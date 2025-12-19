@@ -268,6 +268,117 @@ class ResetStrategy:
     MANUAL = "manual"           # Requires manual intervention
 
 
+# Package name mappings: command -> package name per distro
+PACKAGE_MAPPINGS: dict[str, dict[PackageManager, str]] = {
+    "cyclictest": {
+        PackageManager.RPM: "rt-tests",
+        PackageManager.DPKG: "rt-tests",
+        PackageManager.PACMAN: "rt-tests",
+    },
+    "rtirq": {
+        PackageManager.RPM: "rtirq",
+        PackageManager.DPKG: "rtirq-init",
+        PackageManager.PACMAN: "rtirq",
+    },
+    "cpupower": {
+        PackageManager.RPM: "cpupower",
+        PackageManager.DPKG: "linux-cpupower",
+        PackageManager.PACMAN: "cpupower",
+    },
+}
+
+
+def check_command_available(command: str) -> bool:
+    """Check if a command is available in PATH."""
+    return shutil.which(command) is not None
+
+
+def check_packages_installed(commands: list[str]) -> dict[str, bool]:
+    """Check which commands are available.
+    
+    Returns dict of {command: is_available}.
+    """
+    return {cmd: check_command_available(cmd) for cmd in commands}
+
+
+def get_missing_packages(commands: list[str]) -> list[str]:
+    """Return list of commands that are NOT available."""
+    return [cmd for cmd in commands if not check_command_available(cmd)]
+
+
+def get_package_name(command: str) -> str | None:
+    """Get the package name to install for a command on this distro."""
+    manager = detect_package_manager()
+    mapping = PACKAGE_MAPPINGS.get(command, {})
+    return mapping.get(manager)
+
+
+def install_packages(commands: list[str]) -> tuple[bool, str]:
+    """Install packages that provide the given commands.
+    
+    Returns (success, message).
+    """
+    manager = detect_package_manager()
+    
+    # Map commands to package names
+    packages = []
+    for cmd in commands:
+        pkg = get_package_name(cmd)
+        if pkg:
+            packages.append(pkg)
+        else:
+            return False, f"Unknown package for command: {cmd}"
+    
+    if not packages:
+        return True, "No packages to install"
+    
+    packages = list(set(packages))  # Dedupe
+    
+    try:
+        if manager == PackageManager.RPM:
+            # Try zypper first (openSUSE), fall back to dnf (Fedora)
+            if shutil.which("zypper"):
+                result = subprocess.run(
+                    ["zypper", "--non-interactive", "install", *packages],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+            else:
+                result = subprocess.run(
+                    ["dnf", "install", "-y", *packages],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+        elif manager == PackageManager.DPKG:
+            result = subprocess.run(
+                ["apt-get", "install", "-y", *packages],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        elif manager == PackageManager.PACMAN:
+            result = subprocess.run(
+                ["pacman", "-S", "--noconfirm", *packages],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        else:
+            return False, "Unknown package manager"
+        
+        if result.returncode == 0:
+            return True, f"Installed: {', '.join(packages)}"
+        else:
+            return False, f"Install failed: {result.stderr.strip()}"
+    
+    except subprocess.TimeoutExpired:
+        return False, "Package installation timed out"
+    except Exception as e:
+        return False, f"Install error: {e}"
+
+
 def determine_reset_strategy(path: str | Path, we_created: bool = False) -> tuple[str, PackageInfo | None]:
     """Determine the best reset strategy for a file.
     

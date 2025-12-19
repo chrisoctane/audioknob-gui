@@ -46,6 +46,7 @@ class Knob:
     requires_root: bool
     requires_reboot: bool
     requires_groups: tuple[str, ...]  # User must be in one of these groups
+    requires_commands: tuple[str, ...]  # Commands that must be available
     capabilities: Capabilities
     impl: Impl | None
 
@@ -100,6 +101,12 @@ def load_registry(path: str | Path) -> list[Knob]:
             rg_raw = []
         requires_groups = tuple(str(g) for g in rg_raw if g)
 
+        # Parse requires_commands (list of commands that must be available)
+        rc_raw = k.get("requires_commands", [])
+        if not isinstance(rc_raw, list):
+            rc_raw = []
+        requires_commands = tuple(str(c) for c in rc_raw if c)
+
         out.append(
             Knob(
                 id=kid,
@@ -110,6 +117,7 @@ def load_registry(path: str | Path) -> list[Knob]:
                 requires_root=bool(k.get("requires_root")),
                 requires_reboot=bool(k.get("requires_reboot")),
                 requires_groups=requires_groups,
+                requires_commands=requires_commands,
                 capabilities=caps,
                 impl=impl,
             )

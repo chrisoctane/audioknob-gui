@@ -10,6 +10,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "group_membership",
@@ -27,6 +28,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": ["audio", "realtime"],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "pam_limits_audio_group",
@@ -49,6 +51,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "systemd_unit_toggle",
@@ -58,12 +61,13 @@
     {
       "id": "rtirq_enable",
       "title": "Enable rtirq service",
-      "description": "Enables rtirq service which sets high realtime priorities for audio-related IRQ threads. File: /etc/sysconfig/rtirq or /etc/rtirq.conf.",
+      "description": "Enables rtirq service which sets high realtime priorities for audio-related IRQ threads. Requires rtirq package. File: /etc/sysconfig/rtirq or /etc/rtirq.conf.",
       "category": "irq",
       "risk_level": "medium",
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": ["rtirq"],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -76,6 +80,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "sysfs_glob_kv",
@@ -94,6 +99,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": ["audio", "realtime"],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -106,6 +112,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "sysctl_conf",
@@ -124,6 +131,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "sysfs_glob_kv",
@@ -142,6 +150,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -154,6 +163,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -166,6 +176,7 @@
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -178,6 +189,7 @@
       "requires_root": true,
       "requires_reboot": true,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -190,6 +202,7 @@
       "requires_root": true,
       "requires_reboot": true,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -202,6 +215,7 @@
       "requires_root": true,
       "requires_reboot": true,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -214,6 +228,7 @@
       "requires_root": false,
       "requires_reboot": false,
       "requires_groups": ["audio", "realtime"],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "qjackctl_server_prefix",
@@ -234,6 +249,7 @@
       "requires_root": false,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -246,6 +262,7 @@
       "requires_root": false,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -258,6 +275,7 @@
       "requires_root": false,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -270,6 +288,7 @@
       "requires_root": false,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -282,18 +301,20 @@
       "requires_root": false,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": false, "restore": false},
       "impl": {"kind": "read_only", "params": {"what": "stack_detect"}}
     },
     {
       "id": "scheduler_jitter_test",
       "title": "Scheduler jitter test",
-      "description": "Runs cyclictest to measure scheduler latency jitter. Shows max latency in microseconds. Lower is better. Requires cyclictest package.",
+      "description": "Runs cyclictest to measure scheduler latency jitter. Shows max latency in microseconds. Lower is better. Requires cyclictest (rt-tests package).",
       "category": "testing",
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": ["cyclictest"],
       "capabilities": {"read": true, "apply": false, "restore": false},
       "impl": {"kind": "read_only", "params": {"what": "cyclictest"}}
     },
@@ -306,6 +327,7 @@
       "requires_root": false,
       "requires_reboot": false,
       "requires_groups": [],
+      "requires_commands": [],
       "capabilities": {"read": true, "apply": false, "restore": false},
       "impl": null
     }

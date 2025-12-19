@@ -385,6 +385,20 @@ def main() -> int:
             # User needs to be in at least ONE of the required groups
             return bool(set(k.requires_groups) & self._user_groups)
 
+        def _knob_commands_ok(self, k) -> bool:
+            """Check if required commands are available for this knob."""
+            if not k.requires_commands:
+                return True  # No commands required
+            from audioknob_gui.platform.packages import check_command_available
+            return all(check_command_available(cmd) for cmd in k.requires_commands)
+
+        def _knob_missing_commands(self, k) -> list[str]:
+            """Return list of missing commands for this knob."""
+            if not k.requires_commands:
+                return []
+            from audioknob_gui.platform.packages import check_command_available
+            return [cmd for cmd in k.requires_commands if not check_command_available(cmd)]
+
         def _refresh_statuses(self) -> None:
             """Fetch current status of all knobs."""
             try:
@@ -428,22 +442,36 @@ def main() -> int:
             self.table.setRowCount(len(self.registry))
             
             for r, k in enumerate(self.registry):
-                # Check if user has required groups
+                # Check requirements
                 group_ok = self._knob_group_ok(k)
+                commands_ok = self._knob_commands_ok(k)
+                missing_cmds = self._knob_missing_commands(k)
+                locked = not group_ok or not commands_ok
                 
-                # Column 0: Knob title (gray if group missing)
+                # Determine lock reason
+                lock_reason = ""
+                if not group_ok:
+                    lock_reason = f"Join groups: {', '.join(k.requires_groups)}"
+                elif not commands_ok:
+                    lock_reason = f"Install: {', '.join(missing_cmds)}"
+                
+                # Column 0: Knob title (gray if locked)
                 title_item = QTableWidgetItem(k.title)
                 title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
-                if not group_ok:
+                if locked:
                     title_item.setForeground(QColor("#9e9e9e"))
-                    title_item.setToolTip(f"Requires membership in: {', '.join(k.requires_groups)}")
+                    title_item.setToolTip(lock_reason)
                 self.table.setItem(r, 0, title_item)
 
                 # Column 1: Status (with color)
-                if not group_ok:
-                    status_item = QTableWidgetItem("🔒")
-                    status_item.setForeground(QColor("#ff9800"))
-                    status_item.setToolTip(f"Join groups first: {', '.join(k.requires_groups)}")
+                if locked:
+                    if not group_ok:
+                        status_item = QTableWidgetItem("🔒")
+                        status_item.setForeground(QColor("#ff9800"))
+                    else:
+                        status_item = QTableWidgetItem("📦")
+                        status_item.setForeground(QColor("#1976d2"))
+                    status_item.setToolTip(lock_reason)
                 else:
                     status = self._knob_statuses.get(k.id, "unknown")
                     status_text, status_color = self._status_display(status)
@@ -453,13 +481,13 @@ def main() -> int:
 
                 # Column 2: Category
                 cat_item = QTableWidgetItem(str(k.category))
-                if not group_ok:
+                if locked:
                     cat_item.setForeground(QColor("#9e9e9e"))
                 self.table.setItem(r, 2, cat_item)
 
                 # Column 3: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
-                if not group_ok:
+                if locked:
                     risk_item.setForeground(QColor("#9e9e9e"))
                 self.table.setItem(r, 3, risk_item)
 
@@ -473,7 +501,13 @@ def main() -> int:
                     # Locked: user needs to join groups first
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
-                    btn.setToolTip(f"Join groups first: {', '.join(k.requires_groups)}")
+                    btn.setToolTip(lock_reason)
+                    self.table.setCellWidget(r, 4, btn)
+                elif not commands_ok:
+                    # Locked: needs package install
+                    btn = QPushButton("Install")
+                    btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
+                    btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
                     self.table.setCellWidget(r, 4, btn)
                 elif k.id == "stack_detect":
                     btn = QPushButton("View")
@@ -803,6 +837,82 @@ def main() -> int:
             # Refresh (won't show changes until re-login, but update UI state)
             self._refresh_user_groups()
             self._populate()
+
+        def _on_install_packages(self, commands: list[str]) -> None:
+            """Install packages that provide the given commands."""
+            from audioknob_gui.platform.packages import get_package_name, detect_package_manager
+            
+            # Map commands to package names
+            packages = []
+            unknown = []
+            for cmd in commands:
+                pkg = get_package_name(cmd)
+                if pkg:
+                    packages.append(pkg)
+                else:
+                    unknown.append(cmd)
+            
+            if unknown:
+                QMessageBox.warning(
+                    self,
+                    "Unknown Package",
+                    f"Cannot determine package for: {', '.join(unknown)}\n\n"
+                    f"Please install manually."
+                )
+                return
+            
+            packages = list(set(packages))  # Dedupe
+            
+            # Confirm installation
+            reply = QMessageBox.question(
+                self,
+                "Install Packages",
+                f"Install the following packages?\n\n• {chr(10).join(packages)}",
+                QMessageBox.Ok | QMessageBox.Cancel
+            )
+            
+            if reply != QMessageBox.Ok:
+                return
+            
+            # Run package manager via pkexec
+            manager = detect_package_manager()
+            
+            try:
+                from audioknob_gui.platform.packages import PackageManager
+                import shutil
+                
+                if manager == PackageManager.RPM:
+                    if shutil.which("zypper"):
+                        cmd = ["pkexec", "zypper", "--non-interactive", "install", *packages]
+                    else:
+                        cmd = ["pkexec", "dnf", "install", "-y", *packages]
+                elif manager == PackageManager.DPKG:
+                    cmd = ["pkexec", "apt-get", "install", "-y", *packages]
+                elif manager == PackageManager.PACMAN:
+                    cmd = ["pkexec", "pacman", "-S", "--noconfirm", *packages]
+                else:
+                    QMessageBox.warning(self, "Error", "Unknown package manager")
+                    return
+                
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                
+                if p.returncode == 0:
+                    QMessageBox.information(
+                        self,
+                        "Success",
+                        f"Installed: {', '.join(packages)}"
+                    )
+                    self._populate()  # Refresh UI
+                else:
+                    QMessageBox.critical(
+                        self,
+                        "Install Failed",
+                        f"Failed to install packages:\n\n{p.stderr.strip()}"
+                    )
+            except subprocess.TimeoutExpired:
+                QMessageBox.critical(self, "Timeout", "Package installation timed out")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Install error: {e}")
 
         def on_preview(self) -> None:
             planned = [p for p in self._planned() if p.action in ("apply", "restore")]
