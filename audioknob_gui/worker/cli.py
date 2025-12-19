@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 from audioknob_gui.core.paths import default_paths
@@ -26,6 +27,32 @@ def _registry_default_path() -> str:
     return str(repo_root / "config" / "registry.json")
 
 
+def _load_gui_state() -> dict:
+    """Best-effort load of GUI state.json (user-scope)."""
+    paths = default_paths()
+    p = Path(paths.user_state_dir) / "state.json"
+    try:
+        if not p.exists():
+            return {}
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _qjackctl_cpu_cores_override(state: dict) -> str | None:
+    """Return comma-separated cpu list for taskset, or None if unset."""
+    raw = state.get("qjackctl_cpu_cores")
+    if raw is None:
+        return None
+    if isinstance(raw, list) and all(isinstance(x, int) for x in raw):
+        if not raw:
+            # Explicitly configured as "no pinning"
+            return ""
+        return ",".join(str(int(x)) for x in raw)
+    return None
+
+
 def cmd_detect(_: argparse.Namespace) -> int:
     print(json.dumps(dump_detect(), indent=2, sort_keys=True))
     return 0
@@ -35,11 +62,25 @@ def cmd_preview(args: argparse.Namespace) -> int:
     reg = load_registry(args.registry)
     by_id = {k.id: k for k in reg}
 
+    state = _load_gui_state()
+    qjackctl_override = _qjackctl_cpu_cores_override(state)
+
     items = []
     for kid in args.knob:
         k = by_id.get(kid)
         if k is None:
             raise SystemExit(f"Unknown knob id: {kid}")
+
+        # Apply per-user overrides from GUI state (non-root knobs)
+        if (
+            qjackctl_override is not None
+            and k.impl is not None
+            and k.impl.kind == "qjackctl_server_prefix"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["cpu_cores"] = qjackctl_override
+            k = replace(k, impl=replace(k.impl, params=new_params))
+
         items.append(preview(k, action=args.action))
 
     payload = {
@@ -77,6 +118,9 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
     paths = default_paths()
     tx = new_tx(paths.user_state_dir)
 
+    state = _load_gui_state()
+    qjackctl_override = _qjackctl_cpu_cores_override(state)
+
     backups: list[dict] = []
     applied: list[str] = []
 
@@ -105,7 +149,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
 
             ensure_rt = bool(params.get("ensure_rt", True))
             ensure_priority = bool(params.get("ensure_priority", False))
-            cpu_cores = params.get("cpu_cores")
+            cpu_cores = qjackctl_override if qjackctl_override is not None else params.get("cpu_cores")
             if cpu_cores is not None:
                 cpu_cores = str(cpu_cores)
 

@@ -144,7 +144,15 @@ def _state_path() -> Path:
 
 def load_state() -> dict:
     p = _state_path()
-    default = {"schema": 1, "last_txid": None, "last_user_txid": None, "last_root_txid": None, "font_size": 11}
+    default = {
+        "schema": 1,
+        "last_txid": None,
+        "last_user_txid": None,
+        "last_root_txid": None,
+        "font_size": 11,
+        # Per-knob UI state
+        "qjackctl_cpu_cores": None,  # list[int] or None
+    }
     if not p.exists():
         return default
     try:
@@ -155,6 +163,8 @@ def load_state() -> dict:
             data["last_user_txid"] = None
         if "font_size" not in data:
             data["font_size"] = 11
+        if "qjackctl_cpu_cores" not in data:
+            data["qjackctl_cpu_cores"] = None
         return data
     except Exception:
         return default
@@ -170,8 +180,10 @@ def main() -> int:
         from PySide6.QtWidgets import (
             QApplication,
             QComboBox,
+            QCheckBox,
             QDialog,
             QDialogButtonBox,
+            QGridLayout,
             QHBoxLayout,
             QLabel,
             QMainWindow,
@@ -249,6 +261,58 @@ def main() -> int:
             else:
                 QMessageBox.warning(self, "Not confirmed", "Please type YES to apply.")
 
+    class CpuCoreDialog(QDialog):
+        def __init__(self, *, cpu_count: int, selected: set[int], parent: QWidget | None = None) -> None:
+            super().__init__(parent)
+            self.setWindowTitle("Configure CPU cores for JACK")
+            self.resize(520, 320)
+
+            self._cpu_count = max(1, int(cpu_count))
+            self._checks: list[QCheckBox] = []
+
+            root = QVBoxLayout(self)
+            root.addWidget(QLabel("Select CPU cores to pin JACK to (taskset -c)."))
+            root.addWidget(QLabel("Tip: cores 0-1 are often busiest (IRQs/system tasks)."))
+
+            grid_wrap = QWidget()
+            grid = QGridLayout(grid_wrap)
+
+            cols = 4
+            for core in range(self._cpu_count):
+                cb = QCheckBox(f"Core {core}")
+                cb.setChecked(core in selected)
+                self._checks.append(cb)
+                grid.addWidget(cb, core // cols, core % cols)
+
+            root.addWidget(grid_wrap)
+
+            btn_row = QHBoxLayout()
+            btn_all = QPushButton("Select all")
+            btn_none = QPushButton("Clear all")
+            btn_row.addWidget(btn_all)
+            btn_row.addWidget(btn_none)
+            btn_row.addStretch(1)
+            root.addLayout(btn_row)
+
+            def _set_all(v: bool) -> None:
+                for cb in self._checks:
+                    cb.setChecked(v)
+
+            btn_all.clicked.connect(lambda: _set_all(True))
+            btn_none.clicked.connect(lambda: _set_all(False))
+
+            btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+            btns.accepted.connect(self.accept)
+            btns.rejected.connect(self.reject)
+            root.addWidget(btns)
+
+        def selected_cores(self) -> list[int]:
+            out: list[int] = []
+            for i, cb in enumerate(self._checks):
+                if cb.isChecked():
+                    out.append(i)
+            return out
+
     class MainWindow(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
@@ -288,8 +352,8 @@ def main() -> int:
             top.addWidget(self.btn_undo)
             root.addLayout(top)
 
-            self.table = QTableWidget(0, 5)
-            self.table.setHorizontalHeaderLabels(["Knob", "Description", "Category", "Risk", "Planned action"])
+            self.table = QTableWidget(0, 6)
+            self.table.setHorizontalHeaderLabels(["Knob", "Description", "Category", "Risk", "Planned action", "Configure"])
             self.table.horizontalHeader().setStretchLastSection(True)
             root.addWidget(self.table)
 
@@ -339,6 +403,15 @@ def main() -> int:
                 combo.setToolTip(tooltip)
                 self.table.setCellWidget(r, 4, combo)
 
+                # Per-knob configuration (only for QjackCtl knob for now)
+                if k.id == "qjackctl_server_prefix_rt":
+                    btn = QPushButton("Configure…")
+                    btn.setToolTip(tooltip)
+                    btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
+                    self.table.setCellWidget(r, 5, btn)
+                else:
+                    self.table.setCellWidget(r, 5, QWidget())
+
         def _planned(self) -> list[PlannedAction]:
             out: list[PlannedAction] = []
             for r, k in enumerate(self.registry):
@@ -359,6 +432,38 @@ def main() -> int:
             self._apply_font_size(size)
             self.state["font_size"] = size
             save_state(self.state)
+
+        def _qjackctl_cpu_cores_from_state(self) -> list[int] | None:
+            raw = self.state.get("qjackctl_cpu_cores")
+            if raw is None:
+                return None
+            if isinstance(raw, list) and all(isinstance(x, int) for x in raw):
+                return [int(x) for x in raw]
+            return None
+
+        def on_configure_knob(self, knob_id: str) -> None:
+            if knob_id != "qjackctl_server_prefix_rt":
+                return
+
+            from audioknob_gui.platform.detect import get_cpu_count
+
+            cpu_count = get_cpu_count()
+            selected = set(self._qjackctl_cpu_cores_from_state() or [])
+            d = CpuCoreDialog(cpu_count=cpu_count, selected=selected, parent=self)
+            if d.exec() != QDialog.Accepted:
+                return
+
+            chosen = d.selected_cores()
+            # Empty selection means "no pinning" (remove taskset prefix).
+            # None (unset) means "don't override existing pinning".
+            self.state["qjackctl_cpu_cores"] = chosen
+            save_state(self.state)
+            QMessageBox.information(
+                self,
+                "Saved",
+                "Saved CPU core selection for QjackCtl."
+                + (f" Cores: {','.join(map(str, chosen))}" if chosen else " (no pinning)"),
+            )
 
         def on_tests(self) -> None:
             headline, detail = jitter_test_summary(duration_s=5)

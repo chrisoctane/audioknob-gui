@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 
 from audioknob_gui.core.runner import run
@@ -41,6 +42,10 @@ def list_alsa_playback_devices() -> list[dict]:
     # Minimal parse: return raw lines as a starting point.
     lines = [ln.rstrip() for ln in r.stdout.splitlines() if ln.strip()]
     return [{"raw": ln} for ln in lines]
+
+
+def get_cpu_count() -> int:
+    return os.cpu_count() or 1
 
 
 def dump_detect() -> dict:

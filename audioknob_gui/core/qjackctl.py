@@ -50,43 +50,54 @@ def read_config(path: str | Path) -> QjackCtlConfig:
 
 
 def ensure_server_has_flags(cmd: str, *, ensure_rt: bool = True, ensure_priority: bool = False, cpu_cores: str | None = None) -> str:
-    """Ensure command has -R (and optionally -P90) and taskset prefix if cpu_cores provided."""
+    """Ensure command has -R (and optionally -P90) and optional taskset prefix.
+
+    cpu_cores semantics:
+    - None: keep any existing taskset prefix as-is
+    - "":  remove any existing taskset prefix (no pinning)
+    - other string: replace taskset prefix with this cpu list (e.g. "2,3" or "4-7")
+    """
     parts = cmd.split()
-    if not parts:
-        # Empty command, build from scratch
-        base = "jackd"
+
+    # Extract existing taskset prefix if present: "taskset -c <cores> ..."
+    existing_taskset: str | None = None
+    if len(parts) >= 3 and parts[0] == "taskset" and parts[1] == "-c":
+        existing_taskset = parts[2]
+        parts = parts[3:]
+
+    # Decide which pinning to use
+    if cpu_cores is None:
+        pin_cores = existing_taskset
+    elif cpu_cores == "":
+        pin_cores = None
     else:
-        # Find jackd or jackdmp
-        jackd_idx = None
-        for i, tok in enumerate(parts):
-            if tok in ("jackd", "jackdmp", "jackstart"):
-                jackd_idx = i
-                break
-        if jackd_idx is None:
-            # No jackd found, prepend it
-            base = "jackd"
-            parts = [base] + parts
-        else:
-            base = parts[jackd_idx]
+        pin_cores = str(cpu_cores)
 
-    # Remove existing -R and -P flags
-    parts = [p for p in parts if not (p.startswith("-R") or p.startswith("-P"))]
+    # Find jackd/jackdmp/jackstart token (best effort)
+    base = "jackd"
+    jackd_idx: int | None = None
+    for i, tok in enumerate(parts):
+        if tok in ("jackd", "jackdmp", "jackstart"):
+            jackd_idx = i
+            base = tok
+            break
 
-    # Rebuild: taskset prefix (if cpu_cores) + base + flags
+    # Build remainder args (everything after base if found; else keep all)
+    remainder = parts[jackd_idx + 1 :] if jackd_idx is not None else parts
+
+    # Strip existing realtime/priority flags from remainder
+    remainder = [p for p in remainder if not (p.startswith("-R") or p.startswith("-P"))]
+
+    # Rebuild: optional taskset + base + desired flags + remainder
     result: list[str] = []
-    if cpu_cores:
-        result.append("taskset")
-        result.append("-c")
-        result.append(str(cpu_cores))
+    if pin_cores:
+        result.extend(["taskset", "-c", pin_cores])
     result.append(base)
     if ensure_rt:
         result.append("-R")
     if ensure_priority:
         result.append("-P90")
-    # Append any remaining args (interface, driver, etc.)
-    for p in parts:
-        if p not in (base, "taskset", "-c", cpu_cores) if cpu_cores else (base,):
-            result.append(p)
+    result.extend(remainder)
 
     return " ".join(result)
 
