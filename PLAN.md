@@ -44,12 +44,15 @@ Add to `config/registry.json`:
 
 In `gui/app.py` → `_populate()`:
 
-| Knob type | Column 5 (Action) | Column 6 (Config) |
-|-----------|-------------------|-------------------|
-| Not applied | "Apply" button | Empty or "Config" |
-| Applied | "Reset" button | Empty or "Config" |
-| Read-only info | "View" button | Empty |
-| Read-only test | "Test" button (updates Status) | Empty |
+| Knob type | Column 4 (Action) | Column 5 (Info) |
+|-----------|-------------------|-----------------|
+| Not applied | "Apply" button | "ℹ" info button |
+| Applied | "Reset" button | "ℹ" info button |
+| Not implemented | "—" disabled | "ℹ" info button |
+| Read-only info | "View" button | "ℹ" info button |
+| Read-only test | "Test" button | "ℹ" info button |
+
+**Columns**: Knob | Status | Category | Risk | Action | ℹ
 
 ---
 

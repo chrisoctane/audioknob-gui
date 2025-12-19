@@ -342,9 +342,16 @@ def main() -> int:
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
-            self.table = QTableWidget(0, 7)
-            self.table.setHorizontalHeaderLabels(["Knob", "Status", "Description", "Category", "Risk", "Planned action", "Configure"])
-            self.table.horizontalHeader().setStretchLastSection(True)
+            self.table = QTableWidget(0, 6)
+            self.table.setHorizontalHeaderLabels(["Knob", "Status", "Category", "Risk", "Action", ""])
+            self.table.horizontalHeader().setStretchLastSection(False)
+            self.table.setSortingEnabled(True)
+            self.table.setColumnWidth(0, 200)  # Knob
+            self.table.setColumnWidth(1, 80)   # Status
+            self.table.setColumnWidth(2, 100)  # Category
+            self.table.setColumnWidth(3, 60)   # Risk
+            self.table.setColumnWidth(4, 80)   # Action
+            self.table.setColumnWidth(5, 50)   # Info
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
@@ -392,79 +399,69 @@ def main() -> int:
             return mapping.get(status, ("—", "#9e9e9e"))
 
         def _populate(self) -> None:
+            # Disable sorting during population to avoid issues
+            self.table.setSortingEnabled(False)
             self.table.setRowCount(len(self.registry))
+            
             for r, k in enumerate(self.registry):
-                # Build a rich tooltip with multiple lines
-                tooltip = (
-                    f"<b>{k.title}</b><br/><br/>"
-                    f"{k.description}<br/><br/>"
-                    f"<b>ID:</b> {k.id}<br/>"
-                    f"<b>Category:</b> {k.category}<br/>"
-                    f"<b>Risk:</b> {k.risk_level}<br/>"
-                    f"<b>Requires root:</b> {'Yes' if k.requires_root else 'No'}<br/>"
-                    f"<b>Requires reboot:</b> {'Yes' if k.requires_reboot else 'No'}"
-                )
-
                 # Column 0: Knob title
                 title_item = QTableWidgetItem(k.title)
-                title_item.setToolTip(tooltip)
+                title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
                 self.table.setItem(r, 0, title_item)
 
                 # Column 1: Status (with color)
                 status = self._knob_statuses.get(k.id, "unknown")
                 status_text, status_color = self._status_display(status)
                 status_item = QTableWidgetItem(status_text)
-                status_item.setToolTip(f"Current status: {status}")
                 status_item.setForeground(QColor(status_color))
                 self.table.setItem(r, 1, status_item)
 
-                # Column 2: Description
-                desc_item = QTableWidgetItem(k.description)
-                desc_item.setToolTip(tooltip)
-                self.table.setItem(r, 2, desc_item)
-
-                # Column 3: Category
+                # Column 2: Category
                 cat_item = QTableWidgetItem(str(k.category))
-                cat_item.setToolTip(tooltip)
-                self.table.setItem(r, 3, cat_item)
+                self.table.setItem(r, 2, cat_item)
 
-                # Column 4: Risk
+                # Column 3: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
-                risk_item.setToolTip(tooltip)
-                self.table.setItem(r, 4, risk_item)
+                self.table.setItem(r, 3, risk_item)
 
-                # Column 5: Action button (context-sensitive)
+                # Column 4: Action button (context-sensitive)
                 if k.id == "stack_detect":
                     btn = QPushButton("View")
-                    btn.setToolTip("Show detected audio stack")
                     btn.clicked.connect(self.on_view_stack)
-                    self.table.setCellWidget(r, 5, btn)
+                    self.table.setCellWidget(r, 4, btn)
                 elif k.id == "scheduler_jitter_test":
                     btn = QPushButton("Test")
-                    btn.setToolTip("Run scheduler latency test")
                     btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
-                    self.table.setCellWidget(r, 5, btn)
+                    self.table.setCellWidget(r, 4, btn)
+                elif k.id == "blocker_check":
+                    btn = QPushButton("Check")
+                    btn.clicked.connect(self.on_check_blockers)
+                    self.table.setCellWidget(r, 4, btn)
+                elif k.impl is None:
+                    # Placeholder knob - not implemented yet
+                    btn = QPushButton("—")
+                    btn.setEnabled(False)
+                    btn.setToolTip("Not implemented yet")
+                    self.table.setCellWidget(r, 4, btn)
                 else:
                     # Normal knob: show Apply or Reset based on current status
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status == "applied":
                         btn = QPushButton("Reset")
-                        btn.setToolTip("Reset to original")
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
                         btn = QPushButton("Apply")
-                        btn.setToolTip("Apply optimization")
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-                    self.table.setCellWidget(r, 5, btn)
+                    self.table.setCellWidget(r, 4, btn)
 
-                # Column 6: Per-knob config (optional)
-                if k.id == "qjackctl_server_prefix_rt":
-                    btn = QPushButton("Config")
-                    btn.setToolTip("Configure CPU cores")
-                    btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
-                    self.table.setCellWidget(r, 6, btn)
-                else:
-                    self.table.setCellWidget(r, 6, QWidget())
+                # Column 5: Info button (shows details popup)
+                info_btn = QPushButton("ℹ")
+                info_btn.setFixedWidth(30)
+                info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
+                self.table.setCellWidget(r, 5, info_btn)
+            
+            # Re-enable sorting after population
+            self.table.setSortingEnabled(True)
 
         def _planned(self) -> list[PlannedAction]:
             out: list[PlannedAction] = []
@@ -583,6 +580,109 @@ def main() -> int:
                 QMessageBox.information(self, "Audio Stack", "<br/>".join(info_lines))
             except Exception as e:
                 QMessageBox.critical(self, "Detection Failed", f"Could not detect audio stack: {e}")
+
+        def _show_knob_info(self, knob_id: str) -> None:
+            """Show detailed information about a knob."""
+            k = next((k for k in self.registry if k.id == knob_id), None)
+            if not k:
+                return
+            
+            # Build detailed info
+            status = self._knob_statuses.get(k.id, "unknown")
+            status_text, _ = self._status_display(status)
+            
+            impl_info = "Not implemented yet"
+            if k.impl:
+                impl_info = f"<b>Kind:</b> {k.impl.kind}<br/>"
+                for key, val in k.impl.params.items():
+                    if isinstance(val, list):
+                        impl_info += f"<b>{key}:</b><br/>"
+                        for item in val:
+                            impl_info += f"  • {item}<br/>"
+                    else:
+                        impl_info += f"<b>{key}:</b> {val}<br/>"
+            
+            html = f"""
+            <h3>{k.title}</h3>
+            <p>{k.description}</p>
+            <hr/>
+            <table>
+            <tr><td><b>ID:</b></td><td>{k.id}</td></tr>
+            <tr><td><b>Status:</b></td><td>{status_text}</td></tr>
+            <tr><td><b>Category:</b></td><td>{k.category}</td></tr>
+            <tr><td><b>Risk:</b></td><td>{k.risk_level}</td></tr>
+            <tr><td><b>Requires root:</b></td><td>{'Yes' if k.requires_root else 'No'}</td></tr>
+            <tr><td><b>Requires reboot:</b></td><td>{'Yes' if k.requires_reboot else 'No'}</td></tr>
+            </table>
+            <hr/>
+            <p><b>Implementation:</b></p>
+            <p>{impl_info}</p>
+            """
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle(k.title)
+            dialog.resize(500, 400)
+            layout = QVBoxLayout(dialog)
+            
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setHtml(html)
+            layout.addWidget(text)
+            
+            btns = QDialogButtonBox(QDialogButtonBox.Close)
+            btns.rejected.connect(dialog.reject)
+            layout.addWidget(btns)
+            
+            dialog.exec()
+
+        def on_check_blockers(self) -> None:
+            """Check for common issues that block audio optimization."""
+            import grp
+            import shutil
+            
+            blockers = []
+            warnings = []
+            ok = []
+            
+            # Check audio group membership
+            try:
+                audio_gid = grp.getgrnam("audio").gr_gid
+                user_groups = os.getgroups()
+                if audio_gid in user_groups:
+                    ok.append("✓ User is in 'audio' group")
+                else:
+                    blockers.append("✗ Not in 'audio' group - RT limits won't apply. Run: sudo usermod -aG audio $USER")
+            except KeyError:
+                warnings.append("⚠ 'audio' group doesn't exist")
+            
+            # Check cyclictest
+            if shutil.which("cyclictest"):
+                ok.append("✓ cyclictest is installed")
+            else:
+                warnings.append("⚠ cyclictest not installed - can't run jitter test")
+            
+            # Check RT kernel
+            if Path("/sys/kernel/realtime").exists():
+                ok.append("✓ Running RT kernel")
+            else:
+                warnings.append("⚠ Not running RT kernel (optional, but recommended)")
+            
+            # Build message
+            lines = []
+            if blockers:
+                lines.append("<b style='color: #d32f2f;'>Blockers (must fix):</b><br/>")
+                lines.extend([f"  {b}<br/>" for b in blockers])
+            if warnings:
+                lines.append("<br/><b style='color: #f57c00;'>Warnings:</b><br/>")
+                lines.extend([f"  {w}<br/>" for w in warnings])
+            if ok:
+                lines.append("<br/><b style='color: #2e7d32;'>OK:</b><br/>")
+                lines.extend([f"  {o}<br/>" for o in ok])
+            
+            if not blockers and not warnings:
+                lines = ["<b style='color: #2e7d32;'>All checks passed!</b>"]
+            
+            QMessageBox.information(self, "System Check", "".join(lines))
 
         def on_preview(self) -> None:
             planned = [p for p in self._planned() if p.action in ("apply", "restore")]
