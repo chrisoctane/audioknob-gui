@@ -2,6 +2,23 @@
   "schema": 1,
   "knobs": [
     {
+      "id": "audio_group_membership",
+      "title": "Join audio groups",
+      "description": "Adds current user to audio-related groups (audio, realtime, pipewire). Required for RT limits and low-latency audio. Requires logout/login to take effect.",
+      "category": "permissions",
+      "risk_level": "low",
+      "requires_root": true,
+      "requires_reboot": false,
+      "requires_groups": [],
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "group_membership",
+        "params": {
+          "groups": ["audio", "realtime", "pipewire"]
+        }
+      }
+    },
+    {
       "id": "rt_limits_audio_group",
       "title": "Realtime limits for @audio",
       "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio.",
@@ -9,6 +26,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": ["audio", "realtime"],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "pam_limits_audio_group",
@@ -23,17 +41,6 @@
       }
     },
     {
-      "id": "audio_group_membership",
-      "title": "Add user to audio group",
-      "description": "Adds current user to the 'audio' group (or 'realtime' on Arch). Required for RT limits to take effect. Requires logout/login.",
-      "category": "permissions",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "capabilities": {"read": true, "apply": true, "restore": true},
-      "impl": null
-    },
-    {
       "id": "irqbalance_disable",
       "title": "Disable irqbalance",
       "description": "Stops irqbalance service so audio IRQs don't get moved between CPUs unexpectedly. Reduces latency jitter.",
@@ -41,6 +48,7 @@
       "risk_level": "medium",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "systemd_unit_toggle",
@@ -55,6 +63,7 @@
       "risk_level": "medium",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -66,6 +75,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "sysfs_glob_kv",
@@ -83,6 +93,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": ["audio", "realtime"],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -94,6 +105,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "sysctl_conf",
@@ -111,6 +123,7 @@
       "risk_level": "medium",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "sysfs_glob_kv",
@@ -128,6 +141,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -139,6 +153,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -150,6 +165,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -161,6 +177,7 @@
       "risk_level": "medium",
       "requires_root": true,
       "requires_reboot": true,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -172,6 +189,7 @@
       "risk_level": "medium",
       "requires_root": true,
       "requires_reboot": true,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -183,6 +201,7 @@
       "risk_level": "high",
       "requires_root": true,
       "requires_reboot": true,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -194,6 +213,7 @@
       "risk_level": "low",
       "requires_root": false,
       "requires_reboot": false,
+      "requires_groups": ["audio", "realtime"],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "qjackctl_server_prefix",
@@ -213,6 +233,7 @@
       "risk_level": "low",
       "requires_root": false,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -224,6 +245,7 @@
       "risk_level": "low",
       "requires_root": false,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -235,6 +257,7 @@
       "risk_level": "low",
       "requires_root": false,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -246,6 +269,7 @@
       "risk_level": "low",
       "requires_root": false,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": null
     },
@@ -257,6 +281,7 @@
       "risk_level": "low",
       "requires_root": false,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": false, "restore": false},
       "impl": {"kind": "read_only", "params": {"what": "stack_detect"}}
     },
@@ -268,6 +293,7 @@
       "risk_level": "low",
       "requires_root": true,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": false, "restore": false},
       "impl": {"kind": "read_only", "params": {"what": "cyclictest"}}
     },
@@ -279,6 +305,7 @@
       "risk_level": "low",
       "requires_root": false,
       "requires_reboot": false,
+      "requires_groups": [],
       "capabilities": {"read": true, "apply": false, "restore": false},
       "impl": null
     }

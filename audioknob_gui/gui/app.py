@@ -355,11 +355,35 @@ def main() -> int:
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
+            self._user_groups: set[str] = set()
+            self._refresh_user_groups()
             self._refresh_statuses()
             self._populate()
 
             self.btn_undo.clicked.connect(self.on_undo)
             self.btn_reset.clicked.connect(self.on_reset_defaults)
+
+        def _refresh_user_groups(self) -> None:
+            """Get current user's group memberships."""
+            import grp
+            try:
+                user_gids = set(os.getgroups())
+                self._user_groups = set()
+                for group_name in ["audio", "realtime", "pipewire"]:
+                    try:
+                        if grp.getgrnam(group_name).gr_gid in user_gids:
+                            self._user_groups.add(group_name)
+                    except KeyError:
+                        pass  # Group doesn't exist
+            except Exception:
+                self._user_groups = set()
+
+        def _knob_group_ok(self, k) -> bool:
+            """Check if user has required groups for this knob."""
+            if not k.requires_groups:
+                return True  # No groups required
+            # User needs to be in at least ONE of the required groups
+            return bool(set(k.requires_groups) & self._user_groups)
 
         def _refresh_statuses(self) -> None:
             """Fetch current status of all knobs."""
@@ -404,28 +428,54 @@ def main() -> int:
             self.table.setRowCount(len(self.registry))
             
             for r, k in enumerate(self.registry):
-                # Column 0: Knob title
+                # Check if user has required groups
+                group_ok = self._knob_group_ok(k)
+                
+                # Column 0: Knob title (gray if group missing)
                 title_item = QTableWidgetItem(k.title)
                 title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
+                if not group_ok:
+                    title_item.setForeground(QColor("#9e9e9e"))
+                    title_item.setToolTip(f"Requires membership in: {', '.join(k.requires_groups)}")
                 self.table.setItem(r, 0, title_item)
 
                 # Column 1: Status (with color)
-                status = self._knob_statuses.get(k.id, "unknown")
-                status_text, status_color = self._status_display(status)
-                status_item = QTableWidgetItem(status_text)
-                status_item.setForeground(QColor(status_color))
+                if not group_ok:
+                    status_item = QTableWidgetItem("🔒")
+                    status_item.setForeground(QColor("#ff9800"))
+                    status_item.setToolTip(f"Join groups first: {', '.join(k.requires_groups)}")
+                else:
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    status_text, status_color = self._status_display(status)
+                    status_item = QTableWidgetItem(status_text)
+                    status_item.setForeground(QColor(status_color))
                 self.table.setItem(r, 1, status_item)
 
                 # Column 2: Category
                 cat_item = QTableWidgetItem(str(k.category))
+                if not group_ok:
+                    cat_item.setForeground(QColor("#9e9e9e"))
                 self.table.setItem(r, 2, cat_item)
 
                 # Column 3: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
+                if not group_ok:
+                    risk_item.setForeground(QColor("#9e9e9e"))
                 self.table.setItem(r, 3, risk_item)
 
                 # Column 4: Action button (context-sensitive)
-                if k.id == "stack_detect":
+                if k.id == "audio_group_membership":
+                    # Special: group membership knob
+                    btn = QPushButton("Join")
+                    btn.clicked.connect(self._on_join_groups)
+                    self.table.setCellWidget(r, 4, btn)
+                elif not group_ok:
+                    # Locked: user needs to join groups first
+                    btn = QPushButton("🔒")
+                    btn.setEnabled(False)
+                    btn.setToolTip(f"Join groups first: {', '.join(k.requires_groups)}")
+                    self.table.setCellWidget(r, 4, btn)
+                elif k.id == "stack_detect":
                     btn = QPushButton("View")
                     btn.clicked.connect(self.on_view_stack)
                     self.table.setCellWidget(r, 4, btn)
@@ -683,6 +733,76 @@ def main() -> int:
                 lines = ["<b style='color: #2e7d32;'>All checks passed!</b>"]
             
             QMessageBox.information(self, "System Check", "".join(lines))
+
+        def _on_join_groups(self) -> None:
+            """Add current user to audio groups."""
+            from audioknob_gui.platform.detect import get_available_audio_groups, get_missing_groups
+            
+            missing = get_missing_groups()
+            available = get_available_audio_groups()
+            
+            if not missing:
+                QMessageBox.information(
+                    self, 
+                    "Groups OK", 
+                    "You are already in all available audio groups!"
+                )
+                return
+            
+            # Show what groups we'll add
+            groups_to_add = [g for g in missing if g in available]
+            if not groups_to_add:
+                QMessageBox.warning(
+                    self,
+                    "No Groups Available",
+                    "No audio groups exist on this system."
+                )
+                return
+            
+            reply = QMessageBox.question(
+                self,
+                "Join Audio Groups",
+                f"Add user to these groups?\n\n• {chr(10).join(groups_to_add)}\n\n"
+                f"Note: You must log out and back in for changes to take effect.",
+                QMessageBox.Ok | QMessageBox.Cancel
+            )
+            
+            if reply != QMessageBox.Ok:
+                return
+            
+            # Run usermod via pkexec for each group
+            user = os.environ.get("USER", os.getlogin())
+            errors = []
+            successes = []
+            
+            for group in groups_to_add:
+                try:
+                    p = subprocess.run(
+                        ["pkexec", "usermod", "-aG", group, user],
+                        capture_output=True,
+                        text=True
+                    )
+                    if p.returncode == 0:
+                        successes.append(group)
+                    else:
+                        errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
+                except Exception as e:
+                    errors.append(f"{group}: {e}")
+            
+            # Report results
+            msg = []
+            if successes:
+                msg.append(f"<b style='color: #2e7d32;'>Added to:</b> {', '.join(successes)}")
+            if errors:
+                msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
+            if successes:
+                msg.append("<br/><br/><b>Log out and back in for changes to take effect!</b>")
+            
+            QMessageBox.information(self, "Group Membership", "".join(msg))
+            
+            # Refresh (won't show changes until re-login, but update UI state)
+            self._refresh_user_groups()
+            self._populate()
 
         def on_preview(self) -> None:
             planned = [p for p in self._planned() if p.action in ("apply", "restore")]

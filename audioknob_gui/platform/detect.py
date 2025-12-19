@@ -68,6 +68,71 @@ def get_cpu_count() -> int:
     return os.cpu_count() or 1
 
 
+@dataclass(frozen=True)
+class GroupStatus:
+    """User's audio-related group memberships."""
+    audio: bool
+    realtime: bool  # Arch Linux uses 'realtime' instead of 'audio'
+    pipewire: bool
+    
+    @property
+    def has_rt_groups(self) -> bool:
+        """True if user has groups needed for RT limits."""
+        return self.audio or self.realtime
+
+
+def check_group_membership() -> GroupStatus:
+    """Check if current user is in audio-related groups."""
+    import grp
+    
+    user_groups = set(os.getgroups())
+    
+    def in_group(name: str) -> bool:
+        try:
+            return grp.getgrnam(name).gr_gid in user_groups
+        except KeyError:
+            return False  # Group doesn't exist on this system
+    
+    return GroupStatus(
+        audio=in_group("audio"),
+        realtime=in_group("realtime"),
+        pipewire=in_group("pipewire"),
+    )
+
+
+def get_missing_groups() -> list[str]:
+    """Return list of recommended groups user is NOT in."""
+    import grp
+    
+    user_groups = set(os.getgroups())
+    missing = []
+    
+    # Check which audio groups exist and if user is in them
+    for group_name in ["audio", "realtime", "pipewire"]:
+        try:
+            gid = grp.getgrnam(group_name).gr_gid
+            if gid not in user_groups:
+                missing.append(group_name)
+        except KeyError:
+            pass  # Group doesn't exist, skip
+    
+    return missing
+
+
+def get_available_audio_groups() -> list[str]:
+    """Return list of audio-related groups that exist on this system."""
+    import grp
+    
+    available = []
+    for group_name in ["audio", "realtime", "pipewire"]:
+        try:
+            grp.getgrnam(group_name)
+            available.append(group_name)
+        except KeyError:
+            pass
+    return available
+
+
 def dump_detect() -> dict:
     s = detect_stack()
     return {

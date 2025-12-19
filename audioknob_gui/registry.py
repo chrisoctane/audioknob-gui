@@ -15,6 +15,7 @@ KnobCategory = Literal[
     "power",
     "services",
     "vm",
+    "kernel",
     "testing",
 ]
 
@@ -44,6 +45,7 @@ class Knob:
     risk_level: RiskLevel
     requires_root: bool
     requires_reboot: bool
+    requires_groups: tuple[str, ...]  # User must be in one of these groups
     capabilities: Capabilities
     impl: Impl | None
 
@@ -92,6 +94,12 @@ def load_registry(path: str | Path) -> list[Knob]:
                 raise ValueError(f"knob {kid}: impl.params must be object")
             impl = Impl(kind=str(impl_raw["kind"]), params=params)
 
+        # Parse requires_groups (list of group names, user must be in ONE of them)
+        rg_raw = k.get("requires_groups", [])
+        if not isinstance(rg_raw, list):
+            rg_raw = []
+        requires_groups = tuple(str(g) for g in rg_raw if g)
+
         out.append(
             Knob(
                 id=kid,
@@ -101,6 +109,7 @@ def load_registry(path: str | Path) -> list[Knob]:
                 risk_level=k.get("risk_level"),
                 requires_root=bool(k.get("requires_root")),
                 requires_reboot=bool(k.get("requires_reboot")),
+                requires_groups=requires_groups,
                 capabilities=caps,
                 impl=impl,
             )
