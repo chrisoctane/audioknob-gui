@@ -7,6 +7,7 @@ from pathlib import Path
 
 from audioknob_gui.core.paths import default_paths
 from audioknob_gui.core.transaction import backup_file, new_tx, restore_file, write_manifest
+from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
 from audioknob_gui.worker.ops import preview, restore_sysfs, systemd_restore
 
@@ -20,6 +21,11 @@ def _registry_default_path() -> str:
     here = Path(__file__).resolve()
     repo_root = here.parents[3]
     return str(repo_root / "config" / "registry.json")
+
+
+def cmd_detect(_: argparse.Namespace) -> int:
+    print(json.dumps(dump_detect(), indent=2, sort_keys=True))
+    return 0
 
 
 def cmd_preview(args: argparse.Namespace) -> int:
@@ -89,7 +95,6 @@ def cmd_apply(args: argparse.Namespace) -> int:
             path = str(params["path"])
             backups.append(backup_file(tx, path))
 
-            # Apply by ensuring the desired lines exist.
             want_lines = [str(x) for x in params.get("lines", [])]
             before = ""
             try:
@@ -120,7 +125,6 @@ def cmd_apply(args: argparse.Namespace) -> int:
             effects.extend(write_sysfs_values(str(params["glob"]), str(params["value"])))
 
         elif kind == "read_only":
-            # nothing
             pass
         else:
             raise SystemExit(f"Unsupported knob kind: {kind}")
@@ -152,11 +156,9 @@ def cmd_restore(args: argparse.Namespace) -> int:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    # Restore files
     for meta in manifest.get("backups", []):
-        restore_file(type("Tx", (), {"root": tx_root})(), meta)  # minimal adapter
+        restore_file(type("Tx", (), {"root": tx_root})(), meta)
 
-    # Restore effects
     effects = manifest.get("effects", [])
     sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
     systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
@@ -169,7 +171,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_history(args: argparse.Namespace) -> int:
+def cmd_history(_: argparse.Namespace) -> int:
     paths = default_paths()
     tx_dir = Path(paths.var_lib_dir) / "transactions"
     items: list[dict] = []
@@ -197,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--registry", default=_registry_default_path())
 
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    sd = sub.add_parser("detect", help="Detect audio stack and devices (read-only)")
+    sd.set_defaults(func=cmd_detect)
 
     sp = sub.add_parser("preview", help="Preview planned changes")
     sp.add_argument("--action", choices=["apply", "restore"], default="apply")
