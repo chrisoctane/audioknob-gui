@@ -46,15 +46,43 @@ def _pkexec_available() -> bool:
     return which("pkexec") is not None
 
 
+def _root_worker_path_candidates() -> list[str]:
+    # The polkit policy installs a fixed-path wrapper here by default.
+    return [
+        "/usr/local/libexec/audioknob-gui-worker",
+        # Fallback: if packaged as a normal CLI in PATH.
+        "/usr/local/bin/audioknob-worker",
+        "/usr/bin/audioknob-worker",
+    ]
+
+
+def _pick_root_worker_path() -> str:
+    from shutil import which
+
+    for p in _root_worker_path_candidates():
+        if os.path.isabs(p) and os.path.exists(p) and os.access(p, os.X_OK):
+            return p
+    # Try PATH for audioknob-worker as a last resort.
+    w = which("audioknob-worker")
+    if w:
+        return w
+    raise RuntimeError(
+        "Privileged worker is not installed.\n\n"
+        "Install steps (system change):\n"
+        "  cd /home/chris/audioknob-gui\n"
+        "  sudo ./packaging/install-polkit.sh\n\n"
+        "Then ensure the package is installed into system python so root can import it."
+    )
+
+
 def _run_worker_apply_pkexec(knob_ids: list[str]) -> dict:
     if not _pkexec_available():
         raise RuntimeError("pkexec not found")
 
+    worker = _pick_root_worker_path()
     argv = [
         "pkexec",
-        sys.executable,
-        "-m",
-        "audioknob_gui.worker.cli",
+        worker,
         "--registry",
         _registry_path(),
         "apply",
@@ -70,11 +98,10 @@ def _run_worker_restore_pkexec(txid: str) -> dict:
     if not _pkexec_available():
         raise RuntimeError("pkexec not found")
 
+    worker = _pick_root_worker_path()
     argv = [
         "pkexec",
-        sys.executable,
-        "-m",
-        "audioknob_gui.worker.cli",
+        worker,
         "restore",
         txid,
     ]

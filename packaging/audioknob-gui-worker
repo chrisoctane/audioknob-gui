@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Root worker launcher.
+
+Intended install location:
+  /usr/local/libexec/audioknob-gui-worker
+
+This must be runnable by root via pkexec and should not depend on a venv.
+"""
+
+from __future__ import annotations
+
+import sys
+
+
+def main() -> int:
+    try:
+        from audioknob_gui.worker.cli import main as worker_main
+    except Exception as e:
+        print(
+            "audioknob-gui worker is not installed system-wide.\n"
+            "Install this project into system python (or package it) so root can import it.\n\n"
+            f"Import error: {e}",
+            file=sys.stderr,
+        )
+        return 2
+
+    return int(worker_main())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
