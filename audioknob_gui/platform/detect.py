@@ -14,17 +14,37 @@ class StackStatus:
     jack_active: bool
 
 
-def _is_active(unit: str) -> bool:
-    r = run(["systemctl", "is-active", unit])
+def _is_active(unit: str, user: bool = False) -> bool:
+    """Check if a systemd unit is active.
+    
+    Args:
+        unit: The unit name (e.g., "pipewire.service")
+        user: If True, check user services (--user), else system services
+    """
+    cmd = ["systemctl"]
+    if user:
+        cmd.append("--user")
+    cmd.extend(["is-active", unit])
+    r = run(cmd)
     return r.returncode == 0 and r.stdout.strip() == "active"
 
 
 def detect_stack() -> StackStatus:
-    # Best-effort: systemd services. (Later we can add process/socket probing.)
+    """Detect audio stack status.
+    
+    Checks both user services (PipeWire, WirePlumber) and system services (JACK).
+    """
     return StackStatus(
-        pipewire_active=_is_active("pipewire.service"),
-        wireplumber_active=_is_active("wireplumber.service"),
-        jack_active=_is_active("jack.service") or _is_active("jackd.service"),
+        # PipeWire and WirePlumber run as user services
+        pipewire_active=_is_active("pipewire.service", user=True),
+        wireplumber_active=_is_active("wireplumber.service", user=True),
+        # JACK can run as either user or system service
+        jack_active=(
+            _is_active("jack.service", user=True) or
+            _is_active("jackd.service", user=True) or
+            _is_active("jack.service", user=False) or
+            _is_active("jackd.service", user=False)
+        ),
     )
 
 

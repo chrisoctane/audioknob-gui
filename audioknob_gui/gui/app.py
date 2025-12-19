@@ -197,7 +197,7 @@ def main() -> int:
             QVBoxLayout,
             QWidget,
         )
-        from PySide6.QtGui import QColor, QFont
+        from PySide6.QtGui import QColor
     except Exception as e:  # pragma: no cover
         print(
             "PySide6 is required to run audioknob-gui.\n"
@@ -876,6 +876,10 @@ def main() -> int:
             self.state["last_user_txid"] = None
             self.state["last_root_txid"] = None
             save_state(self.state)
+
+            # Refresh the UI to show updated status
+            self._refresh_statuses()
+            self._populate()
 
             # Show results
             if errors:
