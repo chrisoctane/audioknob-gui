@@ -440,41 +440,50 @@ def main() -> int:
                 risk_item.setToolTip(tooltip)
                 self.table.setItem(r, 4, risk_item)
 
-                # Column 5: Planned action
-                combo = QComboBox()
-                combo.addItem("Keep current", userData="keep")
-                if k.capabilities.apply:
-                    combo.addItem("Apply optimization", userData="apply")
-                if k.capabilities.restore:
-                    combo.addItem("Restore original", userData="restore")
-                combo.setToolTip(tooltip)
-                self.table.setCellWidget(r, 5, combo)
-
-                # Column 6: Per-knob actions
-                if k.id == "qjackctl_server_prefix_rt":
-                    btn = QPushButton("Configure…")
-                    btn.setToolTip("Configure CPU core pinning for JACK")
-                    btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
-                    self.table.setCellWidget(r, 6, btn)
-                elif k.id == "stack_detect":
+                # Column 5: Planned action (or action button for read-only knobs)
+                if k.id == "stack_detect":
+                    # Read-only: show action button instead of dropdown
                     btn = QPushButton("View Stack")
                     btn.setToolTip("Show detected audio stack (PipeWire/JACK/ALSA)")
                     btn.clicked.connect(self.on_view_stack)
-                    self.table.setCellWidget(r, 6, btn)
+                    self.table.setCellWidget(r, 5, btn)
+                    self.table.setCellWidget(r, 6, QWidget())
                 elif k.id == "scheduler_jitter_test":
+                    # Read-only: show action button instead of dropdown
                     btn = QPushButton("Run Test")
                     btn.setToolTip("Run scheduler latency test (cyclictest)")
                     btn.clicked.connect(self.on_tests)
-                    self.table.setCellWidget(r, 6, btn)
-                else:
+                    self.table.setCellWidget(r, 5, btn)
                     self.table.setCellWidget(r, 6, QWidget())
+                else:
+                    # Normal knob: show action dropdown
+                    combo = QComboBox()
+                    combo.addItem("Keep current", userData="keep")
+                    if k.capabilities.apply:
+                        combo.addItem("Apply optimization", userData="apply")
+                    if k.capabilities.restore:
+                        combo.addItem("Restore original", userData="restore")
+                    combo.setToolTip(tooltip)
+                    self.table.setCellWidget(r, 5, combo)
+
+                    # Column 6: Per-knob config actions
+                    if k.id == "qjackctl_server_prefix_rt":
+                        btn = QPushButton("Configure…")
+                        btn.setToolTip("Configure CPU core pinning for JACK")
+                        btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
+                        self.table.setCellWidget(r, 6, btn)
+                    else:
+                        self.table.setCellWidget(r, 6, QWidget())
 
         def _planned(self) -> list[PlannedAction]:
             out: list[PlannedAction] = []
             for r, k in enumerate(self.registry):
-                combo = self.table.cellWidget(r, 5)  # Column 5 is "Planned action"
-                assert isinstance(combo, QComboBox)
-                action = str(combo.currentData())
+                widget = self.table.cellWidget(r, 5)  # Column 5 is "Planned action"
+                if isinstance(widget, QComboBox):
+                    action = str(widget.currentData())
+                else:
+                    # Read-only knobs have buttons, not combos - always "keep"
+                    action = "keep"
                 out.append(PlannedAction(knob_id=k.id, action=action))
             return out
 
