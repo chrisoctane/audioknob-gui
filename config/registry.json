@@ -92,7 +92,7 @@
     {
       "id": "qjackctl_server_prefix_rt",
       "title": "QjackCtl Server Prefix: ensure realtime (-R)",
-      "description": "Ensures JACK realtime flags (-R) are set via QjackCtl's Server Prefix. On this system, JACK realtime flags were only effective when set via QjackCtl → Setup → Settings → Advanced → Server Prefix.",
+      "description": "Configures QjackCtl's Server Prefix to launch JACK with realtime scheduling. Uses flags like 'taskset -c <cpu> -R -P90' to pin JACK to specific CPU cores, enable realtime mode (-R), and set priority (-P). This reduces latency and xruns by ensuring JACK gets consistent CPU time.",
       "category": "stack",
       "risk_level": "low",
       "requires_root": false,

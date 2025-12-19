@@ -19,7 +19,10 @@ def _require_root() -> None:
 
 def _registry_default_path() -> str:
     here = Path(__file__).resolve()
-    repo_root = here.parents[3]
+    # parents[0] = audioknob_gui/worker/
+    # parents[1] = audioknob_gui/
+    # parents[2] = repo root
+    repo_root = here.parents[2]
     return str(repo_root / "config" / "registry.json")
 
 

@@ -144,17 +144,20 @@ def _state_path() -> Path:
 
 def load_state() -> dict:
     p = _state_path()
+    default = {"schema": 1, "last_txid": None, "last_user_txid": None, "last_root_txid": None, "font_size": 11}
     if not p.exists():
-        return {"schema": 1, "last_txid": None, "last_user_txid": None, "last_root_txid": None}
+        return default
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         # Migrate old state format
         if "last_txid" in data and "last_user_txid" not in data:
             data["last_root_txid"] = data.get("last_txid")
             data["last_user_txid"] = None
+        if "font_size" not in data:
+            data["font_size"] = 11
         return data
     except Exception:
-        return {"schema": 1, "last_txid": None, "last_user_txid": None, "last_root_txid": None}
+        return default
 
 
 def save_state(state: dict) -> None:
@@ -174,12 +177,15 @@ def main() -> int:
             QMainWindow,
             QMessageBox,
             QPushButton,
+            QSlider,
+            QSpinBox,
             QTableWidget,
             QTableWidgetItem,
             QTextEdit,
             QVBoxLayout,
             QWidget,
         )
+        from PySide6.QtGui import QFont
     except Exception as e:  # pragma: no cover
         print(
             "PySide6 is required to run audioknob-gui.\n"
@@ -251,6 +257,9 @@ def main() -> int:
 
             self.state = load_state()
             self.registry = load_registry(_registry_path())
+            
+            # Apply saved font size
+            self._apply_font_size(self.state.get("font_size", 11))
 
             w = QWidget()
             self.setCentralWidget(w)
@@ -258,6 +267,16 @@ def main() -> int:
 
             top = QHBoxLayout()
             top.addWidget(QLabel("Pick actions per knob, then Preview and Apply."))
+            
+            # Font size control
+            top.addWidget(QLabel("Font:"))
+            self.font_spinner = QSpinBox()
+            self.font_spinner.setRange(8, 24)
+            self.font_spinner.setValue(self.state.get("font_size", 11))
+            self.font_spinner.setToolTip("Adjust font size (8-24)")
+            self.font_spinner.valueChanged.connect(self._on_font_change)
+            top.addWidget(self.font_spinner)
+            
             self.btn_preview = QPushButton("Preview")
             self.btn_apply = QPushButton("Apply")
             self.btn_undo = QPushButton("Undo last")
@@ -284,10 +303,32 @@ def main() -> int:
         def _populate(self) -> None:
             self.table.setRowCount(len(self.registry))
             for r, k in enumerate(self.registry):
-                self.table.setItem(r, 0, QTableWidgetItem(k.title))
-                self.table.setItem(r, 1, QTableWidgetItem(k.description))
-                self.table.setItem(r, 2, QTableWidgetItem(str(k.category)))
-                self.table.setItem(r, 3, QTableWidgetItem(str(k.risk_level)))
+                # Build a rich tooltip with multiple lines
+                tooltip = (
+                    f"<b>{k.title}</b><br/><br/>"
+                    f"{k.description}<br/><br/>"
+                    f"<b>ID:</b> {k.id}<br/>"
+                    f"<b>Category:</b> {k.category}<br/>"
+                    f"<b>Risk:</b> {k.risk_level}<br/>"
+                    f"<b>Requires root:</b> {'Yes' if k.requires_root else 'No'}<br/>"
+                    f"<b>Requires reboot:</b> {'Yes' if k.requires_reboot else 'No'}"
+                )
+                
+                title_item = QTableWidgetItem(k.title)
+                title_item.setToolTip(tooltip)
+                self.table.setItem(r, 0, title_item)
+                
+                desc_item = QTableWidgetItem(k.description)
+                desc_item.setToolTip(tooltip)
+                self.table.setItem(r, 1, desc_item)
+                
+                cat_item = QTableWidgetItem(str(k.category))
+                cat_item.setToolTip(tooltip)
+                self.table.setItem(r, 2, cat_item)
+                
+                risk_item = QTableWidgetItem(str(k.risk_level))
+                risk_item.setToolTip(tooltip)
+                self.table.setItem(r, 3, risk_item)
 
                 combo = QComboBox()
                 combo.addItem("Keep current", userData="keep")
@@ -295,6 +336,7 @@ def main() -> int:
                     combo.addItem("Apply optimization", userData="apply")
                 if k.capabilities.restore:
                     combo.addItem("Restore original", userData="restore")
+                combo.setToolTip(tooltip)
                 self.table.setCellWidget(r, 4, combo)
 
         def _planned(self) -> list[PlannedAction]:
@@ -305,6 +347,18 @@ def main() -> int:
                 action = str(combo.currentData())
                 out.append(PlannedAction(knob_id=k.id, action=action))
             return out
+
+        def _apply_font_size(self, size: int) -> None:
+            """Apply font size to the application."""
+            font = QApplication.instance().font()
+            font.setPointSize(size)
+            QApplication.instance().setFont(font)
+
+        def _on_font_change(self, size: int) -> None:
+            """Handle font size change from spinner."""
+            self._apply_font_size(size)
+            self.state["font_size"] = size
+            save_state(self.state)
 
         def on_tests(self) -> None:
             headline, detail = jitter_test_summary(duration_s=5)
