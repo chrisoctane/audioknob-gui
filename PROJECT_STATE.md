@@ -33,6 +33,11 @@
   - Bundle dependencies or prompt to install them
   - Remove hardcoded dev paths from worker script
 
+- 🔲 **Phase 7: Distro-Specific Integrations** (optional):
+  - openSUSE: YaST module wrapper / Mylyn integration
+  - Fedora: GNOME Settings panel or Cockpit plugin
+  - Ubuntu: ubuntu-drivers-common style integration
+
 ## Current Implementation
 
 ### Entry Points
