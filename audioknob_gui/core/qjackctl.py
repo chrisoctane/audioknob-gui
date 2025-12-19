@@ -56,14 +56,29 @@ def ensure_server_has_flags(cmd: str, *, ensure_rt: bool = True, ensure_priority
     - None: keep any existing taskset prefix as-is
     - "":  remove any existing taskset prefix (no pinning)
     - other string: replace taskset prefix with this cpu list (e.g. "2,3" or "4-7")
+
+    Preserves other prefixes like nice, ionice, chrt, etc.
     """
     parts = cmd.split()
 
     # Extract existing taskset prefix if present: "taskset -c <cores> ..."
+    # We need to find it anywhere before jackd, not just at the start
     existing_taskset: str | None = None
-    if len(parts) >= 3 and parts[0] == "taskset" and parts[1] == "-c":
-        existing_taskset = parts[2]
-        parts = parts[3:]
+    taskset_start_idx: int | None = None
+    for i, tok in enumerate(parts):
+        if tok == "taskset" and i + 2 < len(parts) and parts[i + 1] == "-c":
+            existing_taskset = parts[i + 2]
+            taskset_start_idx = i
+            break
+
+    # Find jackd/jackdmp/jackstart token position
+    base = "jackd"
+    jackd_idx: int | None = None
+    for i, tok in enumerate(parts):
+        if tok in ("jackd", "jackdmp", "jackstart"):
+            jackd_idx = i
+            base = tok
+            break
 
     # Decide which pinning to use
     if cpu_cores is None:
@@ -73,25 +88,26 @@ def ensure_server_has_flags(cmd: str, *, ensure_rt: bool = True, ensure_priority
     else:
         pin_cores = str(cpu_cores)
 
-    # Find jackd/jackdmp/jackstart token (best effort)
-    base = "jackd"
-    jackd_idx: int | None = None
-    for i, tok in enumerate(parts):
-        if tok in ("jackd", "jackdmp", "jackstart"):
-            jackd_idx = i
-            base = tok
-            break
+    # Build the prefix (everything before jackd, excluding any existing taskset)
+    prefix: list[str] = []
+    if jackd_idx is not None:
+        for i in range(jackd_idx):
+            # Skip existing taskset tokens if we found them
+            if taskset_start_idx is not None and i in (taskset_start_idx, taskset_start_idx + 1, taskset_start_idx + 2):
+                continue
+            prefix.append(parts[i])
 
-    # Build remainder args (everything after base if found; else keep all)
-    remainder = parts[jackd_idx + 1 :] if jackd_idx is not None else parts
+    # Build remainder args (everything after jackd)
+    remainder = parts[jackd_idx + 1:] if jackd_idx is not None else []
 
     # Strip existing realtime/priority flags from remainder
     remainder = [p for p in remainder if not (p.startswith("-R") or p.startswith("-P"))]
 
-    # Rebuild: optional taskset + base + desired flags + remainder
+    # Rebuild: optional taskset + preserved prefix + base + desired flags + remainder
     result: list[str] = []
     if pin_cores:
         result.extend(["taskset", "-c", pin_cores])
+    result.extend(prefix)
     result.append(base)
     if ensure_rt:
         result.append("-R")
