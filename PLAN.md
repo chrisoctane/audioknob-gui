@@ -46,7 +46,8 @@ In `gui/app.py` → `_populate()`:
 
 | Knob type | Column 5 (Action) | Column 6 (Config) |
 |-----------|-------------------|-------------------|
-| Normal | Dropdown: Default / Apply / Restore | Empty or "Config" |
+| Not applied | "Apply" button | Empty or "Config" |
+| Applied | "Reset" button | Empty or "Config" |
 | Read-only info | "View" button | Empty |
 | Read-only test | "Test" button (updates Status) | Empty |
 
@@ -54,13 +55,16 @@ In `gui/app.py` → `_populate()`:
 
 ## Implementation Patterns
 
-### Normal knob
+### Normal knob (context-sensitive button)
 ```python
-combo = QComboBox()
-combo.addItem("Default", userData="keep")
-combo.addItem("Apply", userData="apply")
-combo.addItem("Restore", userData="restore")
-self.table.setCellWidget(r, 5, combo)
+status = self._knob_statuses.get(k.id, "unknown")
+if status == "applied":
+    btn = QPushButton("Reset")
+    btn.clicked.connect(lambda _, kid=k.id: self._on_reset_knob(kid))
+else:
+    btn = QPushButton("Apply")
+    btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+self.table.setCellWidget(r, 5, btn)
 ```
 
 ### Read-only info
@@ -75,7 +79,6 @@ self.table.setCellWidget(r, 5, btn)
 btn = QPushButton("Test")
 btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
 self.table.setCellWidget(r, 5, btn)
-# on_run_test() updates self._knob_statuses[kid] with results
 ```
 
 ### With config dialog

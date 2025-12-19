@@ -333,22 +333,11 @@ def main() -> int:
             self.font_spinner.valueChanged.connect(self._on_font_change)
             top.addWidget(self.font_spinner)
             
-            self.btn_preview = QPushButton("Preview")
-            self.btn_apply = QPushButton("Apply")
             self.btn_undo = QPushButton("Undo")
+            self.btn_undo.setToolTip("Undo last change")
             self.btn_reset = QPushButton("Reset All")
-            self.btn_reset.setToolTip(
-                "Reset ALL audioknob-gui changes to system defaults.\n"
-                "Uses the best strategy per file:\n"
-                "• Files we created: delete them\n"
-                "• Package-owned files: restore from package manager\n"
-                "• User configs: restore from backup"
-            )
-            self.btn_tests = QPushButton("Jitter Test")
+            self.btn_reset.setToolTip("Reset all changes to system defaults")
             top.addStretch(1)
-            top.addWidget(self.btn_tests)
-            top.addWidget(self.btn_preview)
-            top.addWidget(self.btn_apply)
             top.addWidget(self.btn_undo)
             top.addWidget(self.btn_reset)
             root.addLayout(top)
@@ -362,9 +351,6 @@ def main() -> int:
             self._refresh_statuses()
             self._populate()
 
-            self.btn_tests.clicked.connect(self.on_tests)
-            self.btn_preview.clicked.connect(self.on_preview)
-            self.btn_apply.clicked.connect(self.on_apply)
             self.btn_undo.clicked.connect(self.on_undo)
             self.btn_reset.clicked.connect(self.on_reset_defaults)
 
@@ -447,40 +433,38 @@ def main() -> int:
                 risk_item.setToolTip(tooltip)
                 self.table.setItem(r, 4, risk_item)
 
-                # Column 5: Planned action (or action button for read-only knobs)
+                # Column 5: Action button (context-sensitive)
                 if k.id == "stack_detect":
-                    # Read-only: show action button instead of dropdown
                     btn = QPushButton("View")
                     btn.setToolTip("Show detected audio stack")
                     btn.clicked.connect(self.on_view_stack)
                     self.table.setCellWidget(r, 5, btn)
-                    self.table.setCellWidget(r, 6, QWidget())
                 elif k.id == "scheduler_jitter_test":
-                    # Read-only: show action button instead of dropdown
                     btn = QPushButton("Test")
                     btn.setToolTip("Run scheduler latency test")
                     btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
                     self.table.setCellWidget(r, 5, btn)
-                    self.table.setCellWidget(r, 6, QWidget())
                 else:
-                    # Normal knob: show action dropdown
-                    combo = QComboBox()
-                    combo.addItem("Default", userData="keep")
-                    if k.capabilities.apply:
-                        combo.addItem("Apply", userData="apply")
-                    if k.capabilities.restore:
-                        combo.addItem("Restore", userData="restore")
-                    combo.setToolTip(tooltip)
-                    self.table.setCellWidget(r, 5, combo)
-
-                    # Column 6: Per-knob config actions
-                    if k.id == "qjackctl_server_prefix_rt":
-                        btn = QPushButton("Config")
-                        btn.setToolTip("Configure CPU cores")
-                        btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
-                        self.table.setCellWidget(r, 6, btn)
+                    # Normal knob: show Apply or Reset based on current status
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status == "applied":
+                        btn = QPushButton("Reset")
+                        btn.setToolTip("Reset to original")
+                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
-                        self.table.setCellWidget(r, 6, QWidget())
+                        btn = QPushButton("Apply")
+                        btn.setToolTip("Apply optimization")
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    self.table.setCellWidget(r, 5, btn)
+
+                # Column 6: Per-knob config (optional)
+                if k.id == "qjackctl_server_prefix_rt":
+                    btn = QPushButton("Config")
+                    btn.setToolTip("Configure CPU cores")
+                    btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
+                    self.table.setCellWidget(r, 6, btn)
+                else:
+                    self.table.setCellWidget(r, 6, QWidget())
 
         def _planned(self) -> list[PlannedAction]:
             out: list[PlannedAction] = []
@@ -619,7 +603,39 @@ def main() -> int:
 
             PreviewDialog(payload, self).exec()
 
-        def _restore_knob(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
+        def _on_apply_knob(self, knob_id: str) -> None:
+            """Apply a single knob optimization."""
+            k = next((k for k in self.registry if k.id == knob_id), None)
+            if not k:
+                return
+            
+            try:
+                if k.requires_root:
+                    result = _run_worker_apply_pkexec([knob_id])
+                    self.state["last_root_txid"] = result.get("txid")
+                else:
+                    result = _run_worker_apply_user([knob_id])
+                    self.state["last_user_txid"] = result.get("txid")
+                save_state(self.state)
+            except Exception as e:
+                QMessageBox.critical(self, "Failed", str(e))
+                return
+            
+            # Refresh UI
+            self._refresh_statuses()
+            self._populate()
+
+        def _on_reset_knob(self, knob_id: str, requires_root: bool) -> None:
+            """Reset a single knob to original."""
+            success, msg = self._restore_knob_internal(knob_id, requires_root)
+            if not success:
+                QMessageBox.warning(self, "Reset Failed", msg)
+            
+            # Refresh UI
+            self._refresh_statuses()
+            self._populate()
+
+        def _restore_knob_internal(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
             """Restore a single knob to its original state."""
             if requires_root:
                 try:
@@ -628,7 +644,7 @@ def main() -> int:
                     p = subprocess.run(argv, text=True, capture_output=True)
                     result = json.loads(p.stdout) if p.stdout else {}
                     if result.get("success"):
-                        return True, f"Restored {knob_id}"
+                        return True, f"Reset {knob_id}"
                     return False, result.get("error", "Unknown error")
                 except Exception as e:
                     return False, str(e)
@@ -641,10 +657,14 @@ def main() -> int:
                     p = subprocess.run(argv, text=True, capture_output=True)
                     result = json.loads(p.stdout) if p.stdout else {}
                     if result.get("success"):
-                        return True, f"Restored {knob_id}"
+                        return True, f"Reset {knob_id}"
                     return False, result.get("error", "Unknown error")
                 except Exception as e:
                     return False, str(e)
+        
+        def _restore_knob(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
+            """Legacy wrapper for batch restore."""
+            return self._restore_knob_internal(knob_id, requires_root)
 
         def on_apply(self) -> None:
             apply_planned = [p for p in self._planned() if p.action == "apply"]
