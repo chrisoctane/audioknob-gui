@@ -123,10 +123,10 @@ def ensure_server_flags(
     if not cfg.server_cmd:
         # No Server value yet, create a minimal one
         before = ""
-        after = _ensure_server_has_flags("", ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
+        after = ensure_server_has_flags("", ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
     else:
         before = cfg.server_cmd
-        after = _ensure_server_has_flags(cfg.server_cmd, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
+        after = ensure_server_has_flags(cfg.server_cmd, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
 
     if before != after:
         write_config_with_server_update(path, cfg.def_preset, after)
