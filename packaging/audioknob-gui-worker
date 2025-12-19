@@ -4,12 +4,21 @@
 Intended install location:
   /usr/local/libexec/audioknob-gui-worker
 
-This must be runnable by root via pkexec and should not depend on a venv.
+This must be runnable by root via pkexec.
+For development, we add the repo path to sys.path.
+For production, install the package system-wide.
 """
 
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# For development: add repo root to path so we can import audioknob_gui
+# The repo is at /home/chris/audioknob-gui (adjust if installed elsewhere)
+_DEV_REPO_PATH = "/home/chris/audioknob-gui"
+if Path(_DEV_REPO_PATH).exists():
+    sys.path.insert(0, _DEV_REPO_PATH)
 
 
 def main() -> int:

@@ -28,6 +28,11 @@
   - Bootloader detection (openSUSE BLS vs traditional GRUB)
   - Package manager integration (zypper, apt, dnf, pacman)
 
+- 🔲 **Phase 6: Packaging & Distribution**: Planned
+  - Proper packaging (RPM, DEB, Flatpak)
+  - Bundle dependencies or prompt to install them
+  - Remove hardcoded dev paths from worker script
+
 ## Current Implementation
 
 ### Entry Points
