@@ -110,6 +110,25 @@ def cmd_apply(args: argparse.Namespace) -> int:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(after, encoding="utf-8")
 
+        elif kind == "sysctl_conf":
+            path = str(params["path"])
+            backups.append(backup_file(tx, path))
+
+            want_lines = [str(x) for x in params.get("lines", [])]
+            before = ""
+            try:
+                before = Path(path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                before = ""
+            before_lines = before.splitlines()
+            after_lines = list(before_lines)
+            for line in want_lines:
+                if line not in after_lines:
+                    after_lines.append(line)
+            after = "\n".join(after_lines).rstrip("\n") + "\n"
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(after, encoding="utf-8")
+
         elif kind == "systemd_unit_toggle":
             from audioknob_gui.worker.ops import systemd_disable_now
 

@@ -54,6 +54,42 @@
       }
     },
     {
+      "id": "swappiness",
+      "title": "vm.swappiness (reduce swapping)",
+      "description": "Reduces swapping to help avoid latency spikes under memory pressure.",
+      "category": "vm",
+      "risk_level": "low",
+      "requires_root": true,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "sysctl_conf",
+        "params": {
+          "path": "/etc/sysctl.d/99-audioknob-gui.conf",
+          "lines": [
+            "vm.swappiness=10"
+          ]
+        }
+      }
+    },
+    {
+      "id": "thp_mode_madvise",
+      "title": "Transparent Huge Pages: madvise",
+      "description": "Sets THP to 'madvise' (often recommended for latency-sensitive audio).",
+      "category": "vm",
+      "risk_level": "medium",
+      "requires_root": true,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "sysfs_glob_kv",
+        "params": {
+          "glob": "/sys/kernel/mm/transparent_hugepage/enabled",
+          "value": "madvise"
+        }
+      }
+    },
+    {
       "id": "stack_detect",
       "title": "Detect audio stack (PipeWire/JACK/ALSA)",
       "description": "Shows what audio server appears active on this system.",

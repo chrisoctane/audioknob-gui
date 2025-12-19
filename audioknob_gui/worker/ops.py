@@ -56,6 +56,25 @@ def _pam_limits_preview(params: dict[str, Any]) -> list[FileChange]:
     return [FileChange(path=path, action=action, diff=unified_diff(path, before, after))]
 
 
+def _sysctl_conf_preview(params: dict[str, Any]) -> list[FileChange]:
+    # Implemented as a simple sysctl.d drop-in file. We only ensure lines exist.
+    path = str(params["path"])
+    wanted_lines = [str(x) for x in params.get("lines", [])]
+
+    before = _read_text(path)
+    before_lines = before.splitlines()
+    after_lines = list(before_lines)
+
+    for line in wanted_lines:
+        if line not in after_lines:
+            after_lines.append(line)
+
+    after = "\n".join(after_lines).rstrip("\n") + "\n"
+
+    action = "create" if (before == "" and not Path(path).exists()) else "modify"
+    return [FileChange(path=path, action=action, diff=unified_diff(path, before, after))]
+
+
 def _systemd_unit_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
     unit = str(params["unit"])
     action = str(params.get("action", ""))
@@ -99,6 +118,8 @@ def preview(knob: Any, action: str) -> PreviewItem:
     if action == "apply":
         if kind == "pam_limits_audio_group":
             file_changes.extend(_pam_limits_preview(params))
+        elif kind == "sysctl_conf":
+            file_changes.extend(_sysctl_conf_preview(params))
         elif kind == "systemd_unit_toggle":
             cmds, more_notes = _systemd_unit_preview(params)
             would_run.extend(cmds)
@@ -167,7 +188,18 @@ def write_sysfs_values(glob_pat: str, value: str) -> list[dict[str, Any]]:
     for p in sorted(glob.glob(glob_pat)):
         path = Path(p)
         try:
-            before = path.read_text(encoding="utf-8").strip()
+            raw = path.read_text(encoding="utf-8").strip()
+            # Some sysfs selectors (e.g. THP) present options like:
+            #   "[always] madvise never"
+            # Restore should write only the effective token, not the whole line.
+            before = None
+            if raw:
+                toks = raw.split()
+                bracketed = [t for t in toks if t.startswith("[") and t.endswith("]")]
+                if bracketed:
+                    before = bracketed[0].strip("[]")
+                else:
+                    before = raw
         except Exception:
             before = None
         path.write_text(value + "\n", encoding="utf-8")

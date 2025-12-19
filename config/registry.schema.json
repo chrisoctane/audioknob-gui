@@ -69,6 +69,7 @@
               "enum": [
                 "read_only",
                 "pam_limits_audio_group",
+                "sysctl_conf",
                 "systemd_unit_toggle",
                 "sysfs_glob_kv"
               ]
