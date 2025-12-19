@@ -450,11 +450,21 @@ def main() -> int:
                 combo.setToolTip(tooltip)
                 self.table.setCellWidget(r, 5, combo)
 
-                # Column 6: Per-knob configuration (only for QjackCtl knob for now)
+                # Column 6: Per-knob actions
                 if k.id == "qjackctl_server_prefix_rt":
                     btn = QPushButton("Configure…")
-                    btn.setToolTip(tooltip)
+                    btn.setToolTip("Configure CPU core pinning for JACK")
                     btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
+                    self.table.setCellWidget(r, 6, btn)
+                elif k.id == "stack_detect":
+                    btn = QPushButton("View Stack")
+                    btn.setToolTip("Show detected audio stack (PipeWire/JACK/ALSA)")
+                    btn.clicked.connect(self.on_view_stack)
+                    self.table.setCellWidget(r, 6, btn)
+                elif k.id == "scheduler_jitter_test":
+                    btn = QPushButton("Run Test")
+                    btn.setToolTip("Run scheduler latency test (cyclictest)")
+                    btn.clicked.connect(self.on_tests)
                     self.table.setCellWidget(r, 6, btn)
                 else:
                     self.table.setCellWidget(r, 6, QWidget())
@@ -515,6 +525,32 @@ def main() -> int:
         def on_tests(self) -> None:
             headline, detail = jitter_test_summary(duration_s=5)
             QMessageBox.information(self, headline, detail)
+
+        def on_view_stack(self) -> None:
+            """Show detected audio stack information."""
+            try:
+                from audioknob_gui.platform.detect import detect_stack, list_alsa_playback_devices
+                
+                stack = detect_stack()
+                devices = list_alsa_playback_devices()
+                
+                info_lines = [
+                    f"<b>Audio Stack Detection</b>",
+                    "",
+                    f"<b>PipeWire:</b> {'Running' if stack.pipewire_running else 'Not running'}",
+                    f"<b>JACK:</b> {'Running' if stack.jack_running else 'Not running'}",
+                    f"<b>PulseAudio:</b> {'Running' if stack.pulseaudio_running else 'Not running'}",
+                    "",
+                    f"<b>ALSA Playback Devices ({len(devices)}):</b>",
+                ]
+                for dev in devices[:5]:  # Show first 5
+                    info_lines.append(f"  • {dev.get('raw', 'Unknown')}")
+                if len(devices) > 5:
+                    info_lines.append(f"  ... and {len(devices) - 5} more")
+                
+                QMessageBox.information(self, "Audio Stack", "<br/>".join(info_lines))
+            except Exception as e:
+                QMessageBox.critical(self, "Detection Failed", f"Could not detect audio stack: {e}")
 
         def on_preview(self) -> None:
             planned = [p for p in self._planned() if p.action in ("apply", "restore")]
