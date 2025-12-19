@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "knobs": [
+    {
+      "id": "rt_limits_audio_group",
+      "title": "Realtime limits for @audio (rtprio/memlock/nice)",
+      "description": "Allows audio apps in the 'audio' group to request realtime priority and lock memory.",
+      "category": "permissions",
+      "risk_level": "low",
+      "requires_root": true,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "pam_limits_audio_group",
+        "params": {
+          "path": "/etc/security/limits.d/99-audioknob-gui.conf",
+          "lines": [
+            "@audio   -  rtprio     95",
+            "@audio   -  memlock    unlimited",
+            "@audio   -  nice      -10"
+          ]
+        }
+      }
+    },
+    {
+      "id": "irqbalance_disable",
+      "title": "Disable irqbalance",
+      "description": "Stops irqbalance so audio IRQs don't get moved between CPUs unexpectedly.",
+      "category": "irq",
+      "risk_level": "medium",
+      "requires_root": true,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "systemd_unit_toggle",
+        "params": {"unit": "irqbalance.service", "action": "disable_now"}
+      }
+    },
+    {
+      "id": "cpu_governor_performance_temp",
+      "title": "CPU governor: performance (temporary)",
+      "description": "Sets CPU frequency governor to performance (until reboot).",
+      "category": "cpu",
+      "risk_level": "low",
+      "requires_root": true,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "sysfs_glob_kv",
+        "params": {
+          "glob": "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
+          "value": "performance"
+        }
+      }
+    },
+    {
+      "id": "stack_detect",
+      "title": "Detect audio stack (PipeWire/JACK/ALSA)",
+      "description": "Shows what audio server appears active on this system.",
+      "category": "stack",
+      "risk_level": "low",
+      "requires_root": false,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": false, "restore": false},
+      "impl": {"kind": "read_only", "params": {"what": "stack_detect"}}
+    },
+    {
+      "id": "scheduler_jitter_test",
+      "title": "Scheduler jitter test (cyclictest)",
+      "description": "Runs cyclictest and summarizes scheduler latency jitter (not audio RTL).",
+      "category": "testing",
+      "risk_level": "low",
+      "requires_root": true,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": false, "restore": false},
+      "impl": {"kind": "read_only", "params": {"what": "cyclictest"}}
+    }
+  ]
+}

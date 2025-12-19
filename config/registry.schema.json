@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/audioknob-gui/registry.schema.json",
+  "title": "audioknob-gui knob registry",
+  "type": "object",
+  "required": ["schema", "knobs"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"type": "integer", "const": 1},
+    "knobs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/knob"}
+    }
+  },
+  "$defs": {
+    "knob": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "description",
+        "category",
+        "risk_level",
+        "requires_root",
+        "requires_reboot",
+        "capabilities"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "title": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "category": {
+          "type": "string",
+          "enum": [
+            "permissions",
+            "stack",
+            "device",
+            "irq",
+            "cpu",
+            "power",
+            "services",
+            "vm",
+            "testing"
+          ]
+        },
+        "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+        "requires_root": {"type": "boolean"},
+        "requires_reboot": {"type": "boolean"},
+        "capabilities": {
+          "type": "object",
+          "required": ["read", "apply", "restore"],
+          "additionalProperties": false,
+          "properties": {
+            "read": {"type": "boolean"},
+            "apply": {"type": "boolean"},
+            "restore": {"type": "boolean"}
+          }
+        },
+        "notes": {"type": "string"},
+        "impl": {
+          "type": "object",
+          "description": "Worker implementation hook; kept minimal for now.",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "pam_limits_audio_group",
+                "systemd_unit_toggle",
+                "sysfs_glob_kv"
+              ]
+            },
+            "params": {"type": "object"}
+          }
+        }
+      }
+    }
+  }
+}
