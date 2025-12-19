@@ -168,7 +168,6 @@ def reset_file_to_default(meta: dict, tx: Transaction | None = None) -> tuple[bo
             try:
                 from audioknob_gui.platform.packages import (
                     PackageInfo,
-                    PackageManager,
                     detect_package_manager,
                     restore_package_file,
                 )
