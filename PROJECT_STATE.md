@@ -225,6 +225,8 @@ else:
   "risk_level": "low",
   "requires_root": true,
   "requires_reboot": false,
+  "requires_groups": ["audio", "realtime"],
+  "requires_commands": [],
   "capabilities": {
     "read": true,
     "apply": true,
@@ -250,16 +252,37 @@ else:
 |-------|------|---------|
 | `id` | string | Unique identifier, used in code and transactions |
 | `title` | string | Human-readable name shown in GUI |
-| `description` | string | Shown in tooltip and description column |
-| `category` | enum | Grouping: permissions, cpu, irq, vm, stack, testing |
+| `description` | string | Shown in info popup (ℹ button) |
+| `category` | enum | Grouping: permissions, cpu, irq, vm, kernel, stack, services, power, testing |
 | `risk_level` | enum | low/medium/high - shown in Risk column |
 | `requires_root` | bool | If true, apply uses pkexec |
 | `requires_reboot` | bool | If true, show warning (not enforced) |
+| `requires_groups` | array | User must be in ONE of these groups (e.g. ["audio", "realtime"]) |
+| `requires_commands` | array | Commands that must be available (e.g. ["cyclictest"]) |
 | `capabilities.read` | bool | Can we check current status? |
 | `capabilities.apply` | bool | Can we apply this knob? |
 | `capabilities.restore` | bool | Can we restore to original? |
 | `impl.kind` | string | Which implementation handler to use |
 | `impl.params` | object | Parameters passed to handler |
+
+### Dependency System
+
+**Group Requirements (requires_groups):**
+- If user is NOT in any of the listed groups, knob is locked (🔒)
+- User must be in at least ONE of the groups (OR logic)
+- "Join audio groups" knob adds user to all available audio groups
+- Requires logout/login after joining
+
+**Package Requirements (requires_commands):**
+- If any command is missing, knob shows 📦 and "Install" button
+- Clicking Install uses pkexec + package manager (zypper/dnf/apt/pacman)
+- Package mappings in `platform/packages.py`:
+  ```python
+  PACKAGE_MAPPINGS = {
+      "cyclictest": {"rpm": "rt-tests", "dpkg": "rt-tests", "pacman": "rt-tests"},
+      "rtirq": {"rpm": "rtirq", "dpkg": "rtirq-init", "pacman": "rtirq"},
+  }
+  ```
 
 ### Implementation Kinds
 
@@ -539,29 +562,55 @@ def list_audio_interfaces():
 **Features:**
 - Underrun counter (xruns)
 - Interrupt inspector
-- Blocker detection
+- **RT Config Scanner** ✓ IMPLEMENTED
 
-**Blocker detection approach:**
-```python
-def check_blockers() -> list[str]:
-    blockers = []
-    
-    # Check group membership
-    if "audio" not in [grp.gr_name for grp in grp.getgrall() if os.getuid() in grp.gr_mem]:
-        blockers.append("Not in 'audio' group - RT limits won't apply")
-    
-    # Check RT kernel
-    if not Path("/sys/kernel/realtime").exists():
-        blockers.append("Not running RT kernel")
-    
-    # Check cyclictest
-    if shutil.which("cyclictest") is None:
-        blockers.append("cyclictest not installed")
-    
-    return blockers
+### RT Config Scanner (rtcheck.py)
+
+Comprehensive realtime readiness scan inspired by `realtimeconfigquickscan` but improved:
+
+**Checks performed (18 total):**
+| Check | What it detects | Fix knob |
+|-------|-----------------|----------|
+| Not root | Audio apps shouldn't run as root | — |
+| Audio group | User in audio/realtime group | audio_group_membership |
+| RT priority | Can use chrt, rtprio limit | rt_limits_audio_group |
+| Memory lock | memlock limit sufficient | rt_limits_audio_group |
+| CPU governor | All CPUs on 'performance' | cpu_governor_performance_temp |
+| Swappiness | vm.swappiness ≤ 10 | swappiness |
+| Inotify watches | ≥ 524288 for DAWs | inotify_max_watches |
+| Kernel RT | PREEMPT_RT or threadirqs | kernel_threadirqs |
+| High-res timers | CONFIG_HIGH_RES_TIMERS | — |
+| Tickless | NO_HZ kernel config | — |
+| IRQ balance | irqbalance not running | irqbalance_disable |
+| THP | madvise or never mode | thp_mode_madvise |
+| USB autosuspend | Disabled for audio devices | usb_autosuspend_disable |
+| HPET | /dev/hpet readable | — |
+| RTC | /dev/rtc readable | — |
+| Filesystems | No reiserfs/fuseblk for audio | — |
+| Audio services | Detects PipeWire/JACK/etc | — |
+| cyclictest | Tool available for testing | (install rt-tests) |
+
+**Score calculation:**
+- 0-100% based on passed/(passed+warnings+failed)
+- Warnings count as 0.5
+
+**Output:**
+```
+=== Realtime Configuration Scan ===
+Score: 88% (13 passed, 4 warnings, 0 failed)
+
+✓ Audio group membership: User is in 'audio' group
+⚠ CPU governor: Not all CPUs on 'performance'
+    Fix: Use 'cpu_governor_performance_temp' knob
+...
 ```
 
-**Display:** Show as warning banner in GUI or as a "Blockers" info button
+**Why we built our own instead of calling realtimeconfigquickscan:**
+1. Native Python (no Perl dependency)
+2. Structured output for GUI integration
+3. Links checks to our knobs (can fix automatically)
+4. More checks (USB autosuspend, THP, memlock)
+5. Cleaner code for maintenance
 
 ### Guardrails for AI Continuation
 

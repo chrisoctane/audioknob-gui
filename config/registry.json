@@ -320,8 +320,8 @@
     },
     {
       "id": "blocker_check",
-      "title": "Check blockers",
-      "description": "Checks for common issues: not in audio group, missing packages, wrong kernel, etc.",
+      "title": "RT config scan",
+      "description": "Comprehensive realtime readiness scan. Checks: audio group, CPU governor, swappiness, inotify, kernel RT/threadirqs, high-res timers, irqbalance, THP, USB autosuspend, HPET/RTC access, filesystems, and more. Based on realtimeconfigquickscan but improved.",
       "category": "testing",
       "risk_level": "low",
       "requires_root": false,
@@ -329,7 +329,7 @@
       "requires_groups": [],
       "requires_commands": [],
       "capabilities": {"read": true, "apply": false, "restore": false},
-      "impl": null
+      "impl": {"kind": "read_only", "params": {"what": "rtcheck"}}
     }
   ]
 }

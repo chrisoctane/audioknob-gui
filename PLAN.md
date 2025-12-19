@@ -15,6 +15,8 @@ Add to `config/registry.json`:
   "risk_level": "low",
   "requires_root": true,
   "requires_reboot": false,
+  "requires_groups": [],
+  "requires_commands": [],
   "capabilities": { "read": true, "apply": true, "restore": true },
   "impl": {
     "kind": "...",
@@ -22,6 +24,10 @@ Add to `config/registry.json`:
   }
 }
 ```
+
+**New fields:**
+- `requires_groups`: User must be in ONE of these groups (e.g., `["audio", "realtime"]`)
+- `requires_commands`: Commands that must be available (e.g., `["cyclictest"]`)
 
 ### Step 2: Choose implementation kind
 
@@ -44,15 +50,20 @@ Add to `config/registry.json`:
 
 In `gui/app.py` → `_populate()`:
 
-| Knob type | Column 4 (Action) | Column 5 (Info) |
-|-----------|-------------------|-----------------|
-| Not applied | "Apply" button | "ℹ" info button |
-| Applied | "Reset" button | "ℹ" info button |
-| Not implemented | "—" disabled | "ℹ" info button |
-| Read-only info | "View" button | "ℹ" info button |
-| Read-only test | "Test" button | "ℹ" info button |
+| Knob type | Status | Column 4 (Action) | Column 5 (Info) |
+|-----------|--------|-------------------|-----------------|
+| Not applied | — | "Apply" button | "ℹ" info button |
+| Applied | ✓ Applied | "Reset" button | "ℹ" info button |
+| Not implemented | — | "—" disabled | "ℹ" info button |
+| Missing groups | 🔒 | "🔒" disabled | "ℹ" info button |
+| Missing packages | 📦 | "Install" button | "ℹ" info button |
+| Read-only info | — | "View" button | "ℹ" info button |
+| Read-only test | — | "Test"/"Scan" button | "ℹ" info button |
+| Group join knob | — | "Join" button | "ℹ" info button |
 
 **Columns**: Knob | Status | Category | Risk | Action | ℹ
+
+**Sorting**: Click any column header to sort
 
 ---
 
@@ -93,30 +104,44 @@ self.table.setCellWidget(r, 6, btn)
 
 ---
 
-## Planned Knobs
+## Current Knobs (22)
 
-### Phase 4: Audio Configuration
-- `audio_interface_select` - Select ALSA device
-- `sample_rate` - 44100, 48000, 96000
-- `buffer_size` - 64, 128, 256, 512
-- `bit_depth` - 16, 24, 32
-- `pipewire_quantum` - PipeWire buffer tuning
+### Implemented ✓
+| Knob | Category | Status |
+|------|----------|--------|
+| Join audio groups | permissions | ✓ |
+| Realtime limits | permissions | ✓ |
+| Disable irqbalance | irq | ✓ |
+| CPU governor: performance | cpu | ✓ |
+| Reduce swappiness | vm | ✓ |
+| THP: madvise | vm | ✓ |
+| QjackCtl: realtime flags | stack | ✓ |
+| Audio stack info | testing | ✓ |
+| Scheduler jitter test | testing | ✓ |
+| RT config scan | testing | ✓ |
 
-### Phase 5: Monitoring
-- `underrun_monitor` - Count xruns
-- `interrupt_inspector` - View audio IRQs
-- `blocker_check` - What's preventing optimizations
+### Placeholders (Need Implementation)
+| Knob | Category | Notes |
+|------|----------|-------|
+| Enable rtirq | irq | Needs rtirq package |
+| CPU DMA latency udev | cpu | Needs group check |
+| Increase inotify | vm | sysctl.d |
+| Reduce dirty writeback | vm | sysctl.d |
+| Disable USB autosuspend | power | udev rule |
+| Threaded IRQs | kernel | cmdline edit |
+| Disable audit | kernel | cmdline edit |
+| Disable mitigations | kernel | cmdline edit, HIGH RISK |
+| PipeWire quantum | stack | user config |
+| PipeWire sample rate | stack | user config |
+| Disable GNOME tracker | services | user service |
+| Disable KDE Baloo | services | user service |
 
-### Phase 6: User Services
-- `disable_tracker` - GNOME file indexer
-- `disable_baloo` - KDE file indexer
-- `usb_autosuspend_disable`
+### Future Phases
+**Phase 4: Audio Hardware**
+- Interface selection, sample rate, buffer, bit depth
 
-### Phase 7: Advanced System
-- `kernel_threadirqs` - Kernel cmdline
-- `kernel_audit_off` - Disable audit
-- `cpu_dma_latency_udev` - udev rule
-- `rtirq_enable` - IRQ priorities
+**Phase 5: Monitoring**  
+- Underrun counter, interrupt inspector
 
 ---
 
@@ -153,6 +178,22 @@ self.table.setCellWidget(r, 6, btn)
 4. **pkexec is enough** - No need for "type YES" confirmations
 5. **Check user services** - PipeWire runs as user, not system
 6. **Smart reset** - Different files need different restore strategies
+7. **On-demand deps** - Install packages when needed, not upfront
+8. **Group gating** - Lock knobs until user has required groups
+9. **RT scanner** - Better to build our own than shell out to Perl
+10. **Sortable table** - Let users organize by category/risk/status
+
+---
+
+## RT Config Scanner
+
+18 checks based on `realtimeconfigquickscan` but improved:
+- Native Python (no Perl)
+- Structured output for GUI
+- Links to fix knobs
+- More checks (USB, THP, memlock)
+
+See `audioknob_gui/testing/rtcheck.py`
 
 ---
 
@@ -164,4 +205,4 @@ self.table.setCellWidget(r, 6, btn)
 
 ---
 
-*Last updated: 2024-12-19*
+*Last updated: 2025-06-20*

@@ -518,7 +518,7 @@ def main() -> int:
                     btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
                     self.table.setCellWidget(r, 4, btn)
                 elif k.id == "blocker_check":
-                    btn = QPushButton("Check")
+                    btn = QPushButton("Scan")
                     btn.clicked.connect(self.on_check_blockers)
                     self.table.setCellWidget(r, 4, btn)
                 elif k.impl is None:
@@ -720,53 +720,29 @@ def main() -> int:
             dialog.exec()
 
         def on_check_blockers(self) -> None:
-            """Check for common issues that block audio optimization."""
-            import grp
-            import shutil
+            """Run comprehensive realtime configuration scan."""
+            from audioknob_gui.testing.rtcheck import run_full_scan, format_scan_html
             
-            blockers = []
-            warnings = []
-            ok = []
+            # Run the scan
+            result = run_full_scan()
+            html = format_scan_html(result)
             
-            # Check audio group membership
-            try:
-                audio_gid = grp.getgrnam("audio").gr_gid
-                user_groups = os.getgroups()
-                if audio_gid in user_groups:
-                    ok.append("✓ User is in 'audio' group")
-                else:
-                    blockers.append("✗ Not in 'audio' group - RT limits won't apply. Run: sudo usermod -aG audio $USER")
-            except KeyError:
-                warnings.append("⚠ 'audio' group doesn't exist")
+            # Show in a resizable dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"RT Config Scan - Score: {result.score}%")
+            dialog.resize(600, 500)
+            layout = QVBoxLayout(dialog)
             
-            # Check cyclictest
-            if shutil.which("cyclictest"):
-                ok.append("✓ cyclictest is installed")
-            else:
-                warnings.append("⚠ cyclictest not installed - can't run jitter test")
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setHtml(html)
+            layout.addWidget(text)
             
-            # Check RT kernel
-            if Path("/sys/kernel/realtime").exists():
-                ok.append("✓ Running RT kernel")
-            else:
-                warnings.append("⚠ Not running RT kernel (optional, but recommended)")
+            btns = QDialogButtonBox(QDialogButtonBox.Close)
+            btns.rejected.connect(dialog.reject)
+            layout.addWidget(btns)
             
-            # Build message
-            lines = []
-            if blockers:
-                lines.append("<b style='color: #d32f2f;'>Blockers (must fix):</b><br/>")
-                lines.extend([f"  {b}<br/>" for b in blockers])
-            if warnings:
-                lines.append("<br/><b style='color: #f57c00;'>Warnings:</b><br/>")
-                lines.extend([f"  {w}<br/>" for w in warnings])
-            if ok:
-                lines.append("<br/><b style='color: #2e7d32;'>OK:</b><br/>")
-                lines.extend([f"  {o}<br/>" for o in ok])
-            
-            if not blockers and not warnings:
-                lines = ["<b style='color: #2e7d32;'>All checks passed!</b>"]
-            
-            QMessageBox.information(self, "System Check", "".join(lines))
+            dialog.exec()
 
         def _on_join_groups(self) -> None:
             """Add current user to audio groups."""
