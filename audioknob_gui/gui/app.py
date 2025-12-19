@@ -84,14 +84,6 @@ def _run_worker_restore_pkexec(txid: str) -> dict:
     return json.loads(p.stdout)
 
 
-def _run_worker_history() -> dict:
-    argv = [sys.executable, "-m", "audioknob_gui.worker.cli", "history"]
-    p = subprocess.run(argv, text=True, capture_output=True)
-    if p.returncode != 0:
-        raise RuntimeError(p.stderr.strip() or "worker history failed")
-    return json.loads(p.stdout)
-
-
 def _state_path() -> Path:
     xdg_state = os.environ.get("XDG_STATE_HOME")
     if xdg_state:
@@ -147,6 +139,7 @@ def main() -> int:
         )
         return 2
 
+    from audioknob_gui.gui.tests_dialog import jitter_test_summary
     from audioknob_gui.registry import load_registry
 
     class PreviewDialog(QDialog):
@@ -215,7 +208,9 @@ def main() -> int:
             self.btn_preview = QPushButton("Preview")
             self.btn_apply = QPushButton("Apply")
             self.btn_undo = QPushButton("Undo last")
+            self.btn_tests = QPushButton("Run jitter test")
             top.addStretch(1)
+            top.addWidget(self.btn_tests)
             top.addWidget(self.btn_preview)
             top.addWidget(self.btn_apply)
             top.addWidget(self.btn_undo)
@@ -228,6 +223,7 @@ def main() -> int:
 
             self._populate()
 
+            self.btn_tests.clicked.connect(self.on_tests)
             self.btn_preview.clicked.connect(self.on_preview)
             self.btn_apply.clicked.connect(self.on_apply)
             self.btn_undo.clicked.connect(self.on_undo)
@@ -257,13 +253,16 @@ def main() -> int:
                 out.append(PlannedAction(knob_id=k.id, action=action))
             return out
 
+        def on_tests(self) -> None:
+            headline, detail = jitter_test_summary(duration_s=5)
+            QMessageBox.information(self, headline, detail)
+
         def on_preview(self) -> None:
             planned = [p for p in self._planned() if p.action in ("apply", "restore")]
             if not planned:
                 QMessageBox.information(self, "Nothing planned", "No knobs are set to Apply or Restore.")
                 return
 
-            # For MVP we preview only applies (restore is tx-based).
             apply_ids = [p.knob_id for p in planned if p.action == "apply"]
             if not apply_ids:
                 QMessageBox.information(self, "Nothing to apply", "Only Restore is selected; use Undo/History.")
@@ -284,7 +283,6 @@ def main() -> int:
                 QMessageBox.information(self, "Nothing planned", "No knobs are set to Apply.")
                 return
 
-            # Always preview first.
             try:
                 payload = _run_worker_preview(ids, action="apply")
             except Exception as e:
