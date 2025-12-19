@@ -236,18 +236,13 @@ def main() -> int:
         def __init__(self, planned_ids: list[str], parent: QWidget | None = None) -> None:
             super().__init__(parent)
             self.setWindowTitle("Confirm apply")
-            self.resize(520, 180)
+            self.resize(520, 150)
             self.ok = False
 
             root = QVBoxLayout(self)
-            root.addWidget(QLabel("This will apply system changes as root. Type YES to continue."))
-            root.addWidget(QLabel("Planned knobs: " + ", ".join(planned_ids)))
-
-            from PySide6.QtWidgets import QLineEdit
-
-            self.input = QLineEdit()
-            self.input.setPlaceholderText("Type YES")
-            root.addWidget(self.input)
+            root.addWidget(QLabel("<b>Apply these changes?</b>"))
+            root.addWidget(QLabel("Knobs: " + ", ".join(planned_ids)))
+            root.addWidget(QLabel("<i>You'll be prompted for your password if root access is needed.</i>"))
 
             btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
             btns.accepted.connect(self._on_ok)
@@ -255,11 +250,8 @@ def main() -> int:
             root.addWidget(btns)
 
         def _on_ok(self) -> None:
-            if self.input.text().strip() == "YES":
-                self.ok = True
-                self.accept()
-            else:
-                QMessageBox.warning(self, "Not confirmed", "Please type YES to apply.")
+            self.ok = True
+            self.accept()
 
     class CpuCoreDialog(QDialog):
         def __init__(self, *, cpu_count: int, selected: set[int], parent: QWidget | None = None) -> None:
@@ -645,16 +637,14 @@ def main() -> int:
             if len(files) > 10:
                 summary_lines.append(f"... and {len(files) - 10} more files")
 
-            from PySide6.QtWidgets import QLineEdit
-            
             confirm_dialog = QDialog(self)
             confirm_dialog.setWindowTitle("Reset to System Defaults")
-            confirm_dialog.resize(600, 400)
+            confirm_dialog.resize(600, 350)
             layout = QVBoxLayout(confirm_dialog)
             
             layout.addWidget(QLabel(
-                f"<b>This will reset {file_count} file(s) to system defaults.</b><br/><br/>"
-                "This action may require root privileges for package-owned files."
+                f"<b>Reset {file_count} file(s) to system defaults?</b><br/><br/>"
+                "<i>You'll be prompted for your password if root access is needed.</i>"
             ))
             
             text_widget = QTextEdit()
@@ -662,22 +652,14 @@ def main() -> int:
             text_widget.setPlainText("\n".join(summary_lines))
             layout.addWidget(text_widget)
             
-            layout.addWidget(QLabel("Type RESET to confirm:"))
-            input_field = QLineEdit()
-            input_field.setPlaceholderText("Type RESET")
-            layout.addWidget(input_field)
-            
             btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
             layout.addWidget(btns)
             
             confirmed = [False]
             
             def on_ok():
-                if input_field.text().strip() == "RESET":
-                    confirmed[0] = True
-                    confirm_dialog.accept()
-                else:
-                    QMessageBox.warning(confirm_dialog, "Not confirmed", "Please type RESET to continue.")
+                confirmed[0] = True
+                confirm_dialog.accept()
             
             btns.accepted.connect(on_ok)
             btns.rejected.connect(confirm_dialog.reject)
