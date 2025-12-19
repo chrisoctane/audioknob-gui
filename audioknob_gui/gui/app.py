@@ -535,11 +535,11 @@ def main() -> int:
                 devices = list_alsa_playback_devices()
                 
                 info_lines = [
-                    f"<b>Audio Stack Detection</b>",
+                    "<b>Audio Stack Detection</b>",
                     "",
-                    f"<b>PipeWire:</b> {'Running' if stack.pipewire_running else 'Not running'}",
-                    f"<b>JACK:</b> {'Running' if stack.jack_running else 'Not running'}",
-                    f"<b>PulseAudio:</b> {'Running' if stack.pulseaudio_running else 'Not running'}",
+                    f"<b>PipeWire:</b> {'✓ Active' if stack.pipewire_active else '○ Not active'}",
+                    f"<b>WirePlumber:</b> {'✓ Active' if stack.wireplumber_active else '○ Not active'}",
+                    f"<b>JACK:</b> {'✓ Active' if stack.jack_active else '○ Not active'}",
                     "",
                     f"<b>ALSA Playback Devices ({len(devices)}):</b>",
                 ]

@@ -29,30 +29,36 @@ def run_cyclictest(duration_s: int = 5) -> CyclicTestResult:
 
     argv = [
         "cyclictest",
-        "-q",
         "-D",
         str(int(duration_s)),
-        "-m",
-        "-Sp90",
-        "-i200",
-        "-h400",
+        "-m",        # Lock memory
+        "-Sp90",     # SCHED_FIFO priority 90
+        "-i200",     # 200µs interval
+        # Note: removed -q and -h400 to get readable summary output
     ]
     p = subprocess.run(argv, text=True, capture_output=True)
 
     max_us: int | None = None
-    # cyclictest output varies; try a simple parse for the "Max:" field.
+    all_max_values: list[int] = []
+    
+    # cyclictest output format:
+    # "T: 0 (  1234) P:90 I:200 C:  2500 Min:      4 Act:    5 Avg:    6 Max:    12"
     for ln in (p.stdout + "\n" + p.stderr).splitlines():
         ln = ln.strip()
         if "Max:" in ln:
-            # example: "T: 0 (  1234) P:90 I:200 C:  2500 Min:      4 Act:    5 Avg:    6 Max:    12"
             parts = ln.replace("Max:", "Max: ").split()
             for i, tok in enumerate(parts):
                 if tok == "Max:" and i + 1 < len(parts):
                     try:
-                        max_us = int(parts[i + 1])
-                    except Exception:
-                        max_us = None
+                        val = int(parts[i + 1])
+                        all_max_values.append(val)
+                    except (ValueError, IndexError):
+                        pass
                     break
+    
+    # Return the highest max across all threads
+    if all_max_values:
+        max_us = max(all_max_values)
 
     return CyclicTestResult(
         ok=p.returncode == 0,
