@@ -176,13 +176,80 @@ vm.dirty_background_bytes = 16777216
 
 ---
 
-### 11. Testing & Diagnostics (Read-only)
+### 11. Audio Hardware Configuration (NEW)
 
-| Knob ID | Title | Description | Risk | Root |
-|---------|-------|-------------|------|------|
-| `scheduler_jitter_test` | Scheduler jitter (cyclictest) | Run cyclictest, report max latency | low | yes |
-| `jack_xrun_test` | JACK xrun test | Monitor xruns over time | low | no |
-| `rtcqs_check` | Run rtcqs checks | Comprehensive RT audio readiness check | low | no |
+| Knob ID | Title | Description | Risk | Root | UI Type |
+|---------|-------|-------------|------|------|---------|
+| `audio_interface_select` | Audio Interface | Select default audio interface for apps | low | no | Configure dialog |
+| `sample_rate` | Sample Rate | Set sample rate (44100, 48000, 96000, etc.) | low | no | Configure dialog |
+| `bit_depth` | Bit Depth | Set bit depth (16, 24, 32) | low | no | Configure dialog |
+| `buffer_size` | Buffer Size | Set buffer/period size (64, 128, 256, 512, etc.) | low | no | Configure dialog |
+| `periods` | Periods/Buffer | Number of periods (2, 3, 4) | low | no | Configure dialog |
+
+**Implementation approaches:**
+
+For **JACK/QjackCtl**:
+- Interface: `-d alsa -d hw:X` in QjackCtl Server settings
+- Sample rate: `-r 48000` flag
+- Buffer: `-p 256` (frames per period)
+- Periods: `-n 2` (number of periods)
+
+For **PipeWire**:
+```ini
+# ~/.config/pipewire/pipewire.conf.d/99-audioknob.conf
+context.properties = {
+    default.clock.rate = 48000
+    default.clock.quantum = 256
+    default.clock.min-quantum = 64
+    default.clock.max-quantum = 1024
+}
+```
+
+For **ALSA only**:
+- Use `~/.asoundrc` or `/etc/asound.conf`
+- Configure default device and parameters
+
+**Detection needed:**
+- List available ALSA devices: `aplay -l`
+- Current PipeWire settings: `pw-cli info` or `pw-metadata`
+- Current JACK settings: parse QjackCtl config
+
+---
+
+### 12. Testing & Diagnostics (Read-only)
+
+| Knob ID | Title | Description | Risk | Root | UI Type |
+|---------|-------|-------------|------|------|---------|
+| `scheduler_jitter_test` | Scheduler jitter (cyclictest) | Run cyclictest, report max latency | low | yes | Run button |
+| `jack_xrun_test` | JACK xrun monitor | Monitor xruns over time | low | no | Run button |
+| `rtcqs_check` | Run rtcqs checks | Comprehensive RT audio readiness check | low | no | Run button |
+| `underrun_monitor` | Underrun Monitor | Real-time xrun/underrun detection | low | no | View button |
+| `interrupt_inspector` | Interrupt Inspector | View IRQ counts and handlers | low | no | View button |
+| `blocker_check` | Check Blockers | Identify what prevents optimizations | low | no | View button |
+
+---
+
+### 13. Monitoring & Live Diagnostics (NEW)
+
+| Feature | Description | Implementation |
+|---------|-------------|----------------|
+| **Underrun Counter** | Count JACK/PipeWire xruns | Poll `jack_control` or parse PipeWire logs |
+| **Interrupt Inspector** | Show `/proc/interrupts` for audio devices | Parse and filter for snd/xhci/usb |
+| **Latency Calculator** | Calculate theoretical latency | `(buffer * periods) / sample_rate * 1000` |
+| **Blocker Predictor** | Warn about issues | Check group membership, RT kernel, services |
+
+**Blocker detection examples:**
+```python
+def check_blockers() -> list[str]:
+    blockers = []
+    if "audio" not in os.getgroups():
+        blockers.append("Not in 'audio' group - RT limits won't apply")
+    if not Path("/sys/kernel/realtime").exists():
+        blockers.append("Not an RT kernel - consider linux-rt for lowest latency")
+    if shutil.which("cyclictest") is None:
+        blockers.append("cyclictest not installed - can't run jitter test")
+    return blockers
+```
 
 ---
 
@@ -241,6 +308,73 @@ vm.dirty_background_bytes = 16777216
             └───────────────┘   └───────────────┘
 ```
 
+---
+
+## GUI Table Structure
+
+### Column Layout
+
+| # | Column | Width | Content |
+|---|--------|-------|---------|
+| 0 | Title | 180px | Knob name |
+| 1 | Status | 100px | ✓ Applied / ○ Not applied / ◐ Partial |
+| 2 | Description | stretch | What the knob does |
+| 3 | Category | 100px | Grouping |
+| 4 | Risk | 80px | low / medium / high |
+| 5 | Action | 150px | Dropdown OR action button |
+| 6 | Configure | 100px | Per-knob config button (optional) |
+
+### Widget Types by Knob Kind
+
+**Column 5 (Action):**
+
+| Knob Kind | Widget | Behavior |
+|-----------|--------|----------|
+| `normal` (apply/restore) | `QComboBox` | Options: Keep current, Apply optimization, Restore original |
+| `read_only` info | `QPushButton` | Label: "View X", shows info dialog |
+| `read_only` test | `QPushButton` | Label: "Run Test", runs test and shows results |
+| `configurable` (future) | `QPushButton` | Label: "Configure…", opens config dialog |
+
+**Column 6 (Configure):**
+
+| Knob Type | Widget | When to use |
+|-----------|--------|-------------|
+| Has user-configurable params | `QPushButton` "Configure…" | e.g., CPU cores, buffer size |
+| No extra config needed | Empty `QWidget` | Most knobs |
+
+### Adding New Knob Types
+
+When adding a new knob, decide:
+
+1. **Is it apply/restore?** → Use dropdown in col 5, optional Configure in col 6
+2. **Is it info-only?** → Use "View X" button in col 5
+3. **Is it a test?** → Use "Run Test" button in col 5
+4. **Does it need configuration?** → Add "Configure…" button in col 6 with dialog
+
+### Future: Audio Hardware Config Knobs
+
+These will use a combined approach:
+- **Dropdown in col 5**: Keep current / Apply settings / Restore original
+- **Button in col 6**: "Configure…" → opens dialog with:
+  - Interface selector (dropdown of ALSA devices)
+  - Sample rate selector (dropdown: 44100, 48000, 96000)
+  - Buffer size selector (dropdown: 64, 128, 256, 512, 1024)
+  - Bit depth selector (dropdown: 16, 24, 32)
+
+```python
+class AudioConfigDialog(QDialog):
+    """Dialog for audio hardware configuration."""
+    
+    def __init__(self, parent, current_settings: dict):
+        super().__init__(parent)
+        # Interface dropdown (populated from aplay -l)
+        # Sample rate dropdown
+        # Buffer size dropdown
+        # Bit depth dropdown
+        # Periods dropdown
+        # Shows calculated latency: "Latency: 5.3ms @ 48kHz"
+```
+
 ### Transaction Model
 
 - **User knobs**: `~/.local/state/audioknob-gui/transactions/<txid>/`
@@ -270,14 +404,39 @@ vm.dirty_background_bytes = 16777216
 - [x] stack_detect (read-only)
 - [x] scheduler_jitter_test (read-only)
 
-### Phase 3: User-Space Knobs 🔄
-- [x] qjackctl_server_prefix_rt (partial - needs CPU core UI)
-- [ ] pipewire_quantum
-- [ ] pipewire_rt_priority
-- [ ] disable_tracker
-- [ ] disable_baloo
+### Phase 3: UX Refinements ✅
+- [x] Status column (applied/not-applied with color coding)
+- [x] Per-knob restore functionality
+- [x] Reset to Defaults (with smart restore: delete/backup/package)
+- [x] Simplified confirmation dialogs (rely on pkexec)
+- [x] Read-only knob action buttons (View Stack, Run Test)
+- [x] CPU core selector dialog for QjackCtl
+- [x] Font size control with persistence
+- [x] Rich multi-line tooltips
+- [x] Auto-refresh status after apply/undo
 
-### Phase 4: Advanced System Knobs
+### Phase 4: Audio Hardware Configuration 🔄
+- [ ] Audio interface selection (list ALSA devices)
+- [ ] Sample rate configuration (44100, 48000, 96000, etc.)
+- [ ] Bit depth configuration (16, 24, 32)
+- [ ] Buffer size configuration (64, 128, 256, 512, etc.)
+- [ ] Periods configuration (2, 3, 4)
+- [ ] PipeWire quantum tuning
+- [ ] PipeWire RT priority
+
+### Phase 5: Monitoring & Diagnostics 🔲
+- [ ] Underrun/xrun counter (live monitoring)
+- [ ] Interrupt inspector (`/proc/interrupts` for audio)
+- [ ] Blocker predictor (check what prevents optimizations)
+- [ ] Latency calculator display
+- [ ] Improve preview dialog clarity (show meaningful info for runtime-only changes)
+
+### Phase 6: User-Space Services 🔲
+- [ ] disable_tracker (GNOME file indexer)
+- [ ] disable_baloo (KDE file indexer)
+- [ ] usb_autosuspend_disable
+
+### Phase 7: Advanced System Knobs 🔲
 - [ ] kernel_threadirqs (with distro-aware GRUB handling)
 - [ ] kernel_audit_off
 - [ ] cpu_dma_latency_udev
@@ -287,19 +446,20 @@ vm.dirty_background_bytes = 16777216
 - [ ] dirty_bytes
 - [ ] rtc_max_freq / hpet_max_freq
 - [ ] pci_latency_timer
-- [ ] usb_autosuspend_disable
 
-### Phase 5: Distro Detection & Adaptation
+### Phase 8: Distro Detection & Adaptation 🔲
 - [ ] Detect distro family (openSUSE/Fedora/Debian/Arch)
 - [ ] Detect boot loader type (BLS vs traditional GRUB)
 - [ ] Adapt knob implementations per distro
 - [ ] Package manager integration for dependencies
 
-### Phase 6: Polish & Testing
-- [ ] rtcqs integration
-- [ ] Comprehensive testing on multiple distros
-- [ ] Documentation
-- [ ] Packaging (RPM, DEB, Flatpak?)
+### Phase 9: Packaging & Distribution 🔲
+- [ ] Remove hardcoded dev paths from worker
+- [ ] Create proper install script
+- [ ] RPM spec file (openSUSE/Fedora)
+- [ ] DEB packaging (Debian/Ubuntu)
+- [ ] Flatpak (optional)
+- [ ] AUR PKGBUILD (Arch)
 
 ---
 
@@ -380,5 +540,77 @@ This plan incorporates insights from comparing multiple AI agents (GPT 5.2, Comp
 
 ---
 
+## Learnings from Implementation (Dec 2024)
+
+### UX Patterns Established
+
+1. **Status visibility is critical** - Users need to see what's currently applied
+2. **Per-knob restore** - "Restore original" must work per-knob, not just global undo
+3. **Read-only knobs need actions** - Info/test knobs need buttons, not dropdowns
+4. **Simplified confirmation** - pkexec password is sufficient, no need for "type YES"
+5. **Smart reset** - Different files need different restore strategies
+
+### Preview Dialog Improvements Needed
+
+Current issue: "Will change" section can be empty for runtime-only changes.
+
+**Fix approach:**
+```python
+# In preview dialog, show appropriate message based on change type:
+if file_changes:
+    show_file_diff(file_changes)
+elif runtime_changes:  # sysfs writes, service toggles
+    show_runtime_summary(runtime_changes)
+else:
+    show_message("No changes required - already in desired state")
+```
+
+**Runtime change examples to display:**
+- "Will write 'performance' to /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"
+- "Will stop and disable irqbalance.service"
+- "Will run: systemctl --user restart pipewire"
+
+### Transaction Metadata Evolution
+
+Original: Just backup files
+Now includes:
+- `we_created`: bool - did we create this file?
+- `reset_strategy`: str - delete/backup/package
+- `package`: str|null - owning package name
+
+### Widget Patterns for Future Knobs
+
+| Feature | Column 5 | Column 6 | Dialog |
+|---------|----------|----------|--------|
+| Simple toggle | Dropdown | Empty | None |
+| Configurable | Dropdown | "Configure…" | Custom dialog |
+| Info display | "View X" button | Empty | Info message box |
+| Run test | "Run Test" button | Empty | Results message box |
+| Live monitor | "Monitor" button | Empty | Updating dialog |
+
+---
+
+## Potential Blockers to Detect
+
+Before applying optimizations, warn users about:
+
+| Blocker | How to detect | User message |
+|---------|---------------|--------------|
+| Not in audio group | `"audio" not in groups` | "Add yourself to 'audio' group and log out/in" |
+| No RT kernel | `/sys/kernel/realtime` missing | "RT kernel recommended for lowest latency" |
+| PipeWire not running | systemctl status | "Start PipeWire before applying audio settings" |
+| QjackCtl not installed | config file missing | "Install and configure QjackCtl first" |
+| cyclictest missing | `which cyclictest` | "Install rt-tests package for jitter testing" |
+| cpupower missing | `which cpupower` | "Install cpupower for persistent governor" |
+| irqbalance not installed | service missing | "irqbalance not present - skip this knob" |
+
+**Implementation:**
+- Add `check_blockers()` function in `platform/detect.py`
+- Call at GUI startup, show non-modal warning banner
+- Also check before applying specific knobs
+
+---
+
 *Document created by Claude Opus 4.5 on 2024-12-19*
+*Updated with implementation learnings on 2024-12-19*
 *Based on research from Linux Audio Wiki, Arch Wiki, LinuxMusicians forum, and multi-agent comparison*
