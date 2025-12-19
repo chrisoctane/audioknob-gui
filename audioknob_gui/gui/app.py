@@ -1039,10 +1039,18 @@ def main() -> int:
                     "reset-defaults",
                 ]
                 p = subprocess.run(argv, text=True, capture_output=True)
-                result = json.loads(p.stdout) if p.stdout else {}
-                if result.get("reset_count", 0) > 0:
-                    results_text.append(f"Reset {result['reset_count']} user file(s)")
-                errors.extend(result.get("errors", []))
+                if p.returncode != 0:
+                    # Subprocess failed - try to get error from stderr or stdout
+                    err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
+                    errors.append(f"User reset failed: {err_msg}")
+                elif p.stdout:
+                    try:
+                        result = json.loads(p.stdout)
+                        if result.get("reset_count", 0) > 0:
+                            results_text.append(f"Reset {result['reset_count']} user file(s)")
+                        errors.extend(result.get("errors", []))
+                    except json.JSONDecodeError as e:
+                        errors.append(f"User reset: invalid response: {e}")
             except Exception as e:
                 errors.append(f"User reset failed: {e}")
 
@@ -1057,10 +1065,18 @@ def main() -> int:
                         "reset-defaults",
                     ]
                     p = subprocess.run(argv, text=True, capture_output=True)
-                    result = json.loads(p.stdout) if p.stdout else {}
-                    if result.get("reset_count", 0) > 0:
-                        results_text.append(f"Reset {result['reset_count']} system file(s)")
-                    errors.extend(result.get("errors", []))
+                    if p.returncode != 0:
+                        # Subprocess failed - try to get error from stderr or stdout
+                        err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
+                        errors.append(f"Root reset failed: {err_msg}")
+                    elif p.stdout:
+                        try:
+                            result = json.loads(p.stdout)
+                            if result.get("reset_count", 0) > 0:
+                                results_text.append(f"Reset {result['reset_count']} system file(s)")
+                            errors.extend(result.get("errors", []))
+                        except json.JSONDecodeError as e:
+                            errors.append(f"Root reset: invalid response: {e}")
                 except Exception as e:
                     errors.append(f"Root reset failed: {e}")
 

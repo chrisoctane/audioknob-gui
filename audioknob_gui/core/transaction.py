@@ -73,8 +73,17 @@ def backup_file(tx: Transaction, abs_path: str, *, we_created: bool = False) -> 
         "package": None,
     }
 
-    # Check package ownership for system files
-    if existed and not abs_path.startswith(str(Path.home())):
+    # Check package ownership for system files (not user home files)
+    is_user_file = False
+    try:
+        home_dir = str(Path.home())
+        is_user_file = abs_path.startswith(home_dir)
+    except RuntimeError:
+        # Path.home() can fail if HOME is not set
+        # Assume system file in this case
+        pass
+    
+    if existed and not is_user_file:
         try:
             from audioknob_gui.platform.packages import get_package_owner
             pkg_info = get_package_owner(abs_path)
