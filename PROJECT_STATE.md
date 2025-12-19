@@ -3,9 +3,9 @@
 ## Goal
 
 A GUI app to configure Linux for **professional realtime audio** with:
-- **Preview → Confirm → Apply** (no silent changes)
-- **Transaction-based** changes with undo
-- **Distro-aware** (openSUSE, Fedora, Debian, Arch)
+- **Simple UI** - One button per knob: Apply or Reset
+- **Transaction-based** - Every change has undo
+- **Distro-aware** - Works on openSUSE, Fedora, Debian, Arch
 
 ---
 
@@ -15,7 +15,7 @@ A GUI app to configure Linux for **professional realtime audio** with:
 |-------|--------|---------|
 | 1. Foundation | ✅ Done | GUI, Worker, Registry, Transactions |
 | 2. Essential Knobs | ✅ Done | 8 knobs working |
-| 3. UX Refinements | ✅ Done | Status column, per-knob restore, read-only buttons |
+| 3. UX Refinements | ✅ Done | Per-knob Apply/Reset buttons, status display |
 | 4. Audio Config | 🔄 Next | Interface, sample rate, buffer, bit depth |
 | 5. Monitoring | 🔲 | Underruns, interrupts, blockers |
 | 6. Advanced Knobs | 🔲 | Kernel params, GRUB handling |
@@ -39,6 +39,18 @@ A GUI app to configure Linux for **professional realtime audio** with:
 
 ---
 
+## UI Summary
+
+| Status | Action Button |
+|--------|---------------|
+| Not applied | **Apply** |
+| ✓ Applied | **Reset** |
+| Read-only | **View** or **Test** |
+
+**Top bar**: Undo, Reset All
+
+---
+
 ## Quick Reference
 
 ### Run the app
@@ -52,23 +64,21 @@ sudo install -D -m 0755 ~/audioknob-gui/packaging/audioknob-gui-worker /usr/loca
 ```
 
 ### Key files
-- **Registry**: `config/registry.json` (knob definitions)
+- **Registry**: `config/registry.json`
 - **GUI**: `audioknob_gui/gui/app.py`
-- **Worker CLI**: `audioknob_gui/worker/cli.py`
-- **Worker ops**: `audioknob_gui/worker/ops.py`
+- **Worker**: `audioknob_gui/worker/cli.py`
 
 ---
 
 ## Known Issues
 
-1. **Preview dialog** shows raw JSON - needs friendlier display
-2. **Hardcoded dev path** in worker - fix before packaging
+1. **Hardcoded dev path** in worker - fix before packaging
 
 ---
 
 ## See Also
 
-- **PLAN.md** - How to add new knobs, full knob list, implementation patterns
+- **PLAN.md** - How to add new knobs, implementation patterns
 
 ---
 
