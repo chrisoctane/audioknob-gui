@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-python -m audioknob_gui.gui.app "$@"
+
+# Ensure PySide6 from user site-packages is available
+export PYTHONPATH="${HOME}/.local/lib/python3.13/site-packages:${PYTHONPATH:-}"
+
+cd "$(dirname "$0")/.."
+exec python3 -m audioknob_gui.gui.app "$@"

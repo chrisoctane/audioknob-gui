@@ -9,7 +9,11 @@ from pathlib import Path
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    # app.py is in audioknob_gui/gui/app.py
+    # parents[0] = audioknob_gui/gui/
+    # parents[1] = audioknob_gui/
+    # parents[2] = repo root
+    return Path(__file__).resolve().parents[2]
 
 
 def _registry_path() -> str:
