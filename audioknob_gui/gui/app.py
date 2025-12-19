@@ -20,30 +20,6 @@ def _registry_path() -> str:
     return str(_repo_root() / "config" / "registry.json")
 
 
-@dataclass
-class PlannedAction:
-    knob_id: str
-    action: str  # keep|apply|restore
-
-
-def _run_worker_preview(knob_ids: list[str], *, action: str = "apply") -> dict:
-    argv = [
-        sys.executable,
-        "-m",
-        "audioknob_gui.worker.cli",
-        "--registry",
-        _registry_path(),
-        "preview",
-        "--action",
-        action,
-        *knob_ids,
-    ]
-    p = subprocess.run(argv, text=True, capture_output=True)
-    if p.returncode != 0:
-        raise RuntimeError(p.stderr.strip() or "worker preview failed")
-    return json.loads(p.stdout)
-
-
 def _pkexec_available() -> bool:
     from shutil import which
 
@@ -179,7 +155,6 @@ def main() -> int:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
             QApplication,
-            QComboBox,
             QCheckBox,
             QDialog,
             QDialogButtonBox,
@@ -212,25 +187,6 @@ def main() -> int:
 
     from audioknob_gui.gui.tests_dialog import jitter_test_summary
     from audioknob_gui.registry import load_registry
-
-    class PreviewDialog(QDialog):
-        def __init__(self, payload: dict, parent: QWidget | None = None) -> None:
-            super().__init__(parent)
-            self.setWindowTitle("Preview")
-            self.resize(900, 600)
-
-            root = QVBoxLayout(self)
-            root.addWidget(QLabel("Preview of planned changes (nothing applied yet)."))
-
-            text = QTextEdit()
-            text.setReadOnly(True)
-            text.setPlainText(json.dumps(payload, indent=2, sort_keys=True))
-            root.addWidget(text)
-
-            btns = QDialogButtonBox(QDialogButtonBox.Close)
-            btns.rejected.connect(self.reject)
-            btns.accepted.connect(self.accept)
-            root.addWidget(btns)
 
     class ConfirmDialog(QDialog):
         def __init__(self, planned_ids: list[str], parent: QWidget | None = None) -> None:
@@ -547,18 +503,6 @@ def main() -> int:
             # Re-enable sorting after population
             self.table.setSortingEnabled(True)
 
-        def _planned(self) -> list[PlannedAction]:
-            out: list[PlannedAction] = []
-            for r, k in enumerate(self.registry):
-                widget = self.table.cellWidget(r, 5)  # Column 5 is "Planned action"
-                if isinstance(widget, QComboBox):
-                    action = str(widget.currentData())
-                else:
-                    # Read-only knobs have buttons, not combos - always "keep"
-                    action = "keep"
-                out.append(PlannedAction(knob_id=k.id, action=action))
-            return out
-
         def _apply_font_size(self, size: int) -> None:
             """Apply font size to the application."""
             font = QApplication.instance().font()
@@ -707,16 +651,22 @@ def main() -> int:
             dialog.setWindowTitle(k.title)
             dialog.resize(500, 400)
             layout = QVBoxLayout(dialog)
-            
+
             text = QTextEdit()
             text.setReadOnly(True)
             text.setHtml(html)
             layout.addWidget(text)
-            
+
+            # Add config button for knobs that support it
+            if k.id == "qjackctl_server_prefix_rt":
+                config_btn = QPushButton("Configure CPU Cores...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
+
             btns = QDialogButtonBox(QDialogButtonBox.Close)
             btns.rejected.connect(dialog.reject)
             layout.addWidget(btns)
-            
+
             dialog.exec()
 
         def on_check_blockers(self) -> None:
@@ -890,25 +840,6 @@ def main() -> int:
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Install error: {e}")
 
-        def on_preview(self) -> None:
-            planned = [p for p in self._planned() if p.action in ("apply", "restore")]
-            if not planned:
-                QMessageBox.information(self, "Nothing planned", "No knobs are set to Apply or Restore.")
-                return
-
-            apply_ids = [p.knob_id for p in planned if p.action == "apply"]
-            if not apply_ids:
-                QMessageBox.information(self, "Nothing to apply", "Only Restore is selected; use Undo/History.")
-                return
-
-            try:
-                payload = _run_worker_preview(apply_ids, action="apply")
-            except Exception as e:
-                QMessageBox.critical(self, "Preview failed", str(e))
-                return
-
-            PreviewDialog(payload, self).exec()
-
         def _on_apply_knob(self, knob_id: str) -> None:
             """Apply a single knob optimization."""
             k = next((k for k in self.registry if k.id == knob_id), None)
@@ -971,109 +902,6 @@ def main() -> int:
         def _restore_knob(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
             """Legacy wrapper for batch restore."""
             return self._restore_knob_internal(knob_id, requires_root)
-
-        def on_apply(self) -> None:
-            apply_planned = [p for p in self._planned() if p.action == "apply"]
-            restore_planned = [p for p in self._planned() if p.action == "restore"]
-            
-            # Handle restore requests (per-knob restore)
-            if restore_planned:
-                restore_ids = [p.knob_id for p in restore_planned]
-                d = ConfirmDialog(restore_ids, self)
-                d.exec()
-                if not d.ok:
-                    return
-                
-                results = []
-                errors = []
-                for p in restore_planned:
-                    k = next((k for k in self.registry if k.id == p.knob_id), None)
-                    requires_root = k.requires_root if k else False
-                    success, msg = self._restore_knob(p.knob_id, requires_root)
-                    if success:
-                        results.append(msg)
-                    else:
-                        errors.append(f"{p.knob_id}: {msg}")
-                
-                # Refresh status after restore
-                self._refresh_statuses()
-                self._populate()
-                
-                if errors:
-                    QMessageBox.warning(
-                        self, "Restore completed with errors",
-                        "\n".join(results) + "\n\nErrors:\n" + "\n".join(errors)
-                    )
-                elif results:
-                    QMessageBox.information(self, "Restored", "\n".join(results))
-                
-                # If only restore was planned, we're done
-                if not apply_planned:
-                    return
-            
-            if not apply_planned:
-                QMessageBox.information(self, "Nothing planned", "No knobs are set to Apply.")
-                return
-            
-            planned = apply_planned
-
-            # Split into root vs non-root
-            root_knobs: list[str] = []
-            user_knobs: list[str] = []
-            for p in planned:
-                k = next((k for k in self.registry if k.id == p.knob_id), None)
-                if k and k.requires_root:
-                    root_knobs.append(p.knob_id)
-                else:
-                    user_knobs.append(p.knob_id)
-
-            all_ids = root_knobs + user_knobs
-
-            try:
-                payload = _run_worker_preview(all_ids, action="apply")
-            except Exception as e:
-                QMessageBox.critical(self, "Preview failed", str(e))
-                return
-
-            PreviewDialog(payload, self).exec()
-
-            d = ConfirmDialog(all_ids, self)
-            d.exec()
-            if not d.ok:
-                return
-
-            # Apply non-root knobs first (no pkexec)
-            if user_knobs:
-                try:
-                    result_user = _run_worker_apply_user(user_knobs)
-                    self.state["last_user_txid"] = result_user.get("txid")
-                except Exception as e:
-                    QMessageBox.critical(self, "Apply failed (user)", str(e))
-                    return
-
-            # Apply root knobs (with pkexec)
-            if root_knobs:
-                try:
-                    result_root = _run_worker_apply_pkexec(root_knobs)
-                    self.state["last_root_txid"] = result_root.get("txid")
-                except Exception as e:
-                    QMessageBox.critical(self, "Apply failed (root)", str(e))
-                    return
-
-            # Legacy field for backward compat
-            self.state["last_txid"] = self.state.get("last_root_txid") or self.state.get("last_user_txid")
-            save_state(self.state)
-
-            # Refresh status display
-            self._refresh_statuses()
-            self._populate()
-            
-            msg = "Applied."
-            if user_knobs:
-                msg += f" User tx: {self.state.get('last_user_txid')}"
-            if root_knobs:
-                msg += f" Root tx: {self.state.get('last_root_txid')}"
-            QMessageBox.information(self, "Applied", msg)
 
         def on_undo(self) -> None:
             # Try to restore most recent transaction (user or root)

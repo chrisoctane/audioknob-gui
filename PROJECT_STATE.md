@@ -536,7 +536,7 @@ If crash occurs:
 **Approach:**
 1. Add single knob: `audio_config`
 2. Kind: `audio_config` (new)
-3. GUI shows "Config" button in column 6
+3. Info popup (ℹ button) shows "Configure..." button
 4. Config button opens `AudioConfigDialog`
 5. Dialog shows:
    - Interface dropdown (populated from `aplay -l`)
@@ -547,6 +547,8 @@ If crash occurs:
 6. Apply writes to appropriate config:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
+
+**Note:** Current UI has 6 columns (Knob, Status, Category, Risk, Action, ℹ). Config options are in the info popup, not a separate column.
 
 **Detection needed:**
 ```python
