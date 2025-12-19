@@ -266,3 +266,105 @@ def restore_sysfs(effects: list[dict[str, Any]]) -> None:
         if before is None:
             continue
         Path(str(e["path"])).write_text(str(before) + "\n", encoding="utf-8")
+
+
+def check_knob_status(knob: Any) -> str:
+    """Check if a knob's changes are currently applied.
+    
+    Returns one of:
+    - "applied" - the knob's changes are in effect
+    - "not_applied" - the knob's changes are not present
+    - "partial" - some but not all changes are applied
+    - "unknown" - can't determine status
+    - "read_only" - this is a read-only/detection knob
+    """
+    if not knob.impl:
+        return "unknown"
+    
+    kind = knob.impl.kind
+    params = knob.impl.params
+    
+    if kind == "read_only":
+        return "read_only"
+    
+    if kind == "pam_limits_audio_group":
+        path = Path(str(params.get("path", "")))
+        wanted_lines = [str(x) for x in params.get("lines", [])]
+        if not path.exists():
+            return "not_applied"
+        content = path.read_text(encoding="utf-8")
+        found = sum(1 for line in wanted_lines if line in content)
+        if found == len(wanted_lines):
+            return "applied"
+        elif found > 0:
+            return "partial"
+        return "not_applied"
+    
+    if kind == "sysctl_conf":
+        path = Path(str(params.get("path", "")))
+        wanted_lines = [str(x) for x in params.get("lines", [])]
+        if not path.exists():
+            return "not_applied"
+        content = path.read_text(encoding="utf-8")
+        found = sum(1 for line in wanted_lines if line in content)
+        if found == len(wanted_lines):
+            return "applied"
+        elif found > 0:
+            return "partial"
+        return "not_applied"
+    
+    if kind == "systemd_unit_toggle":
+        unit = str(params.get("unit", ""))
+        action = str(params.get("action", ""))
+        if not unit:
+            return "unknown"
+        try:
+            result = run(["systemctl", "is-enabled", unit])
+            is_enabled = result.stdout.strip()
+            if action == "disable_now":
+                return "applied" if is_enabled == "disabled" else "not_applied"
+            elif action == "enable":
+                return "applied" if is_enabled == "enabled" else "not_applied"
+        except Exception:
+            pass
+        return "unknown"
+    
+    if kind == "sysfs_glob_kv":
+        glob_pat = str(params.get("glob", ""))
+        wanted = str(params.get("value", ""))
+        matches = sorted(glob.glob(glob_pat))
+        if not matches:
+            return "unknown"
+        applied_count = 0
+        for p in matches:
+            try:
+                current = Path(p).read_text(encoding="utf-8").strip()
+                # Handle selector format like "[madvise] always never"
+                if current.startswith("[") and "]" in current:
+                    current = current.split("]")[0].strip("[")
+                if current == wanted:
+                    applied_count += 1
+            except Exception:
+                pass
+        if applied_count == len(matches):
+            return "applied"
+        elif applied_count > 0:
+            return "partial"
+        return "not_applied"
+    
+    if kind == "qjackctl_server_prefix":
+        path = Path(str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))).expanduser()
+        if not path.exists():
+            return "not_applied"
+        try:
+            cfg = read_config(path)
+            if not cfg.server_cmd:
+                return "not_applied"
+            # Check if -R flag is present
+            if params.get("ensure_rt", True) and "-R" in cfg.server_cmd:
+                return "applied"
+            return "not_applied"
+        except Exception:
+            return "unknown"
+    
+    return "unknown"

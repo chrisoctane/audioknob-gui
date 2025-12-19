@@ -20,7 +20,7 @@ from audioknob_gui.core.transaction import (
 )
 from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
-from audioknob_gui.worker.ops import preview, restore_sysfs, systemd_restore
+from audioknob_gui.worker.ops import check_knob_status, preview, restore_sysfs, systemd_restore
 
 
 def _require_root() -> None:
@@ -495,6 +495,122 @@ def cmd_list_changes(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """Check current status of all knobs."""
+    reg = load_registry(args.registry)
+    
+    statuses = []
+    for k in reg:
+        status = check_knob_status(k)
+        statuses.append({
+            "knob_id": k.id,
+            "title": k.title,
+            "status": status,
+            "requires_root": k.requires_root,
+        })
+    
+    print(json.dumps({
+        "schema": 1,
+        "statuses": statuses,
+    }, indent=2))
+    return 0
+
+
+def _find_transaction_for_knob(knob_id: str) -> tuple[str | None, dict | None, str | None]:
+    """Find the most recent transaction that applied a specific knob.
+    
+    Returns (txid, manifest, scope) or (None, None, None) if not found.
+    """
+    paths = default_paths()
+    
+    # Check root transactions first (most recent first)
+    root_txs = list_transactions(paths.var_lib_dir)
+    for tx_info in root_txs:
+        if knob_id in tx_info.get("applied", []):
+            manifest_path = Path(tx_info["root"]) / "manifest.json"
+            if manifest_path.exists():
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                return tx_info["txid"], manifest, "root"
+    
+    # Check user transactions
+    user_txs = list_transactions(paths.user_state_dir)
+    for tx_info in user_txs:
+        if knob_id in tx_info.get("applied", []):
+            manifest_path = Path(tx_info["root"]) / "manifest.json"
+            if manifest_path.exists():
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                return tx_info["txid"], manifest, "user"
+    
+    return None, None, None
+
+
+def cmd_restore_knob(args: argparse.Namespace) -> int:
+    """Restore a specific knob to its original state."""
+    knob_id = args.knob_id
+    
+    txid, manifest, scope = _find_transaction_for_knob(knob_id)
+    if not txid or not manifest:
+        print(json.dumps({
+            "schema": 1,
+            "success": False,
+            "error": f"No transaction found for knob: {knob_id}",
+        }, indent=2))
+        return 1
+    
+    # Check if we need root for this operation
+    if scope == "root" and os.geteuid() != 0:
+        print(json.dumps({
+            "schema": 1,
+            "success": False,
+            "error": f"Knob {knob_id} was applied as root; run with pkexec to restore",
+        }, indent=2))
+        return 1
+    
+    paths = default_paths()
+    tx_root = Path(paths.var_lib_dir if scope == "root" else paths.user_state_dir) / "transactions" / txid
+    
+    # Create a Transaction object for backup restore
+    from audioknob_gui.core.transaction import Transaction
+    tx = Transaction(txid=txid, root=tx_root)
+    
+    # Restore only the backups from this knob's transaction
+    restored = []
+    errors = []
+    for meta in manifest.get("backups", []):
+        success, message = reset_file_to_default(meta, tx)
+        if success:
+            restored.append(meta["path"])
+        else:
+            errors.append(message)
+    
+    # Also restore effects if present
+    if scope == "root" and os.geteuid() == 0:
+        effects = manifest.get("effects", [])
+        sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
+        systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+        
+        try:
+            restore_sysfs(sysfs)
+            for e in systemd:
+                systemd_restore(e)
+            if sysfs or systemd:
+                restored.append(f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd)")
+        except Exception as ex:
+            errors.append(f"Failed to restore effects: {ex}")
+    
+    print(json.dumps({
+        "schema": 1,
+        "success": len(errors) == 0,
+        "knob_id": knob_id,
+        "txid": txid,
+        "scope": scope,
+        "restored": restored,
+        "errors": errors,
+    }, indent=2))
+    
+    return 0 if not errors else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="audioknob-worker")
     p.add_argument("--registry", default=_registry_default_path())
@@ -529,6 +645,13 @@ def main(argv: list[str] | None = None) -> int:
 
     slc = sub.add_parser("list-changes", help="List all files modified by audioknob-gui")
     slc.set_defaults(func=cmd_list_changes)
+
+    sst = sub.add_parser("status", help="Check current status of all knobs")
+    sst.set_defaults(func=cmd_status)
+
+    srk = sub.add_parser("restore-knob", help="Restore a specific knob to its original state")
+    srk.add_argument("knob_id", help="ID of the knob to restore")
+    srk.set_defaults(func=cmd_restore_knob)
 
     args = p.parse_args(argv)
     return int(args.func(args))

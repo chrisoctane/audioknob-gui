@@ -197,7 +197,7 @@ def main() -> int:
             QVBoxLayout,
             QWidget,
         )
-        from PySide6.QtGui import QFont
+        from PySide6.QtGui import QColor, QFont
     except Exception as e:  # pragma: no cover
         print(
             "PySide6 is required to run audioknob-gui.\n"
@@ -353,11 +353,13 @@ def main() -> int:
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
-            self.table = QTableWidget(0, 6)
-            self.table.setHorizontalHeaderLabels(["Knob", "Description", "Category", "Risk", "Planned action", "Configure"])
+            self.table = QTableWidget(0, 7)
+            self.table.setHorizontalHeaderLabels(["Knob", "Status", "Description", "Category", "Risk", "Planned action", "Configure"])
             self.table.horizontalHeader().setStretchLastSection(True)
             root.addWidget(self.table)
 
+            self._knob_statuses: dict[str, str] = {}
+            self._refresh_statuses()
             self._populate()
 
             self.btn_tests.clicked.connect(self.on_tests)
@@ -365,6 +367,36 @@ def main() -> int:
             self.btn_apply.clicked.connect(self.on_apply)
             self.btn_undo.clicked.connect(self.on_undo)
             self.btn_reset.clicked.connect(self.on_reset_defaults)
+
+        def _refresh_statuses(self) -> None:
+            """Fetch current status of all knobs."""
+            try:
+                argv = [
+                    sys.executable,
+                    "-m",
+                    "audioknob_gui.worker.cli",
+                    "--registry",
+                    _registry_path(),
+                    "status",
+                ]
+                p = subprocess.run(argv, text=True, capture_output=True)
+                if p.returncode == 0:
+                    data = json.loads(p.stdout)
+                    for item in data.get("statuses", []):
+                        self._knob_statuses[item["knob_id"]] = item["status"]
+            except Exception:
+                pass  # Status check failed, leave statuses empty
+
+        def _status_display(self, status: str) -> tuple[str, str]:
+            """Return (display_text, color) for a status."""
+            mapping = {
+                "applied": ("✓ Applied", "#2e7d32"),      # Green
+                "not_applied": ("○ Not applied", "#757575"),  # Gray
+                "partial": ("◐ Partial", "#f57c00"),      # Orange
+                "read_only": ("ℹ Info only", "#1976d2"),   # Blue
+                "unknown": ("? Unknown", "#9e9e9e"),       # Light gray
+            }
+            return mapping.get(status, ("?", "#9e9e9e"))
 
         def _populate(self) -> None:
             self.table.setRowCount(len(self.registry))
@@ -379,23 +411,36 @@ def main() -> int:
                     f"<b>Requires root:</b> {'Yes' if k.requires_root else 'No'}<br/>"
                     f"<b>Requires reboot:</b> {'Yes' if k.requires_reboot else 'No'}"
                 )
-                
+
+                # Column 0: Knob title
                 title_item = QTableWidgetItem(k.title)
                 title_item.setToolTip(tooltip)
                 self.table.setItem(r, 0, title_item)
-                
+
+                # Column 1: Status (with color)
+                status = self._knob_statuses.get(k.id, "unknown")
+                status_text, status_color = self._status_display(status)
+                status_item = QTableWidgetItem(status_text)
+                status_item.setToolTip(f"Current status: {status}")
+                status_item.setForeground(QColor(status_color))
+                self.table.setItem(r, 1, status_item)
+
+                # Column 2: Description
                 desc_item = QTableWidgetItem(k.description)
                 desc_item.setToolTip(tooltip)
-                self.table.setItem(r, 1, desc_item)
-                
+                self.table.setItem(r, 2, desc_item)
+
+                # Column 3: Category
                 cat_item = QTableWidgetItem(str(k.category))
                 cat_item.setToolTip(tooltip)
-                self.table.setItem(r, 2, cat_item)
-                
+                self.table.setItem(r, 3, cat_item)
+
+                # Column 4: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
                 risk_item.setToolTip(tooltip)
-                self.table.setItem(r, 3, risk_item)
+                self.table.setItem(r, 4, risk_item)
 
+                # Column 5: Planned action
                 combo = QComboBox()
                 combo.addItem("Keep current", userData="keep")
                 if k.capabilities.apply:
@@ -403,21 +448,21 @@ def main() -> int:
                 if k.capabilities.restore:
                     combo.addItem("Restore original", userData="restore")
                 combo.setToolTip(tooltip)
-                self.table.setCellWidget(r, 4, combo)
+                self.table.setCellWidget(r, 5, combo)
 
-                # Per-knob configuration (only for QjackCtl knob for now)
+                # Column 6: Per-knob configuration (only for QjackCtl knob for now)
                 if k.id == "qjackctl_server_prefix_rt":
                     btn = QPushButton("Configure…")
                     btn.setToolTip(tooltip)
                     btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
-                    self.table.setCellWidget(r, 5, btn)
+                    self.table.setCellWidget(r, 6, btn)
                 else:
-                    self.table.setCellWidget(r, 5, QWidget())
+                    self.table.setCellWidget(r, 6, QWidget())
 
         def _planned(self) -> list[PlannedAction]:
             out: list[PlannedAction] = []
             for r, k in enumerate(self.registry):
-                combo = self.table.cellWidget(r, 4)
+                combo = self.table.cellWidget(r, 5)  # Column 5 is "Planned action"
                 assert isinstance(combo, QComboBox)
                 action = str(combo.currentData())
                 out.append(PlannedAction(knob_id=k.id, action=action))
@@ -490,21 +535,71 @@ def main() -> int:
 
             PreviewDialog(payload, self).exec()
 
+        def _restore_knob(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
+            """Restore a single knob to its original state."""
+            if requires_root:
+                try:
+                    worker = _pick_root_worker_path()
+                    argv = ["pkexec", worker, "restore-knob", knob_id]
+                    p = subprocess.run(argv, text=True, capture_output=True)
+                    result = json.loads(p.stdout) if p.stdout else {}
+                    if result.get("success"):
+                        return True, f"Restored {knob_id}"
+                    return False, result.get("error", "Unknown error")
+                except Exception as e:
+                    return False, str(e)
+            else:
+                try:
+                    argv = [
+                        sys.executable, "-m", "audioknob_gui.worker.cli",
+                        "restore-knob", knob_id
+                    ]
+                    p = subprocess.run(argv, text=True, capture_output=True)
+                    result = json.loads(p.stdout) if p.stdout else {}
+                    if result.get("success"):
+                        return True, f"Restored {knob_id}"
+                    return False, result.get("error", "Unknown error")
+                except Exception as e:
+                    return False, str(e)
+
         def on_apply(self) -> None:
             apply_planned = [p for p in self._planned() if p.action == "apply"]
             restore_planned = [p for p in self._planned() if p.action == "restore"]
             
-            # Handle restore requests
-            if restore_planned and not apply_planned:
-                QMessageBox.information(
-                    self, 
-                    "Use Undo or Reset",
-                    "To restore original settings, use:\n\n"
-                    "• <b>Undo last</b> - reverts the most recent transaction\n"
-                    "• <b>Reset to Defaults</b> - reverts ALL changes\n\n"
-                    f"Knobs selected for restore: {', '.join(p.knob_id for p in restore_planned)}"
-                )
-                return
+            # Handle restore requests (per-knob restore)
+            if restore_planned:
+                restore_ids = [p.knob_id for p in restore_planned]
+                d = ConfirmDialog(restore_ids, self)
+                d.exec()
+                if not d.ok:
+                    return
+                
+                results = []
+                errors = []
+                for p in restore_planned:
+                    k = next((k for k in self.registry if k.id == p.knob_id), None)
+                    requires_root = k.requires_root if k else False
+                    success, msg = self._restore_knob(p.knob_id, requires_root)
+                    if success:
+                        results.append(msg)
+                    else:
+                        errors.append(f"{p.knob_id}: {msg}")
+                
+                # Refresh status after restore
+                self._refresh_statuses()
+                self._populate()
+                
+                if errors:
+                    QMessageBox.warning(
+                        self, "Restore completed with errors",
+                        "\n".join(results) + "\n\nErrors:\n" + "\n".join(errors)
+                    )
+                elif results:
+                    QMessageBox.information(self, "Restored", "\n".join(results))
+                
+                # If only restore was planned, we're done
+                if not apply_planned:
+                    return
             
             if not apply_planned:
                 QMessageBox.information(self, "Nothing planned", "No knobs are set to Apply.")
@@ -559,6 +654,10 @@ def main() -> int:
             self.state["last_txid"] = self.state.get("last_root_txid") or self.state.get("last_user_txid")
             save_state(self.state)
 
+            # Refresh status display
+            self._refresh_statuses()
+            self._populate()
+            
             msg = "Applied."
             if user_knobs:
                 msg += f" User tx: {self.state.get('last_user_txid')}"
@@ -606,6 +705,11 @@ def main() -> int:
                 self.state["last_user_txid"] = None
             self.state["last_txid"] = None
             save_state(self.state)
+            
+            # Refresh status display
+            self._refresh_statuses()
+            self._populate()
+            
             QMessageBox.information(self, "Restored", "Undo complete.")
 
         def on_reset_defaults(self) -> None:
