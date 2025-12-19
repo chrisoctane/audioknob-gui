@@ -44,41 +44,43 @@ Add to `config/registry.json`:
 
 In `gui/app.py` → `_populate()`:
 
-| Knob type | Column 5 (Action) | Column 6 (Configure) |
-|-----------|-------------------|----------------------|
-| Normal | Dropdown (keep/apply/restore) | Empty or "Configure…" |
-| Read-only info | "View X" button | Empty |
-| Read-only test | "Run Test" button | Empty |
+| Knob type | Column 5 (Action) | Column 6 (Config) |
+|-----------|-------------------|-------------------|
+| Normal | Dropdown: Default / Apply / Restore | Empty or "Config" |
+| Read-only info | "View" button | Empty |
+| Read-only test | "Test" button (updates Status) | Empty |
 
 ---
 
 ## Implementation Patterns
 
-### Normal knob (apply/restore)
+### Normal knob
 ```python
-# In _populate():
 combo = QComboBox()
-combo.addItem("Keep current", userData="keep")
-combo.addItem("Apply optimization", userData="apply")
-combo.addItem("Restore original", userData="restore")
+combo.addItem("Default", userData="keep")
+combo.addItem("Apply", userData="apply")
+combo.addItem("Restore", userData="restore")
 self.table.setCellWidget(r, 5, combo)
 ```
 
-### Read-only knob (info button)
+### Read-only info
 ```python
-# In _populate():
-btn = QPushButton("View Info")
+btn = QPushButton("View")
 btn.clicked.connect(self.on_view_info)
 self.table.setCellWidget(r, 5, btn)
-self.table.setCellWidget(r, 6, QWidget())  # Empty configure
 ```
 
-### Configurable knob (with dialog)
+### Read-only test (updates status)
 ```python
-# In _populate():
-combo = QComboBox()  # Normal dropdown
-...
-btn = QPushButton("Configure…")
+btn = QPushButton("Test")
+btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
+self.table.setCellWidget(r, 5, btn)
+# on_run_test() updates self._knob_statuses[kid] with results
+```
+
+### With config dialog
+```python
+btn = QPushButton("Config")
 btn.clicked.connect(lambda: self.on_configure(knob_id))
 self.table.setCellWidget(r, 6, btn)
 ```

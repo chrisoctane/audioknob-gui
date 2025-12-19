@@ -335,8 +335,8 @@ def main() -> int:
             
             self.btn_preview = QPushButton("Preview")
             self.btn_apply = QPushButton("Apply")
-            self.btn_undo = QPushButton("Undo last")
-            self.btn_reset = QPushButton("Reset to Defaults")
+            self.btn_undo = QPushButton("Undo")
+            self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip(
                 "Reset ALL audioknob-gui changes to system defaults.\n"
                 "Uses the best strategy per file:\n"
@@ -344,7 +344,7 @@ def main() -> int:
                 "• Package-owned files: restore from package manager\n"
                 "• User configs: restore from backup"
             )
-            self.btn_tests = QPushButton("Run jitter test")
+            self.btn_tests = QPushButton("Jitter Test")
             top.addStretch(1)
             top.addWidget(self.btn_tests)
             top.addWidget(self.btn_preview)
@@ -389,14 +389,21 @@ def main() -> int:
 
         def _status_display(self, status: str) -> tuple[str, str]:
             """Return (display_text, color) for a status."""
+            # Handle test results: "result:12 µs" → "12 µs"
+            if status.startswith("result:"):
+                return (status[7:], "#1976d2")  # Blue
+            
             mapping = {
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
-                "not_applied": ("○ Not applied", "#757575"),  # Gray
+                "not_applied": ("—", "#757575"),          # Gray dash
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
-                "read_only": ("ℹ Info only", "#1976d2"),   # Blue
-                "unknown": ("? Unknown", "#9e9e9e"),       # Light gray
+                "read_only": ("—", "#9e9e9e"),            # Gray dash
+                "unknown": ("—", "#9e9e9e"),              # Gray dash
+                "running": ("⏳", "#1976d2"),             # Blue spinner
+                "done": ("✓", "#2e7d32"),                 # Green check
+                "error": ("✗", "#d32f2f"),                # Red X
             }
-            return mapping.get(status, ("?", "#9e9e9e"))
+            return mapping.get(status, ("—", "#9e9e9e"))
 
         def _populate(self) -> None:
             self.table.setRowCount(len(self.registry))
@@ -443,33 +450,33 @@ def main() -> int:
                 # Column 5: Planned action (or action button for read-only knobs)
                 if k.id == "stack_detect":
                     # Read-only: show action button instead of dropdown
-                    btn = QPushButton("View Stack")
-                    btn.setToolTip("Show detected audio stack (PipeWire/JACK/ALSA)")
+                    btn = QPushButton("View")
+                    btn.setToolTip("Show detected audio stack")
                     btn.clicked.connect(self.on_view_stack)
                     self.table.setCellWidget(r, 5, btn)
                     self.table.setCellWidget(r, 6, QWidget())
                 elif k.id == "scheduler_jitter_test":
                     # Read-only: show action button instead of dropdown
-                    btn = QPushButton("Run Test")
-                    btn.setToolTip("Run scheduler latency test (cyclictest)")
-                    btn.clicked.connect(self.on_tests)
+                    btn = QPushButton("Test")
+                    btn.setToolTip("Run scheduler latency test")
+                    btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
                     self.table.setCellWidget(r, 5, btn)
                     self.table.setCellWidget(r, 6, QWidget())
                 else:
                     # Normal knob: show action dropdown
                     combo = QComboBox()
-                    combo.addItem("Keep current", userData="keep")
+                    combo.addItem("Default", userData="keep")
                     if k.capabilities.apply:
-                        combo.addItem("Apply optimization", userData="apply")
+                        combo.addItem("Apply", userData="apply")
                     if k.capabilities.restore:
-                        combo.addItem("Restore original", userData="restore")
+                        combo.addItem("Restore", userData="restore")
                     combo.setToolTip(tooltip)
                     self.table.setCellWidget(r, 5, combo)
 
                     # Column 6: Per-knob config actions
                     if k.id == "qjackctl_server_prefix_rt":
-                        btn = QPushButton("Configure…")
-                        btn.setToolTip("Configure CPU core pinning for JACK")
+                        btn = QPushButton("Config")
+                        btn.setToolTip("Configure CPU cores")
                         btn.clicked.connect(lambda _=False, kid=k.id: self.on_configure_knob(kid))
                         self.table.setCellWidget(r, 6, btn)
                     else:
@@ -534,6 +541,38 @@ def main() -> int:
         def on_tests(self) -> None:
             headline, detail = jitter_test_summary(duration_s=5)
             QMessageBox.information(self, headline, detail)
+
+        def on_run_test(self, knob_id: str) -> None:
+            """Run a test and update the status column with results."""
+            if knob_id == "scheduler_jitter_test":
+                # Show a brief "running" indicator
+                self._update_knob_status(knob_id, "running", "⏳ Running...")
+                QApplication.processEvents()  # Update UI immediately
+                
+                headline, _ = jitter_test_summary(duration_s=5)
+                
+                # Update status with result (e.g., "max 12 µs")
+                if "max" in headline:
+                    # Extract just the number: "Scheduler jitter: max 12 µs" → "12 µs"
+                    parts = headline.split("max")
+                    if len(parts) > 1:
+                        result = parts[1].strip()
+                        self._knob_statuses[knob_id] = f"result:{result}"
+                    else:
+                        self._knob_statuses[knob_id] = "done"
+                else:
+                    self._knob_statuses[knob_id] = "error"
+                
+                self._populate()
+
+        def _update_knob_status(self, knob_id: str, status: str, display: str) -> None:
+            """Update the status cell for a specific knob."""
+            for r, k in enumerate(self.registry):
+                if k.id == knob_id:
+                    status_item = QTableWidgetItem(display)
+                    status_item.setForeground(QColor("#1976d2"))
+                    self.table.setItem(r, 1, status_item)
+                    break
 
         def on_view_stack(self) -> None:
             """Show detected audio stack information."""
