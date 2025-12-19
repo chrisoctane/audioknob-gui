@@ -344,12 +344,21 @@ def main() -> int:
             self.btn_preview = QPushButton("Preview")
             self.btn_apply = QPushButton("Apply")
             self.btn_undo = QPushButton("Undo last")
+            self.btn_reset = QPushButton("Reset to Defaults")
+            self.btn_reset.setToolTip(
+                "Reset ALL audioknob-gui changes to system defaults.\n"
+                "Uses the best strategy per file:\n"
+                "• Files we created: delete them\n"
+                "• Package-owned files: restore from package manager\n"
+                "• User configs: restore from backup"
+            )
             self.btn_tests = QPushButton("Run jitter test")
             top.addStretch(1)
             top.addWidget(self.btn_tests)
             top.addWidget(self.btn_preview)
             top.addWidget(self.btn_apply)
             top.addWidget(self.btn_undo)
+            top.addWidget(self.btn_reset)
             root.addLayout(top)
 
             self.table = QTableWidget(0, 6)
@@ -363,6 +372,7 @@ def main() -> int:
             self.btn_preview.clicked.connect(self.on_preview)
             self.btn_apply.clicked.connect(self.on_apply)
             self.btn_undo.clicked.connect(self.on_undo)
+            self.btn_reset.clicked.connect(self.on_reset_defaults)
 
         def _populate(self) -> None:
             self.table.setRowCount(len(self.registry))
@@ -589,6 +599,151 @@ def main() -> int:
             self.state["last_txid"] = None
             save_state(self.state)
             QMessageBox.information(self, "Restored", "Undo complete.")
+
+        def on_reset_defaults(self) -> None:
+            """Reset ALL audioknob-gui changes to system defaults."""
+            # First, show what will be reset
+            try:
+                argv = [
+                    sys.executable,
+                    "-m",
+                    "audioknob_gui.worker.cli",
+                    "list-changes",
+                ]
+                p = subprocess.run(argv, text=True, capture_output=True)
+                if p.returncode != 0:
+                    raise RuntimeError(p.stderr.strip() or "list-changes failed")
+                changes = json.loads(p.stdout)
+            except Exception as e:
+                QMessageBox.critical(self, "Failed", f"Could not list changes: {e}")
+                return
+
+            file_count = changes.get("count", 0)
+            if file_count == 0:
+                QMessageBox.information(
+                    self,
+                    "Nothing to reset",
+                    "No audioknob-gui changes found.\n\n"
+                    "Either no changes have been applied, or they've already been reset."
+                )
+                return
+
+            # Show summary and confirm
+            files = changes.get("files", [])
+            summary_lines = []
+            for f in files[:10]:  # Show first 10
+                strategy = f.get("reset_strategy", "backup")
+                pkg = f.get("package", "")
+                line = f"• {f['path']}"
+                if strategy == "delete":
+                    line += " [will delete]"
+                elif strategy == "package" and pkg:
+                    line += f" [restore from {pkg}]"
+                else:
+                    line += " [restore backup]"
+                summary_lines.append(line)
+            if len(files) > 10:
+                summary_lines.append(f"... and {len(files) - 10} more files")
+
+            from PySide6.QtWidgets import QLineEdit
+            
+            confirm_dialog = QDialog(self)
+            confirm_dialog.setWindowTitle("Reset to System Defaults")
+            confirm_dialog.resize(600, 400)
+            layout = QVBoxLayout(confirm_dialog)
+            
+            layout.addWidget(QLabel(
+                f"<b>This will reset {file_count} file(s) to system defaults.</b><br/><br/>"
+                "This action may require root privileges for package-owned files."
+            ))
+            
+            text_widget = QTextEdit()
+            text_widget.setReadOnly(True)
+            text_widget.setPlainText("\n".join(summary_lines))
+            layout.addWidget(text_widget)
+            
+            layout.addWidget(QLabel("Type RESET to confirm:"))
+            input_field = QLineEdit()
+            input_field.setPlaceholderText("Type RESET")
+            layout.addWidget(input_field)
+            
+            btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+            layout.addWidget(btns)
+            
+            confirmed = [False]
+            
+            def on_ok():
+                if input_field.text().strip() == "RESET":
+                    confirmed[0] = True
+                    confirm_dialog.accept()
+                else:
+                    QMessageBox.warning(confirm_dialog, "Not confirmed", "Please type RESET to continue.")
+            
+            btns.accepted.connect(on_ok)
+            btns.rejected.connect(confirm_dialog.reject)
+            
+            confirm_dialog.exec()
+            if not confirmed[0]:
+                return
+
+            # Execute reset - first try without root (for user files)
+            results_text = []
+            errors = []
+
+            # Run user-scope reset first
+            try:
+                argv = [
+                    sys.executable,
+                    "-m",
+                    "audioknob_gui.worker.cli",
+                    "reset-defaults",
+                ]
+                p = subprocess.run(argv, text=True, capture_output=True)
+                result = json.loads(p.stdout) if p.stdout else {}
+                if result.get("reset_count", 0) > 0:
+                    results_text.append(f"Reset {result['reset_count']} user file(s)")
+                errors.extend(result.get("errors", []))
+            except Exception as e:
+                errors.append(f"User reset failed: {e}")
+
+            # Check if we need root for remaining files
+            package_files = [f for f in files if f.get("reset_strategy") == "package"]
+            if package_files:
+                try:
+                    worker = _pick_root_worker_path()
+                    argv = [
+                        "pkexec",
+                        worker,
+                        "reset-defaults",
+                    ]
+                    p = subprocess.run(argv, text=True, capture_output=True)
+                    result = json.loads(p.stdout) if p.stdout else {}
+                    if result.get("reset_count", 0) > 0:
+                        results_text.append(f"Reset {result['reset_count']} system file(s)")
+                    errors.extend(result.get("errors", []))
+                except Exception as e:
+                    errors.append(f"Root reset failed: {e}")
+
+            # Clear all stored txids
+            self.state["last_txid"] = None
+            self.state["last_user_txid"] = None
+            self.state["last_root_txid"] = None
+            save_state(self.state)
+
+            # Show results
+            if errors:
+                QMessageBox.warning(
+                    self,
+                    "Reset completed with errors",
+                    "\n".join(results_text) + "\n\nErrors:\n" + "\n".join(errors[:5])
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Reset complete",
+                    "All audioknob-gui changes have been reset to system defaults.\n\n"
+                    + "\n".join(results_text)
+                )
 
     app = QApplication(sys.argv)
     win = MainWindow()

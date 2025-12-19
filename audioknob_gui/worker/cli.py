@@ -7,7 +7,17 @@ from dataclasses import replace
 from pathlib import Path
 
 from audioknob_gui.core.paths import default_paths
-from audioknob_gui.core.transaction import backup_file, new_tx, restore_file, write_manifest
+from audioknob_gui.core.transaction import (
+    RESET_BACKUP,
+    RESET_DELETE,
+    RESET_PACKAGE,
+    backup_file,
+    list_transactions,
+    new_tx,
+    reset_file_to_default,
+    restore_file,
+    write_manifest,
+)
 from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
 from audioknob_gui.worker.ops import preview, restore_sysfs, systemd_restore
@@ -331,6 +341,160 @@ def cmd_history(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reset_defaults(args: argparse.Namespace) -> int:
+    """Reset all audioknob-gui changes to system defaults.
+    
+    This uses the reset_strategy stored in each backup:
+    - Files we created: delete them
+    - Package-owned files: restore from package manager
+    - User files: restore from our backup
+    """
+    paths = default_paths()
+    results: list[dict] = []
+    errors: list[str] = []
+    
+    # Gather all transactions (root and user)
+    root_txs = list_transactions(paths.var_lib_dir)
+    user_txs = list_transactions(paths.user_state_dir)
+    
+    all_txs = []
+    for tx_info in root_txs:
+        tx_info["scope"] = "root"
+        all_txs.append(tx_info)
+    for tx_info in user_txs:
+        tx_info["scope"] = "user"
+        all_txs.append(tx_info)
+    
+    if not all_txs:
+        print(json.dumps({
+            "schema": 1,
+            "message": "No transactions found - nothing to reset",
+            "reset_count": 0,
+            "errors": [],
+        }, indent=2))
+        return 0
+    
+    # Track which files we've already reset (avoid duplicate resets)
+    reset_paths: set[str] = set()
+    
+    # Process all transactions (newest first - they're already sorted)
+    for tx_info in all_txs:
+        txid = tx_info["txid"]
+        scope = tx_info["scope"]
+        backups = tx_info.get("backups", [])
+        
+        # Check if this is a root transaction and we need root
+        if scope == "root":
+            # Check for package resets which need root
+            needs_root = any(
+                b.get("reset_strategy") == RESET_PACKAGE 
+                for b in backups
+            )
+            if needs_root and os.geteuid() != 0:
+                errors.append(f"Transaction {txid} has package-owned files; run with root to reset")
+                continue
+        
+        # Create a Transaction object for backup restore
+        from audioknob_gui.core.transaction import Transaction
+        tx_root = Path(tx_info["root"])
+        tx = Transaction(txid=txid, root=tx_root)
+        
+        for meta in backups:
+            file_path = meta.get("path", "")
+            if not file_path or file_path in reset_paths:
+                continue
+            
+            strategy = meta.get("reset_strategy", RESET_BACKUP)
+            
+            # Check if we need root for package restore
+            if strategy == RESET_PACKAGE and os.geteuid() != 0:
+                errors.append(f"Need root to restore {file_path} from package")
+                continue
+            
+            success, message = reset_file_to_default(meta, tx)
+            results.append({
+                "path": file_path,
+                "strategy": strategy,
+                "success": success,
+                "message": message,
+            })
+            
+            if success:
+                reset_paths.add(file_path)
+            else:
+                errors.append(message)
+        
+        # Also handle effects (sysfs, systemd) for root transactions
+        if scope == "root":
+            effects = tx_info.get("effects", [])
+            # Read manifest for effects since they're not in the summary
+            manifest_path = tx_root / "manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    effects = manifest.get("effects", [])
+                except Exception:
+                    pass
+            
+            if effects and os.geteuid() == 0:
+                sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
+                systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+                
+                try:
+                    restore_sysfs(sysfs)
+                    for e in systemd:
+                        systemd_restore(e)
+                    results.append({
+                        "path": "(effects)",
+                        "strategy": "effects",
+                        "success": True,
+                        "message": f"Restored {len(sysfs)} sysfs + {len(systemd)} systemd effects",
+                    })
+                except Exception as ex:
+                    errors.append(f"Failed to restore effects: {ex}")
+    
+    print(json.dumps({
+        "schema": 1,
+        "message": f"Reset {len(reset_paths)} files to system defaults",
+        "reset_count": len(reset_paths),
+        "results": results,
+        "errors": errors,
+    }, indent=2))
+    
+    return 1 if errors else 0
+
+
+def cmd_list_changes(_: argparse.Namespace) -> int:
+    """List all files modified by audioknob-gui across all transactions."""
+    paths = default_paths()
+    
+    root_txs = list_transactions(paths.var_lib_dir)
+    user_txs = list_transactions(paths.user_state_dir)
+    
+    all_files: dict[str, dict] = {}
+    
+    for tx_info in root_txs + user_txs:
+        scope = "root" if tx_info in root_txs else "user"
+        for meta in tx_info.get("backups", []):
+            file_path = meta.get("path", "")
+            if file_path and file_path not in all_files:
+                all_files[file_path] = {
+                    "path": file_path,
+                    "scope": scope,
+                    "txid": tx_info["txid"],
+                    "reset_strategy": meta.get("reset_strategy", RESET_BACKUP),
+                    "package": meta.get("package"),
+                    "we_created": meta.get("we_created", False),
+                }
+    
+    print(json.dumps({
+        "schema": 1,
+        "files": list(all_files.values()),
+        "count": len(all_files),
+    }, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="audioknob-worker")
     p.add_argument("--registry", default=_registry_default_path())
@@ -359,6 +523,12 @@ def main(argv: list[str] | None = None) -> int:
 
     sh = sub.add_parser("history", help="List transactions")
     sh.set_defaults(func=cmd_history)
+
+    srd = sub.add_parser("reset-defaults", help="Reset ALL changes to system defaults")
+    srd.set_defaults(func=cmd_reset_defaults)
+
+    slc = sub.add_parser("list-changes", help="List all files modified by audioknob-gui")
+    slc.set_defaults(func=cmd_list_changes)
 
     args = p.parse_args(argv)
     return int(args.func(args))
