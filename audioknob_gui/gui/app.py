@@ -491,10 +491,26 @@ def main() -> int:
             PreviewDialog(payload, self).exec()
 
         def on_apply(self) -> None:
-            planned = [p for p in self._planned() if p.action == "apply"]
-            if not planned:
+            apply_planned = [p for p in self._planned() if p.action == "apply"]
+            restore_planned = [p for p in self._planned() if p.action == "restore"]
+            
+            # Handle restore requests
+            if restore_planned and not apply_planned:
+                QMessageBox.information(
+                    self, 
+                    "Use Undo or Reset",
+                    "To restore original settings, use:\n\n"
+                    "• <b>Undo last</b> - reverts the most recent transaction\n"
+                    "• <b>Reset to Defaults</b> - reverts ALL changes\n\n"
+                    f"Knobs selected for restore: {', '.join(p.knob_id for p in restore_planned)}"
+                )
+                return
+            
+            if not apply_planned:
                 QMessageBox.information(self, "Nothing planned", "No knobs are set to Apply.")
                 return
+            
+            planned = apply_planned
 
             # Split into root vs non-root
             root_knobs: list[str] = []
