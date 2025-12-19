@@ -66,6 +66,68 @@ def cmd_preview(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_apply_user(args: argparse.Namespace) -> int:
+    """Apply non-root knobs (user-scope transactions)."""
+    reg = load_registry(args.registry)
+    by_id = {k.id: k for k in reg}
+
+    paths = default_paths()
+    tx = new_tx(paths.user_state_dir)
+
+    backups: list[dict] = []
+    applied: list[str] = []
+
+    for kid in args.knob:
+        k = by_id.get(kid)
+        if k is None:
+            raise SystemExit(f"Unknown knob id: {kid}")
+        if k.requires_root:
+            raise SystemExit(f"Knob {kid} requires root; use 'apply' command with pkexec")
+        if not k.capabilities.apply:
+            continue
+        if not k.impl:
+            continue
+
+        kind = k.impl.kind
+        params = k.impl.params
+
+        if kind == "qjackctl_server_prefix":
+            from pathlib import Path
+
+            path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
+            path = Path(path_str).expanduser()
+            backups.append(backup_file(tx, str(path)))
+
+            from audioknob_gui.core.qjackctl import ensure_server_flags
+
+            ensure_rt = bool(params.get("ensure_rt", True))
+            ensure_priority = bool(params.get("ensure_priority", False))
+            cpu_cores = params.get("cpu_cores")
+            if cpu_cores is not None:
+                cpu_cores = str(cpu_cores)
+
+            before, after = ensure_server_flags(
+                path, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores
+            )
+
+        else:
+            raise SystemExit(f"Unsupported non-root knob kind: {kind}")
+
+        applied.append(kid)
+
+    manifest = {
+        "schema": 1,
+        "txid": tx.txid,
+        "applied": applied,
+        "backups": backups,
+        "effects": [],
+    }
+    write_manifest(tx, manifest)
+
+    print(json.dumps({"schema": 1, "txid": tx.txid, "applied": applied}, indent=2))
+    return 0
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     _require_root()
 
@@ -164,29 +226,38 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
 
 def cmd_restore(args: argparse.Namespace) -> int:
-    _require_root()
-
+    """Restore a transaction (root or user-scope)."""
     paths = default_paths()
+
+    # Try root transactions first, then user
     tx_root = Path(paths.var_lib_dir) / "transactions" / args.txid
     manifest_path = tx_root / "manifest.json"
+    is_root = manifest_path.exists()
 
-    if not manifest_path.exists():
-        raise SystemExit(f"Transaction not found: {args.txid}")
+    if not is_root:
+        tx_root = Path(paths.user_state_dir) / "transactions" / args.txid
+        manifest_path = tx_root / "manifest.json"
+        if not manifest_path.exists():
+            raise SystemExit(f"Transaction not found: {args.txid}")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
+    # Restore files (works for both root and user)
     for meta in manifest.get("backups", []):
         restore_file(type("Tx", (), {"root": tx_root})(), meta)
 
-    effects = manifest.get("effects", [])
-    sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
-    systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+    # Restore effects (only for root transactions)
+    if is_root:
+        _require_root()
+        effects = manifest.get("effects", [])
+        sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
+        systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
 
-    restore_sysfs(sysfs)
-    for e in systemd:
-        systemd_restore(e)
+        restore_sysfs(sysfs)
+        for e in systemd:
+            systemd_restore(e)
 
-    print(json.dumps({"schema": 1, "restored": args.txid}, indent=2))
+    print(json.dumps({"schema": 1, "restored": args.txid, "was_root": is_root}, indent=2))
     return 0
 
 
@@ -227,9 +298,13 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("knob", nargs="+")
     sp.set_defaults(func=cmd_preview)
 
-    sa = sub.add_parser("apply", help="Apply knobs (creates a transaction)")
+    sa = sub.add_parser("apply", help="Apply root knobs (creates a transaction, requires root)")
     sa.add_argument("knob", nargs="+")
     sa.set_defaults(func=cmd_apply)
+
+    sau = sub.add_parser("apply-user", help="Apply non-root knobs (creates user-scope transaction)")
+    sau.add_argument("knob", nargs="+")
+    sau.set_defaults(func=cmd_apply_user)
 
     sr = sub.add_parser("restore", help="Restore a transaction")
     sr.add_argument("txid")

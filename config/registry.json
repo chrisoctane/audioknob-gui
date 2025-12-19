@@ -90,6 +90,25 @@
       }
     },
     {
+      "id": "qjackctl_server_prefix_rt",
+      "title": "QjackCtl Server Prefix: ensure realtime (-R)",
+      "description": "Ensures JACK realtime flags (-R) are set via QjackCtl's Server Prefix. On this system, JACK realtime flags were only effective when set via QjackCtl → Setup → Settings → Advanced → Server Prefix.",
+      "category": "stack",
+      "risk_level": "low",
+      "requires_root": false,
+      "requires_reboot": false,
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "qjackctl_server_prefix",
+        "params": {
+          "path": "~/.config/rncbc.org/QjackCtl.conf",
+          "ensure_rt": true,
+          "ensure_priority": false,
+          "cpu_cores": null
+        }
+      }
+    },
+    {
       "id": "stack_detect",
       "title": "Detect audio stack (PipeWire/JACK/ALSA)",
       "description": "Shows what audio server appears active on this system.",

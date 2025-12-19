@@ -71,7 +71,8 @@
                 "pam_limits_audio_group",
                 "sysctl_conf",
                 "systemd_unit_toggle",
-                "sysfs_glob_kv"
+                "sysfs_glob_kv",
+                "qjackctl_server_prefix"
               ]
             },
             "params": {"type": "object"}

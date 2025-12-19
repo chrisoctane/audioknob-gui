@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from audioknob_gui.core.diffutil import unified_diff
+from audioknob_gui.core.qjackctl import ensure_server_flags, read_config
 from audioknob_gui.core.runner import run
 
 
@@ -90,6 +91,54 @@ def _sysfs_glob_preview(params: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"path": p, "value": value} for p in matches]
 
 
+def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
+    from audioknob_gui.core.qjackctl import ensure_server_has_flags
+
+    path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
+    path = Path(path_str).expanduser()
+    ensure_rt = bool(params.get("ensure_rt", True))
+    ensure_priority = bool(params.get("ensure_priority", False))
+    cpu_cores = params.get("cpu_cores")
+    if cpu_cores is not None:
+        cpu_cores = str(cpu_cores)
+
+    try:
+        cfg = read_config(path)
+        before_cmd = cfg.server_cmd or ""
+        preset = cfg.def_preset or "default"
+    except Exception:
+        before_cmd = ""
+        preset = "default"
+
+    # Compute what the after command would be (without modifying file)
+    after_cmd = ensure_server_has_flags(
+        before_cmd or "jackd", ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores
+    )
+
+    before = _read_text(str(path))
+    # Generate a realistic diff by finding and replacing the Server line
+    after_lines = before.splitlines() if before else []
+    server_key = f"{preset}\\Server=" if preset else "Server="
+    found = False
+    for i, line in enumerate(after_lines):
+        if line.startswith(server_key):
+            after_lines[i] = f"{server_key}{after_cmd}"
+            found = True
+            break
+    if not found and preset:
+        # Add the line if missing
+        if "[Settings]" not in after_lines:
+            after_lines.append("[Settings]")
+        after_lines.append(f"{server_key}{after_cmd}")
+
+    after = "\n".join(after_lines)
+    if after and not after.endswith("\n"):
+        after += "\n"
+
+    action = "modify" if path.exists() else "create"
+    return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after))]
+
+
 def preview(knob: Any, action: str) -> PreviewItem:
     file_changes: list[FileChange] = []
     would_run: list[list[str]] = []
@@ -126,6 +175,8 @@ def preview(knob: Any, action: str) -> PreviewItem:
             notes.extend(more_notes)
         elif kind == "sysfs_glob_kv":
             would_write.extend(_sysfs_glob_preview(params))
+        elif kind == "qjackctl_server_prefix":
+            file_changes.extend(_qjackctl_server_prefix_preview(params))
         elif kind == "read_only":
             notes.append("Read-only knob; nothing to apply.")
         else:

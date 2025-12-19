@@ -75,6 +75,23 @@ def _pick_root_worker_path() -> str:
     )
 
 
+def _run_worker_apply_user(knob_ids: list[str]) -> dict:
+    """Apply non-root knobs (no pkexec needed)."""
+    argv = [
+        sys.executable,
+        "-m",
+        "audioknob_gui.worker.cli",
+        "--registry",
+        _registry_path(),
+        "apply-user",
+        *knob_ids,
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr.strip() or "worker apply-user failed")
+    return json.loads(p.stdout)
+
+
 def _run_worker_apply_pkexec(knob_ids: list[str]) -> dict:
     if not _pkexec_available():
         raise RuntimeError("pkexec not found")
@@ -124,11 +141,16 @@ def _state_path() -> Path:
 def load_state() -> dict:
     p = _state_path()
     if not p.exists():
-        return {"schema": 1, "last_txid": None}
+        return {"schema": 1, "last_txid": None, "last_user_txid": None, "last_root_txid": None}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
+        # Migrate old state format
+        if "last_txid" in data and "last_user_txid" not in data:
+            data["last_root_txid"] = data.get("last_txid")
+            data["last_user_txid"] = None
+        return data
     except Exception:
-        return {"schema": 1, "last_txid": None}
+        return {"schema": 1, "last_txid": None, "last_user_txid": None, "last_root_txid": None}
 
 
 def save_state(state: dict) -> None:
@@ -305,39 +327,72 @@ def main() -> int:
 
         def on_apply(self) -> None:
             planned = [p for p in self._planned() if p.action == "apply"]
-            ids = [p.knob_id for p in planned]
-            if not ids:
+            if not planned:
                 QMessageBox.information(self, "Nothing planned", "No knobs are set to Apply.")
                 return
 
+            # Split into root vs non-root
+            root_knobs: list[str] = []
+            user_knobs: list[str] = []
+            for p in planned:
+                k = next((k for k in self.registry if k.id == p.knob_id), None)
+                if k and k.requires_root:
+                    root_knobs.append(p.knob_id)
+                else:
+                    user_knobs.append(p.knob_id)
+
+            all_ids = root_knobs + user_knobs
+
             try:
-                payload = _run_worker_preview(ids, action="apply")
+                payload = _run_worker_preview(all_ids, action="apply")
             except Exception as e:
                 QMessageBox.critical(self, "Preview failed", str(e))
                 return
 
             PreviewDialog(payload, self).exec()
 
-            d = ConfirmDialog(ids, self)
+            d = ConfirmDialog(all_ids, self)
             d.exec()
             if not d.ok:
                 return
 
-            try:
-                result = _run_worker_apply_pkexec(ids)
-            except Exception as e:
-                QMessageBox.critical(self, "Apply failed", str(e))
-                return
+            # Apply non-root knobs first (no pkexec)
+            if user_knobs:
+                try:
+                    result_user = _run_worker_apply_user(user_knobs)
+                    self.state["last_user_txid"] = result_user.get("txid")
+                except Exception as e:
+                    QMessageBox.critical(self, "Apply failed (user)", str(e))
+                    return
 
-            self.state["last_txid"] = result.get("txid")
+            # Apply root knobs (with pkexec)
+            if root_knobs:
+                try:
+                    result_root = _run_worker_apply_pkexec(root_knobs)
+                    self.state["last_root_txid"] = result_root.get("txid")
+                except Exception as e:
+                    QMessageBox.critical(self, "Apply failed (root)", str(e))
+                    return
+
+            # Legacy field for backward compat
+            self.state["last_txid"] = self.state.get("last_root_txid") or self.state.get("last_user_txid")
             save_state(self.state)
-            QMessageBox.information(self, "Applied", f"Applied. Transaction: {self.state['last_txid']}")
+
+            msg = "Applied."
+            if user_knobs:
+                msg += f" User tx: {self.state.get('last_user_txid')}"
+            if root_knobs:
+                msg += f" Root tx: {self.state.get('last_root_txid')}"
+            QMessageBox.information(self, "Applied", msg)
 
         def on_undo(self) -> None:
-            txid = self.state.get("last_txid")
+            # Try to restore most recent transaction (user or root)
+            txid = self.state.get("last_user_txid") or self.state.get("last_root_txid") or self.state.get("last_txid")
             if not txid:
                 QMessageBox.information(self, "No undo", "No last transaction recorded.")
                 return
+
+            is_root = bool(self.state.get("last_root_txid") == txid)
 
             d = ConfirmDialog([f"restore:{txid}"], self)
             d.exec()
@@ -345,11 +400,29 @@ def main() -> int:
                 return
 
             try:
-                _run_worker_restore_pkexec(str(txid))
+                if is_root:
+                    _run_worker_restore_pkexec(str(txid))
+                else:
+                    # User restore doesn't need pkexec
+                    argv = [
+                        sys.executable,
+                        "-m",
+                        "audioknob_gui.worker.cli",
+                        "restore",
+                        str(txid),
+                    ]
+                    p = subprocess.run(argv, text=True, capture_output=True)
+                    if p.returncode != 0:
+                        raise RuntimeError(p.stderr.strip() or "worker restore failed")
             except Exception as e:
                 QMessageBox.critical(self, "Undo failed", str(e))
                 return
 
+            # Clear the restored txid
+            if is_root:
+                self.state["last_root_txid"] = None
+            else:
+                self.state["last_user_txid"] = None
             self.state["last_txid"] = None
             save_state(self.state)
             QMessageBox.information(self, "Restored", "Undo complete.")

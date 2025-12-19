@@ -23,6 +23,15 @@ def new_tx(root_dir: str | Path) -> Transaction:
     return Transaction(txid=txid, root=tx_root)
 
 
+def find_tx(root_dir: str | Path, txid: str) -> Transaction | None:
+    """Find an existing transaction by ID."""
+    root = Path(root_dir)
+    tx_root = root / "transactions" / txid
+    if tx_root.exists() and (tx_root / "manifest.json").exists():
+        return Transaction(txid=txid, root=tx_root)
+    return None
+
+
 def _backup_key_for_path(abs_path: str) -> str:
     p = abs_path.lstrip("/").replace("/", "__")
     return p
