@@ -1,0 +1,26 @@
+[project]
+name = "audioknob-gui"
+version = "0.1.0"
+description = "GUI-first realtime audio tuning app (preview/apply/undo with transactions)"
+requires-python = ">=3.10"
+authors = [{ name = "audioknob-gui contributors" }]
+readme = "PROJECT_STATE.md"
+license = { text = "MIT" }
+dependencies = [
+  "PySide6>=6.9.0",
+]
+
+[project.scripts]
+audioknob-gui = "audioknob_gui.gui.app:main"
+audioknob-worker = "audioknob_gui.worker.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["audioknob_gui*"]
+
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
