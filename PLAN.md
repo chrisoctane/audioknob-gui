@@ -74,32 +74,34 @@ In `gui/app.py` → `_populate()`:
 status = self._knob_statuses.get(k.id, "unknown")
 if status == "applied":
     btn = QPushButton("Reset")
-    btn.clicked.connect(lambda _, kid=k.id: self._on_reset_knob(kid))
+    btn.clicked.connect(lambda _, kid=k.id: self._on_reset_knob(kid, root))
 else:
     btn = QPushButton("Apply")
     btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-self.table.setCellWidget(r, 5, btn)
+self.table.setCellWidget(r, 4, btn)  # Column 4 = Action
 ```
 
 ### Read-only info
 ```python
 btn = QPushButton("View")
-btn.clicked.connect(self.on_view_info)
-self.table.setCellWidget(r, 5, btn)
+btn.clicked.connect(self.on_view_stack)
+self.table.setCellWidget(r, 4, btn)  # Column 4 = Action
 ```
 
 ### Read-only test (updates status)
 ```python
 btn = QPushButton("Test")
 btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
-self.table.setCellWidget(r, 5, btn)
+self.table.setCellWidget(r, 4, btn)  # Column 4 = Action
 ```
 
-### With config dialog
+### With config dialog (via info popup)
 ```python
-btn = QPushButton("Config")
-btn.clicked.connect(lambda: self.on_configure(knob_id))
-self.table.setCellWidget(r, 6, btn)
+# In _show_knob_info(), add config button for knobs that need it:
+if k.id == "qjackctl_server_prefix_rt":
+    config_btn = QPushButton("Configure CPU Cores...")
+    config_btn.clicked.connect(lambda: self.on_configure_knob(k.id))
+    layout.addWidget(config_btn)
 ```
 
 ---
@@ -163,10 +165,11 @@ self.table.setCellWidget(r, 6, btn)
 
 ## Guardrails
 
-1. **No silent changes** - Always preview first
-2. **Everything undoable** - Transactions with backups
-3. **Distro-aware** - Don't assume one way works everywhere
-4. **User knows best** - Show status, let them choose
+1. **Everything undoable** - Transactions with backups
+2. **Distro-aware** - Don't assume one way works everywhere
+3. **User knows best** - Show status, let them choose
+4. **One click actions** - No dropdowns, no batch mode, no preview step
+5. **Lock until ready** - Missing groups? 🔒. Missing packages? 📦 Install.
 
 ---
 

@@ -6,6 +6,33 @@
 
 ---
 
+## Current Status (2025-06-20)
+
+### What Works
+- **22 knobs defined** (10 implemented, 12 placeholders)
+- **Per-knob Apply/Reset buttons** - one click to apply or undo
+- **Sortable table** - click column headers to sort
+- **Group gating** - 🔒 locks knobs until user joins audio groups
+- **Package dependencies** - 📦 Install button for missing packages
+- **RT config scanner** - 18 checks with score 0-100%
+- **Info popup** - ℹ button shows details + config options
+- **Transaction system** - backups + smart restore
+- **Undo** - restores last transaction
+- **Reset All** - reverts all changes to system defaults
+
+### GUI Layout
+```
+Columns: Knob | Status | Category | Risk | Action | ℹ
+         (0)    (1)      (2)       (3)    (4)     (5)
+```
+
+### Next Steps
+1. Implement placeholder knobs (see PLAN.md for list)
+2. Add kernel cmdline editing for openSUSE TW
+3. Add PipeWire configuration knobs
+
+---
+
 ## 1. Project Vision & Principles
 
 ### The Problem We're Solving
@@ -619,22 +646,26 @@ Score: 88% (13 passed, 4 warnings, 0 failed)
 When continuing this project, DO NOT:
 
 1. **Add dropdown menus** - We explicitly removed them for simplicity
-2. **Add batch operations** - Each knob acts independently
-3. **Skip status refresh** - Always refresh after any state change
-4. **Assume system services** - PipeWire/WirePlumber are user-scoped
-5. **Modify without backup** - Transaction system is non-negotiable
-6. **Ignore distro differences** - Test on multiple distros or detect
-7. **Add "are you sure" dialogs** - pkexec password is enough friction
-8. **Break existing patterns** - New code should look like existing code
+2. **Add batch operations** - Each knob acts independently  
+3. **Add Preview step** - We removed it; users click Apply, then Undo if wrong
+4. **Skip status refresh** - Always refresh after any state change
+5. **Assume system services** - PipeWire/WirePlumber are user-scoped
+6. **Modify without backup** - Transaction system is non-negotiable
+7. **Ignore distro differences** - Test on multiple distros or detect
+8. **Add "are you sure" dialogs** - pkexec password is enough friction
+9. **Break existing patterns** - New code should look like existing code
+10. **Leave dead code** - If a feature is removed, delete all related code
 
 When continuing this project, DO:
 
 1. **Read this document first** - Understand before modifying
 2. **Update this document** - Keep learnings current
-3. **Follow existing code patterns** - Consistency matters
-4. **Test manually** - The checklist in section 10
-5. **Refresh UI after changes** - `_refresh_statuses()` + `_populate()`
-6. **Handle errors gracefully** - Show message, don't crash
+3. **Update PLAN.md too** - Both docs must stay in sync
+4. **Follow existing code patterns** - Consistency matters
+5. **Test manually** - The checklist in section 11
+6. **Refresh UI after changes** - `_refresh_statuses()` + `_populate()`
+7. **Handle errors gracefully** - Show message, don't crash
+8. **Check requires_groups/requires_commands** - Lock knobs until deps are met
 
 ---
 
