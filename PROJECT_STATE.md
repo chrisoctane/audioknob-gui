@@ -587,7 +587,379 @@ When continuing this project, DO:
 
 ---
 
-## 10. Testing Checklist
+## 10. Distro-Specific Implementation
+
+### Development Focus
+
+**Primary target: openSUSE Tumbleweed** (current dev environment)
+
+We focus on openSUSE first because:
+1. It's the development environment
+2. It has unique characteristics (GRUB2-BLS, sdbootutil)
+3. Better to get one distro right than many half-working
+
+Other distros have **placeholders** until we can verify on real systems.
+
+---
+
+### openSUSE Tumbleweed (PRIMARY)
+
+#### Boot System: GRUB2-BLS with sdbootutil
+
+**What this means:**
+- openSUSE Tumbleweed uses Boot Loader Specification (BLS)
+- Kernel entries are in `/boot/loader/entries/*.conf`
+- **NOT** traditional GRUB with `/etc/default/grub`
+- YaST bootloader module may show GRUB2, but the underlying system is BLS
+
+**Kernel cmdline modification:**
+```bash
+# File to edit
+/etc/kernel/cmdline
+
+# After editing, MUST run:
+sudo sdbootutil update-all-entries
+
+# This regenerates boot entries from /etc/kernel/cmdline
+```
+
+**VERIFIED:** This works on Tumbleweed. Tested with `threadirqs` parameter.
+
+**CAUTION:**
+- YaST bootloader module does NOT update `/etc/kernel/cmdline` correctly
+- Manual edit + sdbootutil is required
+- YaST may be retired in future openSUSE versions
+
+#### Package Manager: zypper + rpm
+
+```bash
+# Install package
+sudo zypper install -y <package>
+
+# Restore package file to default
+sudo rpm --restore <package-name>
+
+# Query file owner
+rpm -qf /path/to/file
+```
+
+**VERIFIED:** `rpm --restore` works for resetting package-owned config files.
+
+#### System Files & Permissions
+
+| File/Directory | Notes |
+|----------------|-------|
+| `/etc/security/limits.d/` | Writable by root, standard PAM location |
+| `/etc/sysctl.d/` | Writable by root, standard sysctl.d |
+| `/etc/modprobe.d/` | May need for some audio drivers |
+| `/sys/devices/system/cpu/` | Standard sysfs, writable by root |
+| `/sys/kernel/mm/transparent_hugepage/` | Standard sysfs |
+| `/etc/kernel/cmdline` | **openSUSE-specific**, not on other distros |
+
+**Locked-down folders (Tumbleweed):**
+- `/usr/` is read-only on transactional systems (MicroOS)
+- Standard Tumbleweed: `/usr/` is writable by root
+- Some security policies may restrict `/etc/` modifications
+
+#### Audio Services (User Scope)
+
+```bash
+# PipeWire and WirePlumber run as USER services
+systemctl --user status pipewire.service
+systemctl --user status wireplumber.service
+
+# NOT system services (these will show inactive)
+systemctl status pipewire.service  # WRONG - will show inactive
+```
+
+**VERIFIED:** Must use `--user` flag for audio service detection.
+
+#### PipeWire Configuration
+
+```bash
+# User override directory (preferred)
+~/.config/pipewire/pipewire.conf.d/
+
+# System default (don't modify directly)
+/usr/share/pipewire/pipewire.conf
+
+# System override (requires root)
+/etc/pipewire/pipewire.conf.d/
+```
+
+**Approach:** Write to `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
+
+#### QjackCtl Configuration
+
+```bash
+~/.config/rncbc.org/QjackCtl.conf
+```
+
+**VERIFIED:** Standard location, INI format with escaped keys.
+
+#### rtirq Configuration
+
+```bash
+# If rtirq is installed
+/etc/sysconfig/rtirq  # openSUSE location (NOT /etc/rtirq.conf)
+```
+
+**TODO:** Verify rtirq package name and config location on Tumbleweed.
+
+#### cpupower Configuration
+
+```bash
+# Service config
+/etc/sysconfig/cpupower
+
+# Command
+cpupower frequency-set -g performance
+```
+
+**TODO:** Verify cpupower is installed by default or needs package.
+
+---
+
+### openSUSE Leap (PLACEHOLDER)
+
+#### Key Differences from Tumbleweed
+
+| Aspect | Tumbleweed | Leap |
+|--------|------------|------|
+| Boot system | GRUB2-BLS (sdbootutil) | Traditional GRUB2 |
+| Kernel cmdline | `/etc/kernel/cmdline` | `/etc/default/grub` |
+| Update command | `sdbootutil update-all-entries` | `grub2-mkconfig -o /boot/grub2/grub.cfg` |
+| Rolling release | Yes | No (fixed versions) |
+
+**NOT TESTED:** These are assumptions based on documentation. Need to verify on real Leap system.
+
+#### GRUB2 Traditional (Leap)
+
+```bash
+# File to edit
+/etc/default/grub
+# Look for: GRUB_CMDLINE_LINUX_DEFAULT="..."
+
+# After editing:
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+```
+
+---
+
+### Fedora (PLACEHOLDER)
+
+**NOT TESTED:** Need to verify on real Fedora system.
+
+#### Assumed Configuration
+
+| Aspect | Expected |
+|--------|----------|
+| Package manager | dnf + rpm |
+| Boot system | GRUB2 |
+| Kernel cmdline | `/etc/default/grub` |
+| Update command | `grub2-mkconfig -o /boot/grub2/grub.cfg` |
+| Audio stack | PipeWire (user service) |
+| Audio group | audio |
+| rtirq config | `/etc/sysconfig/rtirq` (if installed) |
+
+#### Files to Verify
+
+```bash
+# Kernel cmdline
+/etc/default/grub  # GRUB_CMDLINE_LINUX_DEFAULT
+
+# PAM limits
+/etc/security/limits.d/  # Should be standard
+
+# sysctl
+/etc/sysctl.d/  # Should be standard
+
+# PipeWire config
+~/.config/pipewire/pipewire.conf.d/  # User
+/etc/pipewire/pipewire.conf.d/  # System
+```
+
+---
+
+### Debian / Ubuntu (PLACEHOLDER)
+
+**NOT TESTED:** Need to verify on real Debian/Ubuntu system.
+
+#### Assumed Configuration
+
+| Aspect | Expected |
+|--------|----------|
+| Package manager | apt + dpkg |
+| Boot system | GRUB2 |
+| Kernel cmdline | `/etc/default/grub` |
+| Update command | `update-grub` |
+| Audio stack | PipeWire (Ubuntu 22.04+) or PulseAudio |
+| Audio group | audio |
+| rtirq config | `/etc/default/rtirq` (if installed) |
+| cpupower config | `/etc/default/cpupower` |
+
+#### Package Restore
+
+```bash
+# Reinstall package to restore config files
+sudo apt-get install --reinstall <package>
+
+# Or use dpkg
+sudo dpkg --purge <package>  # Remove including configs
+sudo apt-get install <package>
+```
+
+**Note:** apt doesn't have equivalent of `rpm --restore`. May need to reinstall package.
+
+---
+
+### Arch Linux (PLACEHOLDER)
+
+**NOT TESTED:** Need to verify on real Arch system.
+
+#### Assumed Configuration
+
+| Aspect | Expected |
+|--------|----------|
+| Package manager | pacman |
+| Boot system | Varies (GRUB2 or systemd-boot) |
+| Audio group | **realtime** (not audio!) |
+| Realtime package | `realtime-privileges` (AUR or community) |
+
+#### Key Difference: Audio Group
+
+```bash
+# Arch uses 'realtime' group, not 'audio'
+# From realtime-privileges package
+
+# PAM limits file
+/etc/security/limits.d/99-realtime-privileges.conf
+# Content:
+# @realtime - rtprio 99
+# @realtime - memlock unlimited
+# @realtime - nice -20
+```
+
+**CRITICAL:** Detection needed to use correct group name.
+
+#### Boot System Detection
+
+```bash
+# Check for systemd-boot
+if [ -d /boot/loader/entries ]; then
+    # systemd-boot
+    # Edit /boot/loader/entries/*.conf directly
+    # Or use bootctl
+else
+    # GRUB2
+    # Edit /etc/default/grub
+    # Run grub-mkconfig -o /boot/grub/grub.cfg
+fi
+```
+
+---
+
+### Distro Detection Strategy
+
+#### Phase 1: Current Implementation
+
+We currently detect:
+- Package manager (rpm/dpkg/pacman) in `platform/packages.py`
+- Audio stack (PipeWire/JACK) in `platform/detect.py`
+
+#### Phase 2: Needed Detection
+
+```python
+def detect_distro() -> dict:
+    """Detect distro and relevant configuration."""
+    info = {
+        "distro": None,           # opensuse-tumbleweed, fedora, etc.
+        "boot_system": None,      # grub2, grub2-bls, systemd-boot
+        "kernel_cmdline_file": None,
+        "kernel_cmdline_update_cmd": None,
+        "audio_group": "audio",   # or "realtime" for Arch
+        "package_manager": None,  # zypper, dnf, apt, pacman
+        "rtirq_config": None,
+        "cpupower_config": None,
+    }
+    
+    # Detect distro from /etc/os-release
+    os_release = parse_os_release()
+    
+    if "opensuse-tumbleweed" in os_release.get("ID", ""):
+        info["distro"] = "opensuse-tumbleweed"
+        info["boot_system"] = "grub2-bls"
+        info["kernel_cmdline_file"] = "/etc/kernel/cmdline"
+        info["kernel_cmdline_update_cmd"] = ["sdbootutil", "update-all-entries"]
+        info["rtirq_config"] = "/etc/sysconfig/rtirq"
+        info["cpupower_config"] = "/etc/sysconfig/cpupower"
+    
+    elif "opensuse-leap" in os_release.get("ID", ""):
+        info["distro"] = "opensuse-leap"
+        info["boot_system"] = "grub2"
+        info["kernel_cmdline_file"] = "/etc/default/grub"
+        info["kernel_cmdline_update_cmd"] = ["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"]
+        # ... etc
+    
+    # ... other distros
+    
+    return info
+```
+
+#### Phase 3: Boot System Detection
+
+```python
+def detect_boot_system() -> str:
+    """Detect boot system independent of distro."""
+    
+    # Check for BLS (Boot Loader Specification)
+    if Path("/etc/kernel/cmdline").exists() and shutil.which("sdbootutil"):
+        return "grub2-bls"  # openSUSE Tumbleweed style
+    
+    # Check for systemd-boot
+    if Path("/boot/loader/loader.conf").exists():
+        return "systemd-boot"  # Arch with systemd-boot
+    
+    # Check for GRUB2
+    if Path("/etc/default/grub").exists():
+        if Path("/boot/grub2/grub.cfg").exists():
+            return "grub2-opensuse"  # openSUSE style path
+        elif Path("/boot/grub/grub.cfg").exists():
+            return "grub2-standard"  # Debian/Arch style path
+    
+    return "unknown"
+```
+
+---
+
+### Research Needed
+
+| Item | Status | Notes |
+|------|--------|-------|
+| openSUSE Tumbleweed boot system | ✅ Verified | GRUB2-BLS with sdbootutil |
+| openSUSE Tumbleweed audio stack | ✅ Verified | PipeWire (user service) |
+| openSUSE Leap boot system | ❓ Assumed | Traditional GRUB2 - needs verification |
+| Fedora boot system | ❓ Assumed | GRUB2 - needs verification |
+| Debian/Ubuntu boot system | ❓ Assumed | GRUB2 with update-grub |
+| Arch boot system | ❓ Varies | Could be GRUB2 or systemd-boot |
+| Arch realtime group | ❓ Assumed | Uses 'realtime' not 'audio' |
+| rtirq package availability | ❓ | Need to check each distro |
+| cpupower default installation | ❓ | Need to check each distro |
+| YaST retirement timeline | ❓ | openSUSE considering Agama/Cockpit |
+
+---
+
+### Implementation Priority
+
+1. **Now:** openSUSE Tumbleweed works with current code
+2. **Phase 4-5:** Add distro detection function
+3. **Phase 6:** Add kernel cmdline knobs with distro-aware paths
+4. **Phase 7:** Test on other distros, fill in placeholders
+5. **Phase 8:** Package for each distro
+
+---
+
+## 11. Testing Checklist
 
 ### Before Each Session
 ```bash
@@ -630,7 +1002,7 @@ ls -la ~/.local/state/audioknob-gui/transactions/
 
 ---
 
-## 11. Quick Reference
+## 12. Quick Reference
 
 ### Commands
 
