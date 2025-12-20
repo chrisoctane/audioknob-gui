@@ -831,24 +831,59 @@ def check_knob_status(knob: Any) -> str:
         param = str(params.get("param", ""))
         if not param:
             return "unknown"
-        # Check current kernel cmdline - must match complete tokens
-        # e.g., "threadirqs" should not match "nothreadirqs"
-        try:
-            cmdline = Path("/proc/cmdline").read_text(encoding="utf-8")
-            tokens = cmdline.split()
-            # Check for exact match or param=value form
+        
+        def _param_in_tokens(p: str, tokens: list[str]) -> bool:
+            """Check if param is present in token list."""
             for token in tokens:
-                if token == param:
-                    return "applied"
-                # Handle param=value (e.g., "audit=0" matches token "audit=0")
-                if "=" in param and token == param:
-                    return "applied"
-                # Handle param prefix form (e.g., "mitigations=off" matches "mitigations=off")
-                if "=" in param:
-                    param_key = param.split("=")[0]
-                    if token.startswith(param_key + "=") and token == param:
-                        return "applied"
-            return "not_applied"
+                if token == p:
+                    return True
+                # Handle param=value form
+                if "=" in p:
+                    param_key = p.split("=")[0]
+                    if token.startswith(param_key + "=") and token == p:
+                        return True
+            return False
+        
+        try:
+            # Check current running kernel cmdline
+            cmdline = Path("/proc/cmdline").read_text(encoding="utf-8")
+            running_tokens = cmdline.split()
+            in_running = _param_in_tokens(param, running_tokens)
+            
+            # Check boot config file (what will be active after reboot)
+            distro = detect_distro()
+            in_boot_config = False
+            if distro.kernel_cmdline_file:
+                try:
+                    boot_content = Path(distro.kernel_cmdline_file).read_text(encoding="utf-8")
+                    # For BLS/systemd-boot style (single line)
+                    if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                        boot_tokens = boot_content.strip().split()
+                        in_boot_config = _param_in_tokens(param, boot_tokens)
+                    # For GRUB2 style (GRUB_CMDLINE_LINUX_DEFAULT="...")
+                    elif distro.boot_system == "grub2":
+                        import shlex
+                        for line in boot_content.splitlines():
+                            if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                                _, _, rhs = line.partition("=")
+                                rhs = rhs.strip().strip('"')
+                                try:
+                                    boot_tokens = shlex.split(rhs)
+                                except Exception:
+                                    boot_tokens = rhs.split()
+                                in_boot_config = _param_in_tokens(param, boot_tokens)
+                                break
+                except Exception:
+                    pass
+            
+            # Determine status based on both checks
+            if in_running:
+                return "applied"
+            elif in_boot_config:
+                # In boot config but not running = pending reboot
+                return "pending_reboot"
+            else:
+                return "not_applied"
         except Exception:
             return "unknown"
     

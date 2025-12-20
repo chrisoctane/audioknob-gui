@@ -674,6 +674,30 @@ Each implementation kind has specific logic in `check_knob_status()`:
 return "read_only"  # Special case, not apply/reset-able
 ```
 
+**kernel_cmdline:**
+```python
+# Check both running kernel and boot config:
+# 1. Is param in /proc/cmdline? (currently running)
+# 2. Is param in /etc/kernel/cmdline or GRUB config? (pending next boot)
+#
+# Decision matrix:
+#   In /proc/cmdline + in boot config → "applied"
+#   In /proc/cmdline only → "applied" (will be removed on reboot)
+#   In boot config only → "pending_reboot" (needs reboot)
+#   In neither → "not_applied"
+```
+
+### Status Values
+
+| Status | Meaning | GUI Display |
+|--------|---------|-------------|
+| `applied` | Changes are in effect | ✓ Applied (green) |
+| `not_applied` | Changes are not present | — (gray) |
+| `partial` | Some but not all changes applied | ◐ Partial (orange) |
+| `pending_reboot` | Applied to boot config, needs reboot | ⟳ Reboot (orange) |
+| `read_only` | Informational knob, no changes | — (gray) |
+| `unknown` | Could not determine status | — (gray) |
+
 ---
 
 ## 8. Error Handling

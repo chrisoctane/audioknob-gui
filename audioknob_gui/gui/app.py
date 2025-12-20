@@ -391,6 +391,7 @@ def main() -> int:
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
                 "not_applied": ("—", "#757575"),          # Gray dash
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
+                "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
                 "read_only": ("—", "#9e9e9e"),            # Gray dash
                 "unknown": ("—", "#9e9e9e"),              # Gray dash
                 "running": ("⏳", "#1976d2"),             # Blue spinner
@@ -487,7 +488,7 @@ def main() -> int:
                 elif k.id == "pipewire_quantum" and not locked:
                     # Action column: Apply/Reset button
                     status = self._knob_statuses.get(k.id, "unknown")
-                    if status == "applied":
+                    if status in ("applied", "pending_reboot"):
                         btn = QPushButton("Reset")
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
@@ -524,7 +525,7 @@ def main() -> int:
                 elif k.id == "pipewire_sample_rate" and not locked:
                     # Action column: Apply/Reset button
                     status = self._knob_statuses.get(k.id, "unknown")
-                    if status == "applied":
+                    if status in ("applied", "pending_reboot"):
                         btn = QPushButton("Reset")
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
@@ -566,7 +567,7 @@ def main() -> int:
                 else:
                     # Normal knob: show Apply or Reset based on current status
                     status = self._knob_statuses.get(k.id, "unknown")
-                    if status == "applied":
+                    if status in ("applied", "pending_reboot"):
                         btn = QPushButton("Reset")
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
