@@ -472,6 +472,7 @@ Captured system state with multiple applied changes:
    - Fix direction (worker): add a scope option (e.g. `reset-defaults --scope user|root|all`) OR make non-root runs automatically ignore root txs and report a structured “needs_root=true” summary instead of errors.
    - Fix direction (GUI): call `reset-defaults --scope user` first, then pkexec `reset-defaults --scope root`.
    - Severity: **P1** (release UX correctness).
+   - **STATUS: ✅ FIXED** — Added `--scope` option to `reset-defaults` (user|root|all). GUI now calls `--scope user` first, then pkexec `--scope root`. No more spurious "errors" for root txs.
 
 2. **Semantics mismatch: `list-changes` is historical, but GUI uses it as “current pending reset”**:
    - Fact: `list-changes` is defined as “across all transactions” (audit/history). It will continue to show paths even after they were reset.

@@ -1351,21 +1351,21 @@ def main() -> int:
             if not confirmed[0]:
                 return
 
-            # Execute reset - first try without root (for user files and effects)
+            # Execute reset in two phases: user-scope first, then root-scope
             results_text = []
             errors = []
 
-            # Run user-scope reset first
+            # Phase 1: User-scope reset (no pkexec needed)
             try:
                 argv = [
                     sys.executable,
                     "-m",
                     "audioknob_gui.worker.cli",
                     "reset-defaults",
+                    "--scope", "user",
                 ]
                 p = subprocess.run(argv, text=True, capture_output=True)
                 if p.returncode != 0:
-                    # Subprocess failed - try to get error from stderr or stdout
                     err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
                     errors.append(f"User reset failed: {err_msg}")
                 elif p.stdout:
@@ -1379,11 +1379,7 @@ def main() -> int:
             except Exception as e:
                 errors.append(f"User reset failed: {e}")
 
-            # Check if we need root for remaining files OR root effects
-            # Root reset is needed if:
-            # - There are package-owned files to restore
-            # - There are any root-scope files (not just package strategy)
-            # - There are root-scope effects (sysfs, systemd)
+            # Phase 2: Root-scope reset (needs pkexec)
             root_files = [f for f in files if f.get("scope") == "root"]
             needs_root = bool(root_files) or has_root_effects
             
@@ -1394,10 +1390,10 @@ def main() -> int:
                         "pkexec",
                         worker,
                         "reset-defaults",
+                        "--scope", "root",
                     ]
                     p = subprocess.run(argv, text=True, capture_output=True)
                     if p.returncode != 0:
-                        # Subprocess failed - try to get error from stderr or stdout
                         err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
                         errors.append(f"Root reset failed: {err_msg}")
                     elif p.stdout:

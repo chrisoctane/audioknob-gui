@@ -604,22 +604,31 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
     - Files we created: delete them
     - Package-owned files: restore from package manager
     - User files: restore from our backup
+    
+    Use --scope to filter:
+    - 'user': only user-scope transactions (no root needed)
+    - 'root': only root-scope transactions (needs pkexec)
+    - 'all': both (default, but will error on root txs if not root)
     """
     paths = default_paths()
     results: list[dict] = []
     errors: list[str] = []
+    scope_filter = getattr(args, "scope", "all")
     
-    # Gather all transactions (root and user)
-    root_txs = list_transactions(paths.var_lib_dir)
-    user_txs = list_transactions(paths.user_state_dir)
-    
+    # Gather transactions based on scope filter
     all_txs = []
-    for tx_info in root_txs:
-        tx_info["scope"] = "root"
-        all_txs.append(tx_info)
-    for tx_info in user_txs:
-        tx_info["scope"] = "user"
-        all_txs.append(tx_info)
+    
+    if scope_filter in ("root", "all"):
+        root_txs = list_transactions(paths.var_lib_dir)
+        for tx_info in root_txs:
+            tx_info["scope"] = "root"
+            all_txs.append(tx_info)
+    
+    if scope_filter in ("user", "all"):
+        user_txs = list_transactions(paths.user_state_dir)
+        for tx_info in user_txs:
+            tx_info["scope"] = "user"
+            all_txs.append(tx_info)
     
     if not all_txs:
         print(json.dumps({
@@ -640,21 +649,14 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         backups = tx_info.get("backups", [])
         
         # Check if this is a root transaction and we need root
-        if scope == "root":
-            effects = tx_info.get("effects", [])
-            # Need root if: package resets, OR any root-scope effects (sysfs, systemd)
-            has_package_reset = any(
-                b.get("reset_strategy") == RESET_PACKAGE
-                for b in backups
-            )
-            has_root_effects = any(
-                e.get("kind") in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline")
-                for e in effects
-            )
-            needs_root = has_package_reset or has_root_effects or bool(backups)
-            if needs_root and os.geteuid() != 0:
-                errors.append(f"Transaction {txid} needs root to reset (files or effects); run with pkexec")
-                continue
+        if scope == "root" and os.geteuid() != 0:
+            # Can't reset root transactions without root privileges
+            # Only report as error if scope_filter is "all" (mixed mode)
+            # If scope_filter is "root", this is a real error
+            if scope_filter == "root":
+                errors.append(f"Transaction {txid} needs root; run with pkexec")
+            # If scope_filter is "all", we silently skip (GUI will call root separately)
+            continue
         
         # Create a Transaction object for backup restore
         from audioknob_gui.core.transaction import Transaction
@@ -731,12 +733,21 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                     "message": f"Restored {user_effects_restored} user effect(s)",
                 })
     
+    # Check if there are pending root transactions (for informing GUI)
+    needs_root_reset = False
+    if scope_filter == "user":
+        # Check if there are root transactions that still need resetting
+        root_txs = list_transactions(paths.var_lib_dir)
+        needs_root_reset = bool(root_txs)
+    
     print(json.dumps({
         "schema": 1,
         "message": f"Reset {len(reset_paths)} files to system defaults",
         "reset_count": len(reset_paths),
         "results": results,
         "errors": errors,
+        "scope": scope_filter,
+        "needs_root_reset": needs_root_reset,
     }, indent=2))
     
     return 1 if errors else 0
@@ -991,6 +1002,12 @@ def main(argv: list[str] | None = None) -> int:
     sh.set_defaults(func=cmd_history)
 
     srd = sub.add_parser("reset-defaults", help="Reset ALL changes to system defaults")
+    srd.add_argument(
+        "--scope",
+        choices=["user", "root", "all"],
+        default="all",
+        help="Which scope to reset: 'user' (no root needed), 'root' (needs pkexec), or 'all' (default)",
+    )
     srd.set_defaults(func=cmd_reset_defaults)
 
     slc = sub.add_parser("list-changes", help="List all files modified by audioknob-gui")
