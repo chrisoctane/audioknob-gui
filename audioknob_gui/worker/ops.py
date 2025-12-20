@@ -452,13 +452,13 @@ def _baloo_disable_preview(params: dict[str, Any]) -> tuple[list[list[str]], lis
     would_run: list[list[str]] = []
     notes: list[str] = []
     
-    # Check if balooctl is available
-    import shutil
-    if shutil.which("balooctl"):
-        would_run.append(["balooctl", "disable"])
-        notes.append("Will disable Baloo file indexer using balooctl")
+    from audioknob_gui.platform.packages import which_command
+    cmd = which_command("balooctl")
+    if cmd:
+        would_run.append([cmd, "disable"])
+        notes.append(f"Will disable Baloo file indexer using {Path(cmd).name}")
     else:
-        notes.append("balooctl not found - KDE may not be installed")
+        notes.append("balooctl not found (balooctl/balooctl6) - KDE may not be installed")
     
     return would_run, notes
 
@@ -684,9 +684,10 @@ def user_service_restore(effect: dict[str, Any]) -> None:
 
 def baloo_enable() -> None:
     """Re-enable Baloo file indexer."""
-    import shutil
-    if shutil.which("balooctl"):
-        run(["balooctl", "enable"])
+    from audioknob_gui.platform.packages import which_command
+    cmd = which_command("balooctl")
+    if cmd:
+        run([cmd, "enable"])
 
 
 def check_knob_status(knob: Any) -> str:
@@ -941,11 +942,12 @@ def check_knob_status(knob: Any) -> str:
     
     if kind == "baloo_disable":
         # Check if Baloo is disabled
-        import shutil
-        if not shutil.which("balooctl"):
+        from audioknob_gui.platform.packages import which_command
+        cmd = which_command("balooctl")
+        if not cmd:
             return "unknown"
         try:
-            result = run(["balooctl", "status"])
+            result = run([cmd, "status"])
             # "Baloo is currently disabled" in output
             if "disabled" in result.stdout.lower():
                 return "applied"

@@ -634,9 +634,28 @@ def main() -> int:
             font = QApplication.instance().font()
             font.setPointSize(size)
             QApplication.instance().setFont(font)
-            # Reflow rows so widgets/text don't clip at larger font sizes.
+            # Force-propagate the font to key widgets and table contents.
+            # (On some platforms/styles, changing QApplication font doesn't fully repaint existing widgets.)
             try:
+                self.setFont(font)
+                self.table.setFont(font)
+                self.table.horizontalHeader().setFont(font)
+                self.font_spinner.setFont(font)
+                self.btn_undo.setFont(font)
+                self.btn_reset.setFont(font)
+
+                for r in range(self.table.rowCount()):
+                    for c in range(self.table.columnCount()):
+                        it = self.table.item(r, c)
+                        if it is not None:
+                            it.setFont(font)
+                        w = self.table.cellWidget(r, c)
+                        if w is not None:
+                            w.setFont(font)
+
+                # Reflow rows so widgets/text don't clip at larger font sizes.
                 self.table.resizeRowsToContents()
+                self.table.viewport().update()
             except Exception:
                 pass
 

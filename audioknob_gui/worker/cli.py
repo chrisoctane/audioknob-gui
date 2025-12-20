@@ -298,14 +298,16 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             import shutil
             import subprocess
             
-            if shutil.which("balooctl"):
-                result = subprocess.run(["balooctl", "disable"], check=False, capture_output=True)
+            from audioknob_gui.platform.packages import which_command
+            cmd = which_command("balooctl")
+            if cmd:
+                result = subprocess.run([cmd, "disable"], check=False, capture_output=True)
                 effects.append({
                     "kind": "baloo_disable",
                     "result": {"returncode": result.returncode},
                 })
             else:
-                raise SystemExit("balooctl not found - KDE may not be installed")
+                raise SystemExit("balooctl not found (balooctl/balooctl6) - KDE may not be installed")
 
         else:
             raise SystemExit(f"Unsupported non-root knob kind: {kind}")

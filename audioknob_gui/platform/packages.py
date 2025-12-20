@@ -289,24 +289,44 @@ PACKAGE_MAPPINGS: dict[str, dict[PackageManager, str]] = {
     # Best-effort mapping: package names vary by distro/flavor.
     # If this mapping is wrong on a given distro, install will fail and user must install manually.
     "balooctl": {
-        PackageManager.RPM: "baloo-tools5",
+        # openSUSE Tumbleweed / KDE Frameworks 6: provides balooctl6
+        PackageManager.RPM: "kf6-baloo-tools",
         PackageManager.DPKG: "baloo-kf5",
         PackageManager.PACMAN: "baloo",
     },
 }
 
 
+# Some distros rename commands across major desktop/framework versions.
+# Treat these aliases as satisfying the canonical command name in registry.json.
+COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
+    # openSUSE Tumbleweed / KDE Frameworks 6
+    "balooctl": ("balooctl6",),
+}
+
+
+def which_command(command: str) -> str | None:
+    """Return an executable path for a command, considering aliases and common sbin paths."""
+    cands = (command,) + tuple(COMMAND_ALIASES.get(command, ()))
+
+    for cand in cands:
+        p = shutil.which(cand)
+        if p:
+            return p
+
+    # GUI sessions often have a reduced PATH that omits sbin.
+    for cand in cands:
+        for d in ("/usr/bin", "/usr/sbin", "/bin", "/sbin", "/usr/local/bin", "/usr/local/sbin"):
+            p = Path(d) / cand
+            if p.exists() and p.is_file() and os.access(p, os.X_OK):
+                return str(p)
+
+    return None
+
+
 def check_command_available(command: str) -> bool:
     """Check if a command is available in PATH."""
-    if shutil.which(command) is not None:
-        return True
-    # GUI sessions often have a reduced PATH that omits sbin; check common locations
-    # so "Install" buttons unlock immediately after package install.
-    for d in ("/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/local/bin"):
-        p = Path(d) / command
-        if p.exists() and p.is_file() and os.access(p, os.X_OK):
-            return True
-    return False
+    return which_command(command) is not None
 
 
 def check_packages_installed(commands: list[str]) -> dict[str, bool]:
