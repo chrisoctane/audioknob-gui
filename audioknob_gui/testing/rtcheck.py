@@ -581,10 +581,35 @@ def check_usb_autosuspend() -> CheckResult:
     auto = 0
     on = 0
     unknown = 0
+    auto_devices: list[str] = []
+
+    def _read(dev: Path, name: str) -> str:
+        try:
+            return (dev / name).read_text().strip()
+        except Exception:
+            return ""
+
+    def _label_for_control_path(control_path: Path) -> str:
+        # control_path: /sys/bus/usb/devices/<dev>/power/control
+        dev = control_path.parent.parent
+        bus_id = dev.name
+        product = _read(dev, "product")
+        manufacturer = _read(dev, "manufacturer")
+        vid = _read(dev, "idVendor")
+        pid = _read(dev, "idProduct")
+
+        parts: list[str] = [bus_id]
+        pretty = " ".join([x for x in [manufacturer, product] if x]).strip()
+        if pretty:
+            parts.append(f"({pretty})")
+        if vid and pid:
+            parts.append(f"[{vid}:{pid}]")
+        return " ".join(parts)
     for p in controls:
         v = (_read_file(p) or "").strip().lower()
         if v == "auto":
             auto += 1
+            auto_devices.append(f"- {p}: {_label_for_control_path(p)}")
         elif v == "on":
             on += 1
         else:
@@ -592,6 +617,14 @@ def check_usb_autosuspend() -> CheckResult:
 
     if auto > 0:
         detail = f"Devices: on={on}, auto={auto}, unknown={unknown}"
+        if auto_devices:
+            # Show which devices are still autosuspending so user can confirm their interface isn't.
+            # Cap list to keep UI readable.
+            cap = 20
+            shown = auto_devices[:cap]
+            detail += "\n\nDevices still set to 'auto':\n" + "\n".join(shown)
+            if len(auto_devices) > cap:
+                detail += f"\n... and {len(auto_devices) - cap} more"
         if rule_path.exists():
             detail += "\nRule is installed, but some devices are still in 'auto'. Try replugging the interface or running: sudo udevadm trigger"
         return CheckResult(
