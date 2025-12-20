@@ -632,12 +632,38 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             tx_info["scope"] = "user"
             all_txs.append(tx_info)
     
+    # If running the user phase, also compute whether there is pending root work
+    # (for GUI two-phase resets) even when there are no user transactions.
+    needs_root_reset = False
+    if scope_filter == "user":
+        root_txs = list_transactions(paths.var_lib_dir)
+        for tx_info in root_txs:
+            # Pending files: file still exists
+            for meta in tx_info.get("backups", []):
+                file_path = meta.get("path", "")
+                if file_path and Path(file_path).exists():
+                    needs_root_reset = True
+                    break
+            if needs_root_reset:
+                break
+            # Pending effects: restorable effects
+            for effect in tx_info.get("effects", []):
+                kind = effect.get("kind", "")
+                if kind in ("sysfs_write", "systemd_unit_toggle"):
+                    needs_root_reset = True
+                    break
+            if needs_root_reset:
+                break
+
     if not all_txs:
         print(json.dumps({
             "schema": 1,
             "message": "No transactions found - nothing to reset",
             "reset_count": 0,
+            "results": [],
             "errors": [],
+            "scope": scope_filter,
+            "needs_root_reset": needs_root_reset,
         }, indent=2))
         return 0
     
@@ -737,8 +763,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
     
     # Check if there are pending root changes (for informing GUI)
     # Use list-pending semantics: only count files that still exist + restorable effects
-    needs_root_reset = False
-    if scope_filter == "user":
+    if scope_filter == "user" and not needs_root_reset:
         root_txs = list_transactions(paths.var_lib_dir)
         for tx_info in root_txs:
             # Check for pending files
