@@ -1024,3 +1024,52 @@ Now uses list-pending semantics: only returns true if there are files that still
 
 - Added `tests/test_cli_commands.py` with unit tests for `list-pending` output shape, filtering, and dedup behavior
 - Extended `scripts/smoke_test.sh` with `list-pending` and `reset-defaults --scope user` commands
+
+---
+
+## Worker sync protocol (NO DRIFT) — read this first (2025-12-20)
+
+Some workers are reporting they “don’t see updates”. That is almost always a local git sync issue.
+
+### Source of truth
+
+- **Canonical branch**: `origin/master`
+- **Current expected head (as of this note)**: commit `b10e019` (verify via `git rev-parse --short origin/master`)
+
+### Required sync steps (every session start, before any work)
+
+Run these in the repo root:
+
+```bash
+git fetch origin
+git switch master
+git pull --ff-only
+git status -sb
+git rev-parse --short HEAD
+git rev-parse --short origin/master
+```
+
+Acceptance criteria:
+- `git status -sb` shows `## master...origin/master` with **no “ahead/behind”**
+- `HEAD` short hash **matches** `origin/master` short hash
+
+### If you are behind / on a different branch
+
+- If you see “behind”: run the commands above (especially `git pull --ff-only`).
+- If you are on a feature branch: either merge/rebase onto latest `origin/master`, or switch back to `master` and cherry-pick your commits.
+- If `git pull --ff-only` fails: you have local divergence; stop and ask overseer for the preferred resolution (usually: rebase your branch onto `origin/master`).
+
+### Consistency gate (must be green before claiming “done”)
+
+After syncing (and after any changes), run:
+
+```bash
+python3 scripts/check_repo_consistency.py
+python3 -m pytest -q
+./scripts/smoke_test.sh
+```
+
+If you can’t reproduce the latest behavior, paste:
+- `git status -sb`
+- `git log --oneline -5`
+- output of `python3 scripts/check_repo_consistency.py`
