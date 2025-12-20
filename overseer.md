@@ -1113,3 +1113,33 @@ If you can’t reproduce the latest behavior, paste:
 - Update GUI to check `requires_reboot` flag
 - Show indicator in status column or as popup after apply
 
+
+---
+
+## P0 — Restore uses newest transaction, not oldest (original state) (2025-12-20)
+
+**Bug:** When a knob is applied multiple times, `restore-knob` uses the backup from the **newest** transaction, which may already contain the modified state.
+
+**Observed:**
+- First apply of `kernel_audit_off`: backup correctly captured original (no `audit=0`)
+- Second apply (after Reset All or re-apply): backup captured already-modified file (has `audit=0`)
+- Reset uses newest transaction → restores to modified state, not original
+
+**Evidence:**
+```
+Transaction 1883068548106143 (older): 75 bytes — NO audit=0 ✓
+Transaction 1883068784f1b627 (newer): 83 bytes — HAS audit=0 ✗
+```
+
+**Root cause:**
+- `_find_transaction_for_knob()` returns the NEWEST transaction
+- Should return OLDEST transaction to get the original "before" state
+
+**Fix required:**
+- Change `_find_transaction_for_knob()` to return oldest transaction, not newest
+- OR: Skip creating a new transaction if the file is already in the target state
+
+**Workaround used:**
+- Manually edited `/etc/kernel/cmdline` with `sed -i 's/ audit=0//'`
+- Ran `sdbootutil update-all-entries`
+
