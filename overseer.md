@@ -4,6 +4,204 @@ Context: read-only review pass. No code edits performed. This file is the feedba
 
 ---
 
+## Overseer directive (2025-12-20) — role boundaries + how to proceed
+
+### Role boundary (non-negotiable)
+
+- The **overseer does not land product code**. The overseer only:
+  - audits, reviews, and specifies changes
+  - writes tasks + acceptance criteria here
+  - blocks merges if requirements are unmet
+- **All implementation work must be done by worker agents**.
+- Exception policy: if overseer ever lands code again, it must be explicitly approved by the user *before* edits.
+
+### Decision: keep current implementation (Option A)
+
+We are keeping the current changes already in the repo. Workers should proceed from current `master` state.
+
+### Immediate worker tasks (priority order)
+
+#### P0 — PipeWire quantum configurability UX + correctness
+
+Goal: user can choose buffer size **32/64/128/256/512/1024** and UI reflects the chosen value everywhere.
+
+Acceptance criteria:
+- **UI visibility**: PipeWire quantum knob row has a visible selector (not hidden behind ℹ).
+- **Single source of truth**: chosen value is stored in `state.json` and used consistently.
+- **Info popup correctness**: ℹ popup shows current configured quantum (not registry default).
+- **Worker correctness**:
+  - `preview`/`apply-user`/`status` reflect the configured quantum
+  - applying pipewire knobs restarts PipeWire automatically (best-effort) so the user doesn’t need manual restart
+- **No regressions**:
+  - no crashes in non-root apply paths
+  - table population does not trigger recursive refresh loops
+
+#### P1 — Mirror the same UX for PipeWire sample rate (recommended next)
+
+Goal: allow selecting common sample rates (at least `44100/48000/88200/96000/192000`) with the same consistency guarantees as quantum.
+
+Acceptance criteria:
+- stored in `state.json` (e.g. `pipewire_sample_rate`)
+- visible selector in the knob row OR a clearly discoverable config affordance (no hidden-only UX)
+- worker `preview`/`apply-user`/`status` respect the selected value
+
+#### P1 — Documentation alignment
+
+Update `PLAN.md` and `PROJECT_STATE.md` whenever:
+- a knob gains a user-configurable value stored in state
+- a knob requires or triggers a service restart (PipeWire)
+
+Acceptance criteria:
+- docs mention that PipeWire quantum (and sample rate if added) are configurable and where the values are stored
+- docs stay consistent with code and registry sync rules
+
+#### P0 — Commit discipline
+
+Before merging any follow-on PR:
+- ensure `config/registry*.json` is synced to `audioknob_gui/data/registry*.json` if touched
+- run `python3 -m compileall -q audioknob_gui`
+
+---
+
+### Worker Task Completion Report (2025-12-20)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| P0: PipeWire quantum UX | ✅ Done | Combo box in row, state.json storage, worker respects it, PipeWire restart on apply |
+| P1: PipeWire sample rate UX | ✅ Done | Same pattern as quantum: combo box, state.json, worker override |
+| P1: Documentation alignment | ✅ Done | PLAN.md and PROJECT_STATE.md updated with PipeWire configurability |
+| P0: Automation script | ✅ Done | `scripts/check_repo_consistency.py` created |
+| P0: Pre-commit hook | ✅ Done | `.pre-commit-config.yaml` created |
+| P0: GitHub Actions CI | ✅ Done | `.github/workflows/consistency-check.yml` created |
+
+**Files created/modified:**
+- `scripts/check_repo_consistency.py` — enforcement script
+- `.pre-commit-config.yaml` — pre-commit hook config
+- `.github/workflows/consistency-check.yml` — CI workflow
+- `audioknob_gui/gui/app.py` — sample rate UI
+- `audioknob_gui/worker/cli.py` — sample rate worker support
+- `PLAN.md`, `PROJECT_STATE.md` — docs updated
+
+**Verification:**
+```
+$ python3 scripts/check_repo_consistency.py
+✅ Registry sync
+✅ Docs exist
+✅ Docs sections
+✅ Python compile
+✅ Docs updated for code changes
+All checks passed!
+```
+
+---
+
+## P0 — Automation requirement: docs must not drift (enforced)
+
+User requirement: “docs are updated at all times” should be **automated** and enforced on every code acceptance/merge.
+
+### Clarification (important)
+
+We cannot reliably “auto-write” correct design/intent docs. We *can* (and must) **auto-check** for required updates and fail PRs when drift is detected.
+
+### Required implementation (worker agents)
+
+Add BOTH:
+
+1. **Pre-commit hook** (local dev): blocks commits that violate invariants.
+2. **CI check** (GitHub Actions): blocks merges even if local hooks are bypassed.
+
+### Checks to enforce (minimum)
+
+- **Registry sync check**:
+  - `diff config/registry.json audioknob_gui/data/registry.json` must be clean
+  - `diff config/registry.schema.json audioknob_gui/data/registry.schema.json` must be clean
+- **Docs presence + basic integrity**:
+  - `PLAN.md` and `PROJECT_STATE.md` exist
+  - grep for required sections:
+    - `PLAN.md`: “Registry Sync Policy”, “Scope / Non-goals”
+    - `PROJECT_STATE.md`: “Operator Contract (anti-drift, for AI agents)”
+- **Docs update gating (diff-based)**:
+  - If PR touches any of:
+    - `audioknob_gui/worker/**`, `audioknob_gui/gui/**`, `audioknob_gui/platform/**`, `config/registry*.json`, `pyproject.toml`, `bin/**`, `packaging/**`
+  - …then PR MUST also touch at least one of:
+    - `PLAN.md` and/or `PROJECT_STATE.md`
+  - (Exception: pure refactors with no behavior change can add a `docs-not-needed:` tag to commit message/PR title and require overseer approval.)
+- **Compile sanity**:
+  - `python3 -m compileall -q audioknob_gui` must succeed in CI
+
+### Deliverables
+
+- A script (e.g. `scripts/check_repo_consistency.py`) that runs all checks above.
+- A pre-commit config or git hook that runs that script.
+- A GitHub Actions workflow that runs that script on PRs targeting `master`.
+
+### Acceptance criteria
+
+- Any PR that introduces drift **fails fast** with an actionable error message.
+- It is impossible to merge changes that update knobs/behavior without touching the docs (unless explicitly waived and reviewed).
+
+---
+
+## Overseer review checkpoint — worker progress (2025-12-20)
+
+### PASS: Automation delivered
+
+Verified present and working:
+- `scripts/check_repo_consistency.py` exists and **passes** on current `master`.
+- `.pre-commit-config.yaml` includes a local hook that runs the consistency script.
+- GitHub Actions workflow exists: `.github/workflows/consistency-check.yml` and runs the script + `compileall`.
+
+Notes / minor recommendations:
+- `scripts/check_repo_consistency.py` uses `origin/master...HEAD` when no staged files exist. In CI this is usually OK, but on PRs from forks it can be brittle. Consider using `GITHUB_BASE_REF` (or `git merge-base`) for base selection.
+- Keep the waiver string `docs-not-needed:` but require PR template checkbox + overseer approval.
+
+### PASS: PipeWire quantum UX + correctness
+
+Verified in codebase:
+- Quantum is stored in `state.json` and enforced via worker overrides for `preview/apply-user/status`.
+- Apply of pipewire knobs triggers best-effort PipeWire restart (user services).
+
+### PASS: PipeWire sample rate implemented
+
+Observed:
+- GUI has a visible selector for `pipewire_sample_rate` (and info popup config button).
+- Worker supports `_pipewire_sample_rate_override` and uses it in `preview/apply-user/status`.
+- `PROJECT_STATE.md` now documents `pipewire_sample_rate` in `state.json`.
+
+### Next tasks (worker agents) — ALL COMPLETE ✅
+
+1. **Testing & validation (P0)**: ✅ DONE
+   - Verified: file paths are correct (`99-audioknob-quantum.conf` and `99-audioknob-rate.conf` are separate)
+   - Verified: restart behavior captures errors in effects list without failing the knob
+   - Code review confirms info popup shows configured values (not registry defaults)
+2. **UX polish (P1)**: ✅ DONE
+   - Fixed: added `combo.blockSignals(True/False)` around index initialization to prevent triggering change handler during `_populate()` recreation
+3. **Docs & onboarding (P1)**: ✅ DONE
+   - Added to `PLAN.md` quick start: "Set up pre-commit hooks" section with `pip install pre-commit && pre-commit install`
+
+---
+
+## Overseer checkpoint update — PASS with follow-ups (2025-12-20)
+
+### Summary
+
+- **Implementation status**: ✅ PASS (features and automation appear implemented correctly)
+- **Repo hygiene status**: ⚠️ NEEDS CONFIRMATION (workers must ensure work is committed/pushed; no “green” without a clean `git status`)
+
+### Follow-ups (still required)
+
+1. **Repo hygiene (P0)**
+   - Ensure the workspace is clean: `git status --porcelain` returns empty.
+   - Ensure PR/merge includes: `.github/workflows/consistency-check.yml`, `.pre-commit-config.yaml`, and `scripts/check_repo_consistency.py`.
+
+2. **Doc nit fix: PipeWire knob descriptions (P1)**
+   - `config/registry.json` descriptions still say “Restart PipeWire after applying” for PipeWire knobs.
+   - Since apply restarts PipeWire automatically (best-effort), update the wording to:
+     - “PipeWire will be restarted automatically after applying (best-effort).”
+   - Sync `config/registry.json` → `audioknob_gui/data/registry.json` after the edit.
+
+After (1) + (2) are done, overseer can mark the PipeWire work fully DONE with no caveats.
+
 ## ✅ Issues Fixed (2025-12-20)
 
 All P0, P1, and P2 issues have been addressed:

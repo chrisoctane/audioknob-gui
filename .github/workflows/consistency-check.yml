@@ -1,0 +1,28 @@
+name: Consistency Check
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for diff against base
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Run consistency checks
+        run: python3 scripts/check_repo_consistency.py
+      
+      - name: Compile check
+        run: python3 -m compileall -q audioknob_gui

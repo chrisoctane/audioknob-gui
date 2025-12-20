@@ -60,6 +60,34 @@ def _qjackctl_cpu_cores_override(state: dict) -> str | None:
     return None
 
 
+def _pipewire_quantum_override(state: dict) -> int | None:
+    """Return selected PipeWire quantum (buffer size), or None if unset/invalid."""
+    raw = state.get("pipewire_quantum")
+    if raw is None:
+        return None
+    try:
+        v = int(raw)
+    except Exception:
+        return None
+    if v in (32, 64, 128, 256, 512, 1024):
+        return v
+    return None
+
+
+def _pipewire_sample_rate_override(state: dict) -> int | None:
+    """Return selected PipeWire sample rate, or None if unset/invalid."""
+    raw = state.get("pipewire_sample_rate")
+    if raw is None:
+        return None
+    try:
+        v = int(raw)
+    except Exception:
+        return None
+    if v in (44100, 48000, 88200, 96000, 192000):
+        return v
+    return None
+
+
 def cmd_detect(_: argparse.Namespace) -> int:
     print(json.dumps(dump_detect(), indent=2, sort_keys=True))
     return 0
@@ -71,6 +99,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
     state = _load_gui_state()
     qjackctl_override = _qjackctl_cpu_cores_override(state)
+    pipewire_quantum = _pipewire_quantum_override(state)
+    pipewire_sample_rate = _pipewire_sample_rate_override(state)
 
     items = []
     for kid in args.knob:
@@ -86,6 +116,26 @@ def cmd_preview(args: argparse.Namespace) -> int:
         ):
             new_params = dict(k.impl.params)
             new_params["cpu_cores"] = qjackctl_override
+            k = replace(k, impl=replace(k.impl, params=new_params))
+
+        if (
+            pipewire_quantum is not None
+            and k.id == "pipewire_quantum"
+            and k.impl is not None
+            and k.impl.kind == "pipewire_conf"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["quantum"] = pipewire_quantum
+            k = replace(k, impl=replace(k.impl, params=new_params))
+
+        if (
+            pipewire_sample_rate is not None
+            and k.id == "pipewire_sample_rate"
+            and k.impl is not None
+            and k.impl.kind == "pipewire_conf"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["rate"] = pipewire_sample_rate
             k = replace(k, impl=replace(k.impl, params=new_params))
 
         items.append(preview(k, action=args.action))
@@ -127,6 +177,8 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
 
     state = _load_gui_state()
     qjackctl_override = _qjackctl_cpu_cores_override(state)
+    pipewire_quantum = _pipewire_quantum_override(state)
+    pipewire_sample_rate = _pipewire_sample_rate_override(state)
 
     backups: list[dict] = []
     effects: list[dict] = []
@@ -147,8 +199,6 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         params = k.impl.params
 
         if kind == "qjackctl_server_prefix":
-            from pathlib import Path
-
             path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
             path = Path(path_str).expanduser()
             backups.append(backup_file(tx, str(path)))
@@ -166,14 +216,16 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             )
 
         elif kind == "pipewire_conf":
+            import subprocess
+
             path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
             path = Path(path_str).expanduser()
             backups.append(backup_file(tx, str(path)))
             
             # Build config content
             lines = ["# audioknob-gui PipeWire configuration"]
-            quantum = params.get("quantum")
-            rate = params.get("rate")
+            quantum = pipewire_quantum if (kid == "pipewire_quantum" and pipewire_quantum is not None) else params.get("quantum")
+            rate = pipewire_sample_rate if (kid == "pipewire_sample_rate" and pipewire_sample_rate is not None) else params.get("rate")
             
             if quantum or rate:
                 lines.append("context.properties = {")
@@ -187,6 +239,25 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             content = "\n".join(lines) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
+
+            # Apply immediately: restart PipeWire user services (best-effort).
+            # Avoid failing the whole knob if restart is unsupported on the system.
+            try:
+                r = subprocess.run(
+                    ["systemctl", "--user", "restart", "pipewire.service", "pipewire-pulse.service"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                effects.append(
+                    {
+                        "kind": "pipewire_restart",
+                        "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
+                    }
+                )
+            except Exception as e:
+                effects.append({"kind": "pipewire_restart", "error": str(e)})
 
         elif kind == "user_service_mask":
             import subprocess
@@ -726,9 +797,41 @@ def cmd_list_changes(_: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     """Check current status of all knobs."""
     reg = load_registry(args.registry)
+
+    # Apply per-user overrides so status reflects GUI-configured values.
+    state = _load_gui_state()
+    qjackctl_override = _qjackctl_cpu_cores_override(state)
+    pipewire_quantum = _pipewire_quantum_override(state)
+    pipewire_sample_rate = _pipewire_sample_rate_override(state)
     
     statuses = []
     for k in reg:
+        if (
+            qjackctl_override is not None
+            and k.impl is not None
+            and k.impl.kind == "qjackctl_server_prefix"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["cpu_cores"] = qjackctl_override
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if (
+            pipewire_quantum is not None
+            and k.id == "pipewire_quantum"
+            and k.impl is not None
+            and k.impl.kind == "pipewire_conf"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["quantum"] = pipewire_quantum
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if (
+            pipewire_sample_rate is not None
+            and k.id == "pipewire_sample_rate"
+            and k.impl is not None
+            and k.impl.kind == "pipewire_conf"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["rate"] = pipewire_sample_rate
+            k = replace(k, impl=replace(k.impl, params=new_params))
         status = check_knob_status(k)
         statuses.append({
             "knob_id": k.id,

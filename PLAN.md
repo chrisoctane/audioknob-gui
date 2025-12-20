@@ -13,6 +13,14 @@ python3 -m pip install -e .
 bin/audioknob-gui
 ```
 
+### Set up pre-commit hooks (recommended for contributors)
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
+This runs `scripts/check_repo_consistency.py` before each commit to catch registry drift and doc omissions.
+
 ### Run the worker CLI directly (debugging)
 
 ```bash
@@ -164,6 +172,8 @@ if k.id == "qjackctl_server_prefix_rt":
     config_btn.clicked.connect(lambda: self.on_configure_knob(k.id))
     layout.addWidget(config_btn)
 ```
+
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the ℹ info popup (saved to `state.json`). Applying either PipeWire knob restarts PipeWire services automatically.
 
 ---
 

@@ -1,0 +1,23 @@
+# See https://pre-commit.com for more information
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  - repo: local
+    hooks:
+      - id: check-repo-consistency
+        name: Check repo consistency (registry sync, docs, compile)
+        entry: python3 scripts/check_repo_consistency.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+        files: '\.json$'

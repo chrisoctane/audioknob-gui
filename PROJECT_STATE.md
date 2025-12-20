@@ -385,7 +385,9 @@ else:
   "last_user_txid": "abc123",
   "last_root_txid": "def456",
   "font_size": 11,
-  "qjackctl_cpu_cores": [2, 3]
+  "qjackctl_cpu_cores": [2, 3],
+  "pipewire_quantum": 256,
+  "pipewire_sample_rate": 48000
 }
 ```
 
@@ -398,6 +400,16 @@ else:
 - CPU core selection is a GUI-level preference
 - Applied via override when worker runs
 - Not stored in registry (that's static)
+
+**Why store pipewire_quantum?**
+- Buffer size selection is a GUI-level preference (32/64/128/256/512/1024)
+- Applied via override in the worker for the `pipewire_quantum` knob
+- Not stored in registry (registry is canonical defaults; state captures per-user choices)
+
+**Why store pipewire_sample_rate?**
+- Sample rate selection is a GUI-level preference (44100/48000/88200/96000/192000)
+- Applied via override in the worker for the `pipewire_sample_rate` knob
+- Applying either PipeWire knob restarts PipeWire services automatically (best-effort)
 
 ### Status Refresh Flow
 

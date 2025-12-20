@@ -282,7 +282,7 @@
     {
       "id": "pipewire_quantum",
       "title": "PipeWire quantum (buffer)",
-      "description": "Configures PipeWire buffer size (quantum) to 256 samples. Lower = less latency, more CPU. Restart PipeWire after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob.conf",
+      "description": "Configures PipeWire buffer size (quantum). Lower = less latency, more CPU. PipeWire will be restarted automatically after applying (best-effort). File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
       "category": "stack",
       "risk_level": "low",
       "requires_root": false,
@@ -301,7 +301,7 @@
     {
       "id": "pipewire_sample_rate",
       "title": "PipeWire sample rate",
-      "description": "Configures PipeWire default sample rate to 48000 Hz. Restart PipeWire after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
+      "description": "Configures PipeWire default sample rate. PipeWire will be restarted automatically after applying (best-effort). File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
       "category": "stack",
       "risk_level": "low",
       "requires_root": false,

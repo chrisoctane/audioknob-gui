@@ -121,6 +121,8 @@ def load_state() -> dict:
         "font_size": 11,
         # Per-knob UI state
         "qjackctl_cpu_cores": None,  # list[int] or None
+        "pipewire_quantum": None,  # int (32..1024) or None
+        "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
     }
     if not p.exists():
         return default
@@ -134,6 +136,10 @@ def load_state() -> dict:
             data["font_size"] = 11
         if "qjackctl_cpu_cores" not in data:
             data["qjackctl_cpu_cores"] = None
+        if "pipewire_quantum" not in data:
+            data["pipewire_quantum"] = None
+        if "pipewire_sample_rate" not in data:
+            data["pipewire_sample_rate"] = None
         return data
     except Exception:
         return default
@@ -149,6 +155,7 @@ def main() -> int:
         from PySide6.QtWidgets import (
             QApplication,
             QCheckBox,
+            QComboBox,
             QDialog,
             QDialogButtonBox,
             QGridLayout,
@@ -470,6 +477,91 @@ def main() -> int:
                     btn = QPushButton("Scan")
                     btn.clicked.connect(self.on_check_blockers)
                     self.table.setCellWidget(r, 4, btn)
+                elif k.id == "pipewire_quantum" and not locked:
+                    # Visible control: pick quantum and Apply/Reset in-row.
+                    wrap = QWidget()
+                    row = QHBoxLayout(wrap)
+                    row.setContentsMargins(0, 0, 0, 0)
+
+                    combo = QComboBox()
+                    values = [32, 64, 128, 256, 512, 1024]
+                    for v in values:
+                        combo.addItem(str(v), v)
+
+                    current = self._pipewire_quantum_from_state()
+                    if current is None and k.impl:
+                        try:
+                            current = int(k.impl.params.get("quantum")) if k.impl.params.get("quantum") is not None else None
+                        except Exception:
+                            current = None
+                    # Block signals during init to prevent triggering change handler
+                    combo.blockSignals(True)
+                    if current in values:
+                        combo.setCurrentIndex(values.index(int(current)))
+                    combo.blockSignals(False)
+
+                    def _on_change(_: int) -> None:
+                        self.state["pipewire_quantum"] = int(combo.currentData())
+                        save_state(self.state)
+                        # Status depends on expected quantum; refresh so UI reflects new expectation immediately.
+                        self._refresh_statuses()
+                        self._populate()
+
+                    combo.currentIndexChanged.connect(_on_change)
+                    row.addWidget(combo)
+
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status == "applied":
+                        btn = QPushButton("Reset")
+                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                    else:
+                        btn = QPushButton("Apply")
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    row.addWidget(btn)
+
+                    self.table.setCellWidget(r, 4, wrap)
+                elif k.id == "pipewire_sample_rate" and not locked:
+                    # Visible control: pick sample rate and Apply/Reset in-row.
+                    wrap = QWidget()
+                    row = QHBoxLayout(wrap)
+                    row.setContentsMargins(0, 0, 0, 0)
+
+                    combo = QComboBox()
+                    values = [44100, 48000, 88200, 96000, 192000]
+                    for v in values:
+                        combo.addItem(f"{v} Hz", v)
+
+                    current = self._pipewire_sample_rate_from_state()
+                    if current is None and k.impl:
+                        try:
+                            current = int(k.impl.params.get("rate")) if k.impl.params.get("rate") is not None else None
+                        except Exception:
+                            current = None
+                    # Block signals during init to prevent triggering change handler
+                    combo.blockSignals(True)
+                    if current in values:
+                        combo.setCurrentIndex(values.index(int(current)))
+                    combo.blockSignals(False)
+
+                    def _on_rate_change(_: int) -> None:
+                        self.state["pipewire_sample_rate"] = int(combo.currentData())
+                        save_state(self.state)
+                        self._refresh_statuses()
+                        self._populate()
+
+                    combo.currentIndexChanged.connect(_on_rate_change)
+                    row.addWidget(combo)
+
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status == "applied":
+                        btn = QPushButton("Reset")
+                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                    else:
+                        btn = QPushButton("Apply")
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    row.addWidget(btn)
+
+                    self.table.setCellWidget(r, 4, wrap)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
                     btn = QPushButton("—")
@@ -516,29 +608,132 @@ def main() -> int:
                 return [int(x) for x in raw]
             return None
 
+        def _pipewire_quantum_from_state(self) -> int | None:
+            raw = self.state.get("pipewire_quantum")
+            if raw is None:
+                return None
+            try:
+                v = int(raw)
+            except Exception:
+                return None
+            if v in (32, 64, 128, 256, 512, 1024):
+                return v
+            return None
+
+        def _pipewire_sample_rate_from_state(self) -> int | None:
+            raw = self.state.get("pipewire_sample_rate")
+            if raw is None:
+                return None
+            try:
+                v = int(raw)
+            except Exception:
+                return None
+            if v in (44100, 48000, 88200, 96000, 192000):
+                return v
+            return None
+
         def on_configure_knob(self, knob_id: str) -> None:
-            if knob_id != "qjackctl_server_prefix_rt":
+            if knob_id == "qjackctl_server_prefix_rt":
+                from audioknob_gui.platform.detect import get_cpu_count
+
+                cpu_count = get_cpu_count()
+                selected = set(self._qjackctl_cpu_cores_from_state() or [])
+                d = CpuCoreDialog(cpu_count=cpu_count, selected=selected, parent=self)
+                if d.exec() != QDialog.Accepted:
+                    return
+
+                chosen = d.selected_cores()
+                # Empty selection means "no pinning" (remove taskset prefix).
+                # None (unset) means "don't override existing pinning".
+                self.state["qjackctl_cpu_cores"] = chosen
+                save_state(self.state)
+                QMessageBox.information(
+                    self,
+                    "Saved",
+                    "Saved CPU core selection for QjackCtl."
+                    + (f" Cores: {','.join(map(str, chosen))}" if chosen else " (no pinning)"),
+                )
                 return
 
-            from audioknob_gui.platform.detect import get_cpu_count
+            if knob_id == "pipewire_quantum":
+                from PySide6.QtWidgets import QComboBox
 
-            cpu_count = get_cpu_count()
-            selected = set(self._qjackctl_cpu_cores_from_state() or [])
-            d = CpuCoreDialog(cpu_count=cpu_count, selected=selected, parent=self)
-            if d.exec() != QDialog.Accepted:
+                class PipeWireQuantumDialog(QDialog):
+                    def __init__(self, current: int | None, parent: QWidget | None = None) -> None:
+                        super().__init__(parent)
+                        self.setWindowTitle("Configure PipeWire buffer (quantum)")
+                        self.resize(420, 160)
+
+                        root = QVBoxLayout(self)
+                        root.addWidget(QLabel("Select PipeWire buffer size (quantum)."))
+                        root.addWidget(QLabel("Recommended: 128 or 256. Smaller can underrun; larger adds latency."))
+
+                        self.combo = QComboBox()
+                        self._values = [32, 64, 128, 256, 512, 1024]
+                        for v in self._values:
+                            self.combo.addItem(str(v), v)
+                        if current in self._values:
+                            self.combo.setCurrentIndex(self._values.index(current))
+                        root.addWidget(self.combo)
+
+                        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+                        btns.accepted.connect(self.accept)
+                        btns.rejected.connect(self.reject)
+                        root.addWidget(btns)
+
+                    def selected_value(self) -> int:
+                        return int(self.combo.currentData())
+
+                current = self._pipewire_quantum_from_state() or 256
+                d = PipeWireQuantumDialog(current=current, parent=self)
+                if d.exec() != QDialog.Accepted:
+                    return
+                chosen = d.selected_value()
+                self.state["pipewire_quantum"] = chosen
+                save_state(self.state)
+                QMessageBox.information(self, "Saved", f"Saved PipeWire quantum = {chosen}. Apply the PipeWire knob to take effect.")
                 return
 
-            chosen = d.selected_cores()
-            # Empty selection means "no pinning" (remove taskset prefix).
-            # None (unset) means "don't override existing pinning".
-            self.state["qjackctl_cpu_cores"] = chosen
-            save_state(self.state)
-            QMessageBox.information(
-                self,
-                "Saved",
-                "Saved CPU core selection for QjackCtl."
-                + (f" Cores: {','.join(map(str, chosen))}" if chosen else " (no pinning)"),
-            )
+            if knob_id == "pipewire_sample_rate":
+                from PySide6.QtWidgets import QComboBox
+
+                class PipeWireSampleRateDialog(QDialog):
+                    def __init__(self, current: int | None, parent: QWidget | None = None) -> None:
+                        super().__init__(parent)
+                        self.setWindowTitle("Configure PipeWire sample rate")
+                        self.resize(420, 160)
+
+                        root = QVBoxLayout(self)
+                        root.addWidget(QLabel("Select PipeWire default sample rate."))
+                        root.addWidget(QLabel("Common: 48000 Hz. Higher rates for high-res audio."))
+
+                        self.combo = QComboBox()
+                        self._values = [44100, 48000, 88200, 96000, 192000]
+                        for v in self._values:
+                            self.combo.addItem(f"{v} Hz", v)
+                        if current in self._values:
+                            self.combo.setCurrentIndex(self._values.index(current))
+                        root.addWidget(self.combo)
+
+                        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+                        btns.accepted.connect(self.accept)
+                        btns.rejected.connect(self.reject)
+                        root.addWidget(btns)
+
+                    def selected_value(self) -> int:
+                        return int(self.combo.currentData())
+
+                current = self._pipewire_sample_rate_from_state() or 48000
+                d = PipeWireSampleRateDialog(current=current, parent=self)
+                if d.exec() != QDialog.Accepted:
+                    return
+                chosen = d.selected_value()
+                self.state["pipewire_sample_rate"] = chosen
+                save_state(self.state)
+                QMessageBox.information(self, "Saved", f"Saved PipeWire sample rate = {chosen} Hz. Apply the PipeWire knob to take effect.")
+                return
+
+            return
 
         def on_tests(self) -> None:
             headline, detail = jitter_test_summary(duration_s=5)
@@ -615,7 +810,18 @@ def main() -> int:
             impl_info = "Not implemented yet"
             if k.impl:
                 impl_info = f"<b>Kind:</b> {k.impl.kind}<br/>"
-                for key, val in k.impl.params.items():
+                # For configurable knobs, show current configured values rather than registry defaults.
+                params = dict(k.impl.params)
+                if k.id == "pipewire_quantum":
+                    q = self._pipewire_quantum_from_state()
+                    if q is not None:
+                        params["quantum"] = q
+                if k.id == "pipewire_sample_rate":
+                    r = self._pipewire_sample_rate_from_state()
+                    if r is not None:
+                        params["rate"] = r
+
+                for key, val in params.items():
                     if isinstance(val, list):
                         impl_info += f"<b>{key}:</b><br/>"
                         for item in val:
@@ -653,6 +859,14 @@ def main() -> int:
             # Add config button for knobs that support it
             if k.id == "qjackctl_server_prefix_rt":
                 config_btn = QPushButton("Configure CPU Cores...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
+            if k.id == "pipewire_quantum":
+                config_btn = QPushButton("Configure Buffer Size...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
+            if k.id == "pipewire_sample_rate":
+                config_btn = QPushButton("Configure Sample Rate...")
                 config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
                 layout.addWidget(config_btn)
 
