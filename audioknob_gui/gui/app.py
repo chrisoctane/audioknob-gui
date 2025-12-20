@@ -154,6 +154,7 @@ def main() -> int:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
             QApplication,
+            QAbstractItemView,
             QCheckBox,
             QComboBox,
             QDialog,
@@ -165,6 +166,7 @@ def main() -> int:
             QMainWindow,
             QMessageBox,
             QPushButton,
+            QSizePolicy,
             QSlider,
             QSpinBox,
             QTableWidget,
@@ -306,16 +308,25 @@ def main() -> int:
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(True)
             self.table.setAlternatingRowColors(True)
+            self.table.setWordWrap(False)
+            self.table.setTextElideMode(Qt.ElideRight)
+            self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+            self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
             self.table.verticalHeader().setVisible(False)
             header = self.table.horizontalHeader()
+            header.setMinimumSectionSize(60)
             header.setSectionResizeMode(0, QHeaderView.Fixed)            # Info
             header.setSectionResizeMode(1, QHeaderView.Stretch)          # Knob
             header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Status
             header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Category
             header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Risk
-            header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Action
-            header.setSectionResizeMode(6, QHeaderView.ResizeToContents) # Config
+            # NOTE: ResizeToContents does NOT reliably account for cell widgets (buttons/combos),
+            # which causes text clipping like "Apply" -> "Annlv". Use Interactive + defaults.
+            header.setSectionResizeMode(5, QHeaderView.Interactive)      # Action (button)
+            header.setSectionResizeMode(6, QHeaderView.Interactive)      # Config (combo)
             self.table.setColumnWidth(0, 32)
+            self.table.setColumnWidth(5, 96)   # fits "Apply"/"Reset"
+            self.table.setColumnWidth(6, 140)  # fits "48000 Hz"
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
@@ -384,15 +395,25 @@ def main() -> int:
 
         def _make_apply_button(self, text: str = "Apply") -> QPushButton:
             """Create an Apply button."""
-            return QPushButton(text)
+            btn = QPushButton(text)
+            # Ensure button labels don't clip at common font sizes and narrow columns.
+            btn.setMinimumWidth(80)
+            btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            return btn
 
         def _make_reset_button(self, text: str = "Reset") -> QPushButton:
             """Create a Reset button."""
-            return QPushButton(text)
+            btn = QPushButton(text)
+            btn.setMinimumWidth(80)
+            btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            return btn
 
         def _make_action_button(self, text: str) -> QPushButton:
             """Create an action button."""
-            return QPushButton(text)
+            btn = QPushButton(text)
+            btn.setMinimumWidth(80)
+            btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            return btn
 
         def _status_display(self, status: str) -> tuple[str, str]:
             """Return (display_text, color) for a status."""
@@ -602,12 +623,22 @@ def main() -> int:
             
             # Re-enable sorting after population
             self.table.setSortingEnabled(True)
+            # Reflow row heights so text/widgets don't clip when font size changes.
+            try:
+                self.table.resizeRowsToContents()
+            except Exception:
+                pass
 
         def _apply_font_size(self, size: int) -> None:
             """Apply font size to the application."""
             font = QApplication.instance().font()
             font.setPointSize(size)
             QApplication.instance().setFont(font)
+            # Reflow rows so widgets/text don't clip at larger font sizes.
+            try:
+                self.table.resizeRowsToContents()
+            except Exception:
+                pass
 
         def _apply_stylesheet(self) -> None:
             """Apply clean dark theme."""
