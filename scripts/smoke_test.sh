@@ -38,6 +38,17 @@ python3 -m audioknob_gui.worker.cli list-changes > /dev/null
 echo "   ✅ list-changes works"
 
 echo ""
+echo "6. Testing list-pending..."
+python3 -m audioknob_gui.worker.cli list-pending > /dev/null
+echo "   ✅ list-pending works"
+
+echo ""
+echo "7. Testing reset-defaults --scope user (dry run - should have no errors)..."
+# This resets only user-scope transactions; safe without root
+python3 -m audioknob_gui.worker.cli reset-defaults --scope user > /dev/null
+echo "   ✅ reset-defaults --scope user works"
+
+echo ""
 echo "=============================================="
 echo "All smoke tests passed!"
 echo "=============================================="

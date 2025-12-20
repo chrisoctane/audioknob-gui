@@ -606,9 +606,11 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
     - User files: restore from our backup
     
     Use --scope to filter:
-    - 'user': only user-scope transactions (no root needed)
-    - 'root': only root-scope transactions (needs pkexec)
-    - 'all': both (default, but will error on root txs if not root)
+    - 'user': only user-scope transactions (no root needed); silently skips root txs
+    - 'root': only root-scope transactions (needs pkexec); errors if not root
+    - 'all': both (default); silently skips root txs if not root (for GUI two-phase use)
+    
+    The GUI uses two-phase reset: first --scope user, then pkexec --scope root.
     """
     paths = default_paths()
     results: list[dict] = []
@@ -733,12 +735,28 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                     "message": f"Restored {user_effects_restored} user effect(s)",
                 })
     
-    # Check if there are pending root transactions (for informing GUI)
+    # Check if there are pending root changes (for informing GUI)
+    # Use list-pending semantics: only count files that still exist + restorable effects
     needs_root_reset = False
     if scope_filter == "user":
-        # Check if there are root transactions that still need resetting
         root_txs = list_transactions(paths.var_lib_dir)
-        needs_root_reset = bool(root_txs)
+        for tx_info in root_txs:
+            # Check for pending files
+            for meta in tx_info.get("backups", []):
+                file_path = meta.get("path", "")
+                if file_path and Path(file_path).exists():
+                    needs_root_reset = True
+                    break
+            if needs_root_reset:
+                break
+            # Check for restorable effects (sysfs, systemd - not pipewire_restart)
+            for effect in tx_info.get("effects", []):
+                kind = effect.get("kind", "")
+                if kind in ("sysfs_write", "systemd_unit_toggle"):
+                    needs_root_reset = True
+                    break
+            if needs_root_reset:
+                break
     
     print(json.dumps({
         "schema": 1,
@@ -866,10 +884,9 @@ def cmd_list_pending(_: argparse.Namespace) -> int:
             else:
                 has_user_files = True
         
-        # For effects, deduplicate by path - only keep the oldest (original "before" state)
-        # sysfs_write: can always be undone if we have the "before" value
-        # systemd_unit_toggle: can be undone
-        # user_service_mask: can be undone
+        # For effects, deduplicate by kind+path. Transactions are newest-first.
+        # We keep the OLDEST entry (original "before" state) to restore to true baseline.
+        # So we DON'T skip duplicates here; we let later (older) entries overwrite.
         for effect in tx_info.get("effects", []):
             kind = effect.get("kind", "")
             # Skip pipewire_restart - those are just notifications, not reversible
@@ -880,18 +897,23 @@ def cmd_list_pending(_: argparse.Namespace) -> int:
             effect_path = effect.get("path", "")
             effect_key = f"{kind}:{effect_path}"
             
-            # Check if we already have this effect (from a newer transaction)
-            already_tracked = any(
-                e.get("kind") == kind and e.get("path") == effect_path
-                for e in pending_effects
+            # Find if we already have this effect (from a newer transaction)
+            # We want the OLDEST entry (original before state), so replace if found
+            existing_idx = next(
+                (i for i, e in enumerate(pending_effects)
+                 if e.get("kind") == kind and e.get("path") == effect_path),
+                None
             )
-            if already_tracked:
-                continue
             
             effect_copy = dict(effect)
             effect_copy["scope"] = scope
             effect_copy["txid"] = tx_info["txid"]
-            pending_effects.append(effect_copy)
+            
+            if existing_idx is not None:
+                # Replace with older (current) entry to get original before state
+                pending_effects[existing_idx] = effect_copy
+            else:
+                pending_effects.append(effect_copy)
             
             if scope == "root":
                 has_root_effects = True
