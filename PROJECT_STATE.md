@@ -6,10 +6,10 @@
 
 ---
 
-## Current Status (2025-06-20)
+## Current Status (2025-12-20)
 
 ### What Works
-- **22 knobs defined** (10 implemented, 12 placeholders)
+- **22 knobs defined** (ALL 22 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to apply or undo
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
@@ -19,6 +19,9 @@
 - **Transaction system** - backups + smart restore
 - **Undo** - restores last transaction
 - **Reset All** - reverts all changes to system defaults
+- **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
+- **PipeWire configuration** - quantum and sample rate knobs
+- **User service masking** - disable GNOME Tracker, KDE Baloo
 
 ### GUI Layout
 ```
@@ -27,11 +30,43 @@ Columns: Knob | Status | Category | Risk | Action | ℹ
 ```
 
 ### Next Steps
-1. Implement placeholder knobs (see PLAN.md for list)
-2. Add kernel cmdline editing for openSUSE TW
-3. Add PipeWire configuration knobs
+1. Test all knobs on real system
+2. Add more PipeWire configuration options (via info popup config dialog)
+3. Package for distribution
 
 ---
+
+## Operator Contract (anti-drift, for AI agents)
+
+This is the enforcement layer. Any agent making changes MUST satisfy this contract before declaring work “done”.
+
+### Source of Truth Map (when things disagree)
+
+1. **Code is truth for behavior**: `audioknob_gui/**` runtime behavior wins over prose.
+2. **Registry canonical**: `config/registry.json` + `config/registry.schema.json` are canonical; packaged copies must be synced.
+3. **Installed-mode truth**: if behavior differs between repo-run and installed package, prefer installed-mode and fix dev-mode to match.
+4. **Docs are constraints**: `PLAN.md` defines UX/process constraints; agents must not introduce new flows without updating docs.
+
+### Definition of Done (must be true before finishing)
+
+- **Behavioral change?** Update the relevant sections in this file (and add a “Bugs Fixed (Prevent Regression)” entry if applicable).
+- **User workflow changed?** Update `PLAN.md`.
+- **Touched registry/schema?**
+  - Update canonical: `config/registry.json`, `config/registry.schema.json`
+  - Sync packaged: `audioknob_gui/data/registry.json`, `audioknob_gui/data/registry.schema.json`
+- **New env var / path / entrypoint?** Document it here with exact name and semantics.
+- **New knob kind?** Implement all three:
+  - preview (`worker/ops.py`)
+  - apply (`worker/cli.py`)
+  - status (`worker/ops.py`)
+- **Safety bar**: if status can’t be proven, report `"unknown"` / conservative state.
+
+### Scope / Non-goals (hard boundaries)
+
+- No background daemons or scheduled auto-tuning
+- No silent system modifications (must be user-initiated and visible in UI)
+- No batch “apply all” UX without an explicit design update in docs
+- No network/cloud features
 
 ## 1. Project Vision & Principles
 
@@ -70,9 +105,10 @@ A single GUI that:
 ```
 audioknob-gui/
 ├── bin/audioknob-gui              # Entry point (bash script)
-├── config/registry.json           # Knob definitions (declarative)
+├── config/registry.json           # Knob definitions (canonical source)
 ├── packaging/                     # Deployment files
 ├── audioknob_gui/
+│   ├── data/registry.json         # Packaged copy (synced from config/)
 │   ├── gui/app.py                 # UI layer (PySide6)
 │   ├── worker/                    # Business logic (can run as root)
 │   ├── core/                      # Shared utilities
@@ -103,7 +139,7 @@ audioknob-gui/
    - User sees polkit password prompt
    - Worker runs as root
 4. If not requires_root:
-   - GUI calls: python -m audioknob_gui.worker.cli apply-user <knob_id>
+   - GUI calls: `sys.executable -m audioknob_gui.worker.cli apply-user <knob_id>`
    - Worker runs as current user
 5. Worker:
    a. Creates new transaction directory with timestamp-based ID
@@ -128,7 +164,7 @@ audioknob-gui/
    c. Based on reset_strategy:
       - "delete": Remove the file we created
       - "backup": Copy backup file back to original location
-      - "package": Call rpm --restore or apt reinstall
+      - "package": Restore via package manager (best-effort; see notes below)
    d. For effects (sysfs, systemd): restore previous state
 4. GUI refreshes status display
 ```
@@ -147,10 +183,13 @@ audioknob-gui/
 - Worker is installed to /usr/local/libexec/ (not in user's PATH)
 - Polkit policy explicitly allows this specific binary
 
-**Development workaround:**
-- Worker has hardcoded `/home/chris/audioknob-gui` path added to sys.path
-- This is a development convenience, MUST be removed for packaging
-- Production: package should install into system Python or bundle dependencies
+**Development vs Production:**
+- Development: set `AUDIOKNOB_DEV_REPO=/path/to/repo` environment variable
+  - Worker launcher adds this to `sys.path` if set
+  - Registry is loaded from repo's `config/` or `audioknob_gui/data/`
+- Production: install package system-wide (`pip install .`)
+  - Registry is loaded via `importlib.resources` from package data
+  - No environment variables needed
 
 ---
 
@@ -280,7 +319,7 @@ else:
 | `id` | string | Unique identifier, used in code and transactions |
 | `title` | string | Human-readable name shown in GUI |
 | `description` | string | Shown in info popup (ℹ button) |
-| `category` | enum | Grouping: permissions, cpu, irq, vm, kernel, stack, services, power, testing |
+| `category` | enum | Grouping: permissions, cpu, irq, vm, kernel, stack, services, power, testing, device |
 | `risk_level` | enum | low/medium/high - shown in Risk column |
 | `requires_root` | bool | If true, apply uses pkexec |
 | `requires_reboot` | bool | If true, show warning (not enforced) |
@@ -291,6 +330,8 @@ else:
 | `capabilities.restore` | bool | Can we restore to original? |
 | `impl.kind` | string | Which implementation handler to use |
 | `impl.params` | object | Parameters passed to handler |
+
+**Note:** `impl` may be `null` for placeholder knobs (schema allows null).
 
 ### Dependency System
 
@@ -308,6 +349,8 @@ else:
   PACKAGE_MAPPINGS = {
       "cyclictest": {"rpm": "rt-tests", "dpkg": "rt-tests", "pacman": "rt-tests"},
       "rtirq": {"rpm": "rtirq", "dpkg": "rtirq-init", "pacman": "rtirq"},
+      "cpupower": {"rpm": "cpupower", "dpkg": "linux-cpupower", "pacman": "cpupower"},
+      "balooctl": {"rpm": "baloo-tools5", "dpkg": "baloo-kf5", "pacman": "baloo"},
   }
   ```
 
@@ -320,6 +363,12 @@ else:
 | `sysfs_glob_kv` | Writes value to /sys paths matching glob | Read current values |
 | `systemd_unit_toggle` | Enable/disable a systemd unit | Check is-enabled |
 | `qjackctl_server_prefix` | Modify QjackCtl Server command | Parse config, check -R flag |
+| `udev_rule` | Create a udev rule file | Check if file exists with content |
+| `kernel_cmdline` | Add parameter to kernel cmdline (distro-aware) | Check /proc/cmdline |
+| `pipewire_conf` | Create PipeWire user config | Check if config file has settings |
+| `user_service_mask` | Mask user systemd services | Check if services are masked |
+| `baloo_disable` | Disable KDE Baloo indexer | Check balooctl status |
+| `group_membership` | Add user to groups | Check user's groups |
 | `read_only` | No changes, just info/test | Returns "read_only" status |
 
 ---
@@ -430,6 +479,13 @@ def _on_apply_knob(self, knob_id):
 | Cyclictest returned null | `-h400` flag outputs histogram, not summary | Removed histogram flag |
 | UI not updating after reset | Missing refresh calls | Added `_refresh_statuses()` + `_populate()` after every action |
 | Unused QFont import | Copy-paste error | Removed |
+| Reset-defaults ignored sysfs/systemd effects | `list_transactions()` didn't include effects | Added effects to transaction summaries, fixed GUI logic |
+| Hardcoded dev repo path in worker | Path `/home/chris/...` hardcoded | Use `AUDIOKNOB_DEV_REPO` env var |
+| Registry not found when installed | Computed path from `__file__` doesn't work in site-packages | Use `importlib.resources` with package data |
+| `python` not found | Some systems only have `python3` | Changed wrapper scripts to use `python3` |
+| kernel_cmdline false positives | `param in cmdline` matches substrings | Split cmdline by spaces, check exact tokens |
+| systemd state misreported | Only checked `enabled`/`disabled` | Handle `masked`, `static`, `indirect`, etc. |
+| os.getlogin() fails in GUI | No tty in GUI contexts | Use `getpass.getuser()` instead |
 
 ### What We Tried That Didn't Work
 
@@ -725,7 +781,7 @@ sudo rpm --restore <package-name>
 rpm -qf /path/to/file
 ```
 
-**VERIFIED:** `rpm --restore` works for resetting package-owned config files.
+**NOTE:** `rpm --restore` primarily restores file attributes; verify config contents for packages using `%config(noreplace)`.
 
 #### System Files & Permissions
 
@@ -1096,13 +1152,13 @@ ls -la ~/.local/state/audioknob-gui/transactions/
 sudo install -D -m 0755 ~/audioknob-gui/packaging/audioknob-gui-worker /usr/local/libexec/audioknob-gui-worker
 
 # Check knob status (CLI)
-python -m audioknob_gui.worker.cli status
+python3 -m audioknob_gui.worker.cli status
 
 # Preview a knob
-python -m audioknob_gui.worker.cli preview rt_limits_audio_group
+python3 -m audioknob_gui.worker.cli preview rt_limits_audio_group
 
 # List all changes
-python -m audioknob_gui.worker.cli list-changes
+python3 -m audioknob_gui.worker.cli list-changes
 
 # Apply root knob (via pkexec)
 pkexec /usr/local/libexec/audioknob-gui-worker apply rt_limits_audio_group
@@ -1115,10 +1171,37 @@ pkexec /usr/local/libexec/audioknob-gui-worker restore-knob rt_limits_audio_grou
 
 | File | Purpose |
 |------|---------|
-| `config/registry.json` | Knob definitions |
+| `config/registry.json` | Knob definitions (**canonical source**) |
+| `audioknob_gui/data/registry.json` | Packaged copy (synced from `config/`) |
 | `audioknob_gui/gui/app.py` | Main GUI |
 | `audioknob_gui/worker/cli.py` | Worker CLI |
 | `audioknob_gui/worker/ops.py` | Preview/status logic |
+
+### Canonical Registry Policy
+
+**Source of truth:** `config/registry.json`
+
+The registry exists in two locations:
+1. `config/registry.json` — **canonical**, edit here
+2. `audioknob_gui/data/registry.json` — packaged copy for installed builds
+
+**Sync policy:**
+- After editing `config/registry.json`, run:
+  ```bash
+  cp config/registry.json audioknob_gui/data/registry.json
+  ```
+- Both files MUST be committed together
+- CI/pre-commit should verify they are identical
+
+**Why two copies?**
+- `config/` is at repo root for easy editing/discovery
+- `audioknob_gui/data/` is inside the package for `importlib.resources` to find it when installed via pip
+
+**Resolution order** (in `core/paths.py::get_registry_path()`):
+1. `AUDIOKNOB_REGISTRY` env var (explicit override)
+2. `AUDIOKNOB_DEV_REPO` env var + `config/registry.json`
+3. Package data via `importlib.resources`
+4. Fallback: file-relative path (legacy)
 | `audioknob_gui/core/transaction.py` | Backup/restore |
 | `audioknob_gui/platform/detect.py` | Audio stack detection |
 | `~/.local/state/audioknob-gui/state.json` | GUI state |
@@ -1135,5 +1218,5 @@ pkexec /usr/local/libexec/audioknob-gui-worker restore-knob rt_limits_audio_grou
 
 ---
 
-*Last updated: 2024-12-19*
+*Last updated: 2025-12-20*
 *This document is the technical source of truth. Any AI continuing this project must read and follow it.*

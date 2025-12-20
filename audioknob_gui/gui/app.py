@@ -8,16 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-def _repo_root() -> Path:
-    # app.py is in audioknob_gui/gui/app.py
-    # parents[0] = audioknob_gui/gui/
-    # parents[1] = audioknob_gui/
-    # parents[2] = repo root
-    return Path(__file__).resolve().parents[2]
-
-
 def _registry_path() -> str:
-    return str(_repo_root() / "config" / "registry.json")
+    from audioknob_gui.core.paths import get_registry_path
+    return get_registry_path()
 
 
 def _pkexec_available() -> bool:
@@ -731,7 +724,8 @@ def main() -> int:
                 return
             
             # Run usermod via pkexec for each group
-            user = os.environ.get("USER", os.getlogin())
+            import getpass
+            user = os.environ.get("USER") or getpass.getuser()
             errors = []
             successes = []
             
@@ -969,7 +963,12 @@ def main() -> int:
                 return
 
             file_count = changes.get("count", 0)
-            if file_count == 0:
+            effects_count = changes.get("effects_count", 0)
+            has_root_effects = changes.get("has_root_effects", False)
+            has_user_effects = changes.get("has_user_effects", False)
+            
+            # Check if there's anything to reset (files OR effects)
+            if file_count == 0 and effects_count == 0:
                 QMessageBox.information(
                     self,
                     "Nothing to reset",
@@ -980,7 +979,10 @@ def main() -> int:
 
             # Show summary and confirm
             files = changes.get("files", [])
+            effects = changes.get("effects", [])
             summary_lines = []
+            
+            # List files
             for f in files[:10]:  # Show first 10
                 strategy = f.get("reset_strategy", "backup")
                 pkg = f.get("package", "")
@@ -994,39 +996,62 @@ def main() -> int:
                 summary_lines.append(line)
             if len(files) > 10:
                 summary_lines.append(f"... and {len(files) - 10} more files")
+            
+            # List effects
+            if effects:
+                summary_lines.append("")
+                summary_lines.append("Effects to restore:")
+                effect_kinds = {}
+                for e in effects:
+                    kind = e.get("kind", "unknown")
+                    effect_kinds[kind] = effect_kinds.get(kind, 0) + 1
+                for kind, count in effect_kinds.items():
+                    if kind == "sysfs_write":
+                        summary_lines.append(f"• {count} sysfs value(s)")
+                    elif kind == "systemd_unit_toggle":
+                        summary_lines.append(f"• {count} systemd service(s)")
+                    elif kind == "user_service_mask":
+                        summary_lines.append(f"• {count} user service mask(s)")
+                    elif kind == "baloo_disable":
+                        summary_lines.append(f"• Baloo indexer")
+                    elif kind == "kernel_cmdline":
+                        summary_lines.append(f"• {count} kernel cmdline change(s)")
+                    else:
+                        summary_lines.append(f"• {count} {kind} effect(s)")
 
             confirm_dialog = QDialog(self)
             confirm_dialog.setWindowTitle("Reset to System Defaults")
             confirm_dialog.resize(600, 350)
             layout = QVBoxLayout(confirm_dialog)
-            
+
+            total_changes = file_count + effects_count
             layout.addWidget(QLabel(
-                f"<b>Reset {file_count} file(s) to system defaults?</b><br/><br/>"
+                f"<b>Reset {total_changes} change(s) to system defaults?</b><br/><br/>"
                 "<i>You'll be prompted for your password if root access is needed.</i>"
             ))
-            
+
             text_widget = QTextEdit()
             text_widget.setReadOnly(True)
             text_widget.setPlainText("\n".join(summary_lines))
             layout.addWidget(text_widget)
-            
+
             btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
             layout.addWidget(btns)
-            
+
             confirmed = [False]
-            
+
             def on_ok():
                 confirmed[0] = True
                 confirm_dialog.accept()
-            
+
             btns.accepted.connect(on_ok)
             btns.rejected.connect(confirm_dialog.reject)
-            
+
             confirm_dialog.exec()
             if not confirmed[0]:
                 return
 
-            # Execute reset - first try without root (for user files)
+            # Execute reset - first try without root (for user files and effects)
             results_text = []
             errors = []
 
@@ -1054,9 +1079,15 @@ def main() -> int:
             except Exception as e:
                 errors.append(f"User reset failed: {e}")
 
-            # Check if we need root for remaining files
-            package_files = [f for f in files if f.get("reset_strategy") == "package"]
-            if package_files:
+            # Check if we need root for remaining files OR root effects
+            # Root reset is needed if:
+            # - There are package-owned files to restore
+            # - There are any root-scope files (not just package strategy)
+            # - There are root-scope effects (sysfs, systemd)
+            root_files = [f for f in files if f.get("scope") == "root"]
+            needs_root = bool(root_files) or has_root_effects
+            
+            if needs_root:
                 try:
                     worker = _pick_root_worker_path()
                     argv = [

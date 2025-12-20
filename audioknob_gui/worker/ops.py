@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,123 @@ from typing import Any
 from audioknob_gui.core.diffutil import unified_diff
 from audioknob_gui.core.qjackctl import ensure_server_flags, read_config
 from audioknob_gui.core.runner import run
+
+
+# ============================================================================
+# Distro detection for kernel cmdline handling
+# ============================================================================
+
+@dataclass(frozen=True)
+class DistroInfo:
+    """Detected distribution and boot system info."""
+    distro_id: str  # e.g., "opensuse-tumbleweed", "fedora", "ubuntu"
+    boot_system: str  # "grub2-bls", "grub2", "systemd-boot", "unknown"
+    kernel_cmdline_file: str
+    kernel_cmdline_update_cmd: list[str]
+
+
+def detect_distro() -> DistroInfo:
+    """Detect distribution and boot system configuration."""
+    import shutil
+    
+    # Parse /etc/os-release
+    os_release = {}
+    try:
+        content = Path("/etc/os-release").read_text()
+        for line in content.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                os_release[key] = value.strip('"\'')
+    except Exception:
+        pass
+    
+    distro_id = os_release.get("ID", "unknown")
+    version_id = os_release.get("VERSION_ID", "")
+    
+    # Detect boot system and cmdline location
+    if distro_id == "opensuse-tumbleweed" or (distro_id == "opensuse" and "tumbleweed" in os_release.get("PRETTY_NAME", "").lower()):
+        # openSUSE Tumbleweed uses GRUB2-BLS with sdbootutil
+        if Path("/etc/kernel/cmdline").exists() and shutil.which("sdbootutil"):
+            return DistroInfo(
+                distro_id="opensuse-tumbleweed",
+                boot_system="grub2-bls",
+                kernel_cmdline_file="/etc/kernel/cmdline",
+                kernel_cmdline_update_cmd=["sdbootutil", "update-all-entries"],
+            )
+    
+    if distro_id in ("opensuse-leap", "opensuse"):
+        # openSUSE Leap uses traditional GRUB2
+        return DistroInfo(
+            distro_id="opensuse-leap",
+            boot_system="grub2",
+            kernel_cmdline_file="/etc/default/grub",
+            kernel_cmdline_update_cmd=["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+        )
+    
+    if distro_id == "fedora":
+        return DistroInfo(
+            distro_id="fedora",
+            boot_system="grub2",
+            kernel_cmdline_file="/etc/default/grub",
+            kernel_cmdline_update_cmd=["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+        )
+    
+    if distro_id in ("debian", "ubuntu", "linuxmint", "pop"):
+        return DistroInfo(
+            distro_id=distro_id,
+            boot_system="grub2",
+            kernel_cmdline_file="/etc/default/grub",
+            kernel_cmdline_update_cmd=["update-grub"],
+        )
+    
+    if distro_id == "arch":
+        # Arch can use either GRUB2 or systemd-boot
+        if Path("/boot/loader/loader.conf").exists():
+            return DistroInfo(
+                distro_id="arch",
+                boot_system="systemd-boot",
+                kernel_cmdline_file="/etc/kernel/cmdline",
+                kernel_cmdline_update_cmd=["bootctl", "update"],
+            )
+        return DistroInfo(
+            distro_id="arch",
+            boot_system="grub2",
+            kernel_cmdline_file="/etc/default/grub",
+            kernel_cmdline_update_cmd=["grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
+        )
+    
+    # Fallback: try to detect boot system heuristically
+    if Path("/etc/kernel/cmdline").exists():
+        return DistroInfo(
+            distro_id=distro_id,
+            boot_system="bls",
+            kernel_cmdline_file="/etc/kernel/cmdline",
+            kernel_cmdline_update_cmd=["echo", "Manual bootloader update required"],
+        )
+    
+    if Path("/etc/default/grub").exists():
+        # Guess grub path
+        if Path("/boot/grub2/grub.cfg").exists():
+            return DistroInfo(
+                distro_id=distro_id,
+                boot_system="grub2",
+                kernel_cmdline_file="/etc/default/grub",
+                kernel_cmdline_update_cmd=["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+            )
+        if Path("/boot/grub/grub.cfg").exists():
+            return DistroInfo(
+                distro_id=distro_id,
+                boot_system="grub2",
+                kernel_cmdline_file="/etc/default/grub",
+                kernel_cmdline_update_cmd=["grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
+            )
+    
+    return DistroInfo(
+        distro_id=distro_id,
+        boot_system="unknown",
+        kernel_cmdline_file="",
+        kernel_cmdline_update_cmd=[],
+    )
 
 
 @dataclass(frozen=True)
@@ -81,6 +199,12 @@ def _systemd_unit_preview(params: dict[str, Any]) -> tuple[list[list[str]], list
     action = str(params.get("action", ""))
     if action == "disable_now":
         return [["systemctl", "disable", "--now", unit]], []
+    elif action == "enable_now":
+        return [["systemctl", "enable", "--now", unit]], []
+    elif action == "enable":
+        return [["systemctl", "enable", unit]], []
+    elif action == "disable":
+        return [["systemctl", "disable", unit]], []
     return [], [f"Unsupported systemd action: {action}"]
 
 
@@ -139,6 +263,206 @@ def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
     return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after))]
 
 
+def _udev_rule_preview(params: dict[str, Any]) -> list[FileChange]:
+    """Preview for udev rule creation."""
+    path = str(params["path"])
+    content = str(params["content"])
+    
+    before = _read_text(path)
+    after = content.rstrip("\n") + "\n"
+    
+    action = "create" if not Path(path).exists() else "modify"
+    return [FileChange(path=path, action=action, diff=unified_diff(path, before, after))]
+
+
+def _kernel_cmdline_preview(params: dict[str, Any]) -> tuple[list[FileChange], list[str]]:
+    """Preview for kernel cmdline modification.
+    
+    Returns (file_changes, notes) tuple.
+    """
+    param = str(params.get("param", ""))
+    if not param:
+        return [], ["No kernel parameter specified"]
+    
+    distro = detect_distro()
+    notes: list[str] = []
+    
+    if distro.boot_system == "unknown":
+        notes.append(f"Unknown boot system for {distro.distro_id}; cannot modify kernel cmdline")
+        return [], notes
+    
+    cmdline_file = distro.kernel_cmdline_file
+    if not cmdline_file:
+        notes.append("No kernel cmdline file detected")
+        return [], notes
+    
+    before = _read_text(cmdline_file)
+
+    def _cmdline_tokens_for_file(text: str, boot_system: str) -> list[str]:
+        """Return existing cmdline tokens for presence checks (avoid substring matches)."""
+        if boot_system in ("grub2-bls", "bls", "systemd-boot"):
+            return text.strip().split()
+
+        if boot_system == "grub2":
+            # Extract GRUB_CMDLINE_LINUX_DEFAULT="..."; best-effort parse.
+            for line in text.splitlines():
+                if not line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                    continue
+                _, _, rhs = line.partition("=")
+                rhs = rhs.strip()
+                # Prefer quoted value if present
+                if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                    rhs = rhs[1:-1]
+                try:
+                    return shlex.split(rhs)
+                except Exception:
+                    return rhs.split()
+            return []
+
+        return text.strip().split()
+
+    def _param_present(param: str, tokens: list[str]) -> bool:
+        if not param:
+            return False
+        if "=" in param:
+            return any(t == param for t in tokens)
+        # also treat foo=bar as satisfying "foo" presence
+        return any(t == param or t.startswith(param + "=") for t in tokens)
+    
+    tokens = _cmdline_tokens_for_file(before, distro.boot_system)
+
+    if distro.boot_system == "grub2-bls" or distro.boot_system == "bls":
+        # BLS style: /etc/kernel/cmdline contains the full cmdline
+        if _param_present(param, tokens):
+            notes.append(f"Parameter '{param}' already present in {cmdline_file}")
+            return [], notes
+        
+        # Add param to the end of the line (single line file)
+        after = before.strip() + " " + param + "\n" if before.strip() else param + "\n"
+        
+        notes.append(f"Will run: {' '.join(distro.kernel_cmdline_update_cmd)}")
+        notes.append("Requires reboot to take effect")
+        
+    elif distro.boot_system == "grub2":
+        # GRUB2 style: /etc/default/grub has GRUB_CMDLINE_LINUX_DEFAULT="..."
+        if _param_present(param, tokens):
+            notes.append(f"Parameter '{param}' already present in {cmdline_file}")
+            return [], notes
+        
+        # Find and modify GRUB_CMDLINE_LINUX_DEFAULT line
+        after_lines = before.splitlines() if before else []
+        found = False
+        for i, line in enumerate(after_lines):
+            if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                # Extract current value and add param
+                # Format: GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+                if '="' in line and line.rstrip().endswith('"'):
+                    # Add before the closing quote
+                    after_lines[i] = line.rstrip()[:-1] + " " + param + '"'
+                else:
+                    # Fallback: append to line
+                    after_lines[i] = line.rstrip() + " " + param
+                found = True
+                break
+        
+        if not found:
+            # Add the line if missing
+            after_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{param}"')
+        
+        after = "\n".join(after_lines)
+        if after and not after.endswith("\n"):
+            after += "\n"
+        
+        notes.append(f"Will run: {' '.join(distro.kernel_cmdline_update_cmd)}")
+        notes.append("Requires reboot to take effect")
+    
+    elif distro.boot_system == "systemd-boot":
+        # systemd-boot: similar to BLS
+        if _param_present(param, tokens):
+            notes.append(f"Parameter '{param}' already present in {cmdline_file}")
+            return [], notes
+        
+        after = before.strip() + " " + param + "\n" if before.strip() else param + "\n"
+        notes.append(f"Will run: {' '.join(distro.kernel_cmdline_update_cmd)}")
+        notes.append("Requires reboot to take effect")
+    
+    else:
+        notes.append(f"Unsupported boot system: {distro.boot_system}")
+        return [], notes
+    
+    action = "modify" if Path(cmdline_file).exists() else "create"
+    return [FileChange(path=cmdline_file, action=action, diff=unified_diff(cmdline_file, before, after))], notes
+
+
+def _pipewire_conf_preview(params: dict[str, Any]) -> list[FileChange]:
+    """Preview for PipeWire configuration."""
+    path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
+    path = Path(path_str).expanduser()
+    
+    # Build config content based on params
+    lines = ["# audioknob-gui PipeWire configuration"]
+    
+    quantum = params.get("quantum")
+    rate = params.get("rate")
+    
+    if quantum or rate:
+        lines.append("context.properties = {")
+        if quantum:
+            lines.append(f"    default.clock.quantum = {quantum}")
+            lines.append(f"    default.clock.min-quantum = {quantum}")
+        if rate:
+            lines.append(f"    default.clock.rate = {rate}")
+        lines.append("}")
+    
+    content = "\n".join(lines) + "\n"
+    before = _read_text(str(path))
+    
+    action = "create" if not path.exists() else "modify"
+    return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, content))]
+
+
+def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
+    """Preview for user service masking.
+    
+    Returns (would_run, notes) tuple.
+    """
+    services = params.get("services", [])
+    if isinstance(services, str):
+        services = [services]
+    
+    would_run: list[list[str]] = []
+    notes: list[str] = []
+    
+    for svc in services:
+        would_run.append(["systemctl", "--user", "mask", svc])
+        would_run.append(["systemctl", "--user", "stop", svc])
+    
+    if services:
+        notes.append("This will mask and stop the services for the current user")
+        notes.append("Masking prevents services from starting, even on boot")
+    
+    return would_run, notes
+
+
+def _baloo_disable_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
+    """Preview for Baloo (KDE file indexer) disable.
+    
+    Returns (would_run, notes) tuple.
+    """
+    would_run: list[list[str]] = []
+    notes: list[str] = []
+    
+    # Check if balooctl is available
+    import shutil
+    if shutil.which("balooctl"):
+        would_run.append(["balooctl", "disable"])
+        notes.append("Will disable Baloo file indexer using balooctl")
+    else:
+        notes.append("balooctl not found - KDE may not be installed")
+    
+    return would_run, notes
+
+
 def preview(knob: Any, action: str) -> PreviewItem:
     file_changes: list[FileChange] = []
     would_run: list[list[str]] = []
@@ -177,6 +501,24 @@ def preview(knob: Any, action: str) -> PreviewItem:
             would_write.extend(_sysfs_glob_preview(params))
         elif kind == "qjackctl_server_prefix":
             file_changes.extend(_qjackctl_server_prefix_preview(params))
+        elif kind == "udev_rule":
+            file_changes.extend(_udev_rule_preview(params))
+            notes.append("Requires udev reload: udevadm control --reload-rules && udevadm trigger")
+        elif kind == "kernel_cmdline":
+            changes, more_notes = _kernel_cmdline_preview(params)
+            file_changes.extend(changes)
+            notes.extend(more_notes)
+        elif kind == "pipewire_conf":
+            file_changes.extend(_pipewire_conf_preview(params))
+            notes.append("Restart PipeWire to apply: systemctl --user restart pipewire")
+        elif kind == "user_service_mask":
+            cmds, more_notes = _user_service_mask_preview(params)
+            would_run.extend(cmds)
+            notes.extend(more_notes)
+        elif kind == "baloo_disable":
+            cmds, more_notes = _baloo_disable_preview(params)
+            would_run.extend(cmds)
+            notes.extend(more_notes)
         elif kind == "read_only":
             notes.append("Read-only knob; nothing to apply.")
         else:
@@ -217,6 +559,23 @@ def systemd_disable_now(unit: str) -> dict[str, Any]:
     }
 
 
+def systemd_enable_now(unit: str, start: bool = True) -> dict[str, Any]:
+    """Enable a systemd unit, optionally starting it immediately."""
+    pre_enabled = run(["systemctl", "is-enabled", unit]).stdout.strip()
+    pre_active = run(["systemctl", "is-active", unit]).stdout.strip()
+
+    if start:
+        r = run(["systemctl", "enable", "--now", unit])
+    else:
+        r = run(["systemctl", "enable", unit])
+    return {
+        "kind": "systemd_unit_toggle",
+        "unit": unit,
+        "pre": {"enabled": pre_enabled, "active": pre_active},
+        "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
+    }
+
+
 def systemd_restore(effect: dict[str, Any]) -> None:
     unit = str(effect["unit"])
     pre = effect.get("pre", {})
@@ -227,6 +586,8 @@ def systemd_restore(effect: dict[str, Any]) -> None:
         run(["systemctl", "enable", unit])
     elif pre_enabled == "disabled":
         run(["systemctl", "disable", unit])
+    elif pre_enabled == "masked":
+        run(["systemctl", "mask", unit])
 
     if pre_active == "active":
         run(["systemctl", "start", unit])
@@ -266,6 +627,66 @@ def restore_sysfs(effects: list[dict[str, Any]]) -> None:
         if before is None:
             continue
         Path(str(e["path"])).write_text(str(before) + "\n", encoding="utf-8")
+
+
+def user_service_unmask(services: list[str]) -> None:
+    """Unmask user services that were masked."""
+    for svc in services:
+        run(["systemctl", "--user", "unmask", svc])
+
+
+def user_service_restore(effect: dict[str, Any]) -> None:
+    """Restore user service mask effects safely.
+
+    Supports both legacy format:
+      {"services": ["foo.service", ...]}
+    and new format:
+      {"services": [{"unit": "...", "pre_enabled": "...", "pre_active": "..."}, ...]}
+    """
+    services = effect.get("services", [])
+
+    # Legacy: list[str]
+    if isinstance(services, list) and all(isinstance(x, str) for x in services):
+        user_service_unmask([str(x) for x in services])
+        return
+
+    if not isinstance(services, list):
+        return
+
+    for item in services:
+        if not isinstance(item, dict):
+            continue
+        unit = str(item.get("unit", "")).strip()
+        if not unit:
+            continue
+
+        pre_enabled = str(item.get("pre_enabled", "")).strip()
+        pre_active = str(item.get("pre_active", "")).strip()
+
+        # If it was already masked, don't unmask it.
+        if pre_enabled != "masked":
+            run(["systemctl", "--user", "unmask", unit])
+
+        # Restore enablement state best-effort (avoid static/indirect etc).
+        if pre_enabled == "enabled":
+            run(["systemctl", "--user", "enable", unit])
+        elif pre_enabled == "disabled":
+            run(["systemctl", "--user", "disable", unit])
+        elif pre_enabled == "masked":
+            run(["systemctl", "--user", "mask", unit])
+
+        # Restore running state best-effort.
+        if pre_active == "active":
+            run(["systemctl", "--user", "start", unit])
+        elif pre_active == "inactive":
+            run(["systemctl", "--user", "stop", unit])
+
+
+def baloo_enable() -> None:
+    """Re-enable Baloo file indexer."""
+    import shutil
+    if shutil.which("balooctl"):
+        run(["balooctl", "enable"])
 
 
 def check_knob_status(knob: Any) -> str:
@@ -321,10 +742,25 @@ def check_knob_status(knob: Any) -> str:
         try:
             result = run(["systemctl", "is-enabled", unit])
             is_enabled = result.stdout.strip()
-            if action == "disable_now":
-                return "applied" if is_enabled == "disabled" else "not_applied"
-            elif action == "enable":
-                return "applied" if is_enabled == "enabled" else "not_applied"
+            # systemctl is-enabled can return many values:
+            # enabled, disabled, masked, static, indirect, generated, linked, etc.
+            if action in ("disable_now", "disable"):
+                # "disabled" or "masked" means the service won't start
+                if is_enabled in ("disabled", "masked"):
+                    return "applied"
+                # "static" means no [Install] section, can't be enabled/disabled
+                # "indirect" means enabled via another unit
+                # "enabled" means explicitly enabled
+                if is_enabled in ("enabled", "static", "indirect", "generated", "linked"):
+                    return "not_applied"
+                # If unit doesn't exist or unknown state
+                return "unknown"
+            elif action in ("enable_now", "enable"):
+                if is_enabled in ("enabled", "static", "indirect"):
+                    return "applied"
+                if is_enabled in ("disabled", "masked"):
+                    return "not_applied"
+                return "unknown"
         except Exception:
             pass
         return "unknown"
@@ -362,6 +798,111 @@ def check_knob_status(knob: Any) -> str:
                 return "not_applied"
             # Check if -R flag is present
             if params.get("ensure_rt", True) and "-R" in cfg.server_cmd:
+                return "applied"
+            return "not_applied"
+        except Exception:
+            return "unknown"
+    
+    if kind == "udev_rule":
+        path = Path(str(params.get("path", "")))
+        if not path.exists():
+            return "not_applied"
+        # Check if file has expected content
+        content = params.get("content", "")
+        try:
+            current = path.read_text(encoding="utf-8")
+            if content.strip() in current:
+                return "applied"
+        except Exception:
+            pass
+        return "not_applied"
+    
+    if kind == "kernel_cmdline":
+        param = str(params.get("param", ""))
+        if not param:
+            return "unknown"
+        # Check current kernel cmdline - must match complete tokens
+        # e.g., "threadirqs" should not match "nothreadirqs"
+        try:
+            cmdline = Path("/proc/cmdline").read_text(encoding="utf-8")
+            tokens = cmdline.split()
+            # Check for exact match or param=value form
+            for token in tokens:
+                if token == param:
+                    return "applied"
+                # Handle param=value (e.g., "audit=0" matches token "audit=0")
+                if "=" in param and token == param:
+                    return "applied"
+                # Handle param prefix form (e.g., "mitigations=off" matches "mitigations=off")
+                if "=" in param:
+                    param_key = param.split("=")[0]
+                    if token.startswith(param_key + "=") and token == param:
+                        return "applied"
+            return "not_applied"
+        except Exception:
+            return "unknown"
+    
+    if kind == "pipewire_conf":
+        path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
+        path = Path(path_str).expanduser()
+        if not path.exists():
+            return "not_applied"
+        # File exists, check for our settings
+        try:
+            content = path.read_text(encoding="utf-8")
+            quantum = params.get("quantum")
+            rate = params.get("rate")
+            found = 0
+            expected = 0
+            if quantum:
+                expected += 1
+                if f"default.clock.quantum = {quantum}" in content:
+                    found += 1
+            if rate:
+                expected += 1
+                if f"default.clock.rate = {rate}" in content:
+                    found += 1
+            if expected == 0:
+                return "unknown"
+            if found == expected:
+                return "applied"
+            elif found > 0:
+                return "partial"
+            return "not_applied"
+        except Exception:
+            return "unknown"
+    
+    if kind == "user_service_mask":
+        services = params.get("services", [])
+        if isinstance(services, str):
+            services = [services]
+        if not services:
+            return "unknown"
+        
+        masked_count = 0
+        for svc in services:
+            try:
+                result = run(["systemctl", "--user", "is-enabled", svc])
+                if result.stdout.strip() == "masked":
+                    masked_count += 1
+            except Exception:
+                pass
+        
+        if masked_count == len(services):
+            return "applied"
+        elif masked_count > 0:
+            return "partial"
+        return "not_applied"
+    
+    if kind == "baloo_disable":
+        # Check if Baloo is disabled
+        import shutil
+        if not shutil.which("balooctl"):
+            return "unknown"
+        try:
+            result = run(["balooctl", "status"])
+            # "Baloo is currently disabled" in output
+            if "disabled" in result.stdout.lower():
                 return "applied"
             return "not_applied"
         except Exception:

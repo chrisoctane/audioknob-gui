@@ -285,6 +285,13 @@ PACKAGE_MAPPINGS: dict[str, dict[PackageManager, str]] = {
         PackageManager.DPKG: "linux-cpupower",
         PackageManager.PACMAN: "cpupower",
     },
+    # Best-effort mapping: package names vary by distro/flavor.
+    # If this mapping is wrong on a given distro, install will fail and user must install manually.
+    "balooctl": {
+        PackageManager.RPM: "baloo-tools5",
+        PackageManager.DPKG: "baloo-kf5",
+        PackageManager.PACMAN: "baloo",
+    },
 }
 
 

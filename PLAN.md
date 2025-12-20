@@ -1,10 +1,61 @@
 # audioknob-gui: Plan
 
+## Quick start (for you)
+
+### Run from a repo checkout (recommended for development)
+
+```bash
+cd /path/to/audioknob-gui
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -U pip
+python3 -m pip install -e .
+bin/audioknob-gui
+```
+
+### Run the worker CLI directly (debugging)
+
+```bash
+python3 -m audioknob_gui.worker.cli --help
+python3 -m audioknob_gui.worker.cli status
+python3 -m audioknob_gui.worker.cli preview rt_limits_audio_group
+```
+
+---
+
+## Working agreement (to prevent drift)
+
+If any agent (including “overseer”) changes behavior, adds a knob, changes packaging, or changes any file path/env var, they MUST:
+
+- Update `PROJECT_STATE.md` (machine reference) and keep it consistent with the code.
+- Update `PLAN.md` (user guide) only for user-relevant steps and keep it consistent with the code.
+- Sync `config/registry*.json` → `audioknob_gui/data/registry*.json` when touched.
+- Prefer conservative behavior: if status cannot be proven, show “unknown/not applied” rather than “applied”.
+
+When in doubt, stop and ask rather than inventing new UX/flows not described here.
+
 ## How to Add a New Knob
 
 ### Step 1: Define in registry.json
 
-Add to `config/registry.json`:
+Add a knob object to `config/registry.json` (**canonical source**) inside the top-level `knobs` array.
+
+The file format is:
+
+```json
+{
+  "schema": 1,
+  "knobs": [
+    { "id": "example", "title": "…", "description": "…", "category": "cpu", "risk_level": "low",
+      "requires_root": false, "requires_reboot": false, "requires_groups": [], "requires_commands": [],
+      "capabilities": { "read": true, "apply": true, "restore": true },
+      "impl": { "kind": "read_only", "params": {} }
+    }
+  ]
+}
+```
+
+Add your new knob object like this:
 
 ```json
 {
@@ -18,12 +69,16 @@ Add to `config/registry.json`:
   "requires_groups": [],
   "requires_commands": [],
   "capabilities": { "read": true, "apply": true, "restore": true },
-  "impl": {
-    "kind": "...",
-    "params": { ... }
-  }
+  "impl": { "kind": "...", "params": { ... } }
 }
 ```
+
+**⚠️ IMPORTANT: After editing, sync to package data:**
+```bash
+cp config/registry.json audioknob_gui/data/registry.json
+cp config/registry.schema.json audioknob_gui/data/registry.schema.json
+```
+Both files must be committed together. See "Registry Sync Policy" below.
 
 **New fields:**
 - `requires_groups`: User must be in ONE of these groups (e.g., `["audio", "realtime"]`)
@@ -34,10 +89,16 @@ Add to `config/registry.json`:
 | Kind | When to use | Example |
 |------|-------------|---------|
 | `pam_limits_audio_group` | PAM limits file | rt_limits |
-| `sysctl_conf` | Sysctl.d drop-in | swappiness |
+| `sysctl_conf` | Sysctl.d drop-in | swappiness, inotify |
 | `sysfs_glob_kv` | Write to /sys | cpu_governor, thp |
-| `systemd_unit_toggle` | Enable/disable service | irqbalance |
+| `systemd_unit_toggle` | Enable/disable service | irqbalance, rtirq |
 | `qjackctl_server_prefix` | QjackCtl config | jackd flags |
+| `udev_rule` | Create udev rule | cpu_dma_latency, usb_autosuspend |
+| `kernel_cmdline` | Kernel cmdline param (distro-aware) | threadirqs, audit=0 |
+| `pipewire_conf` | PipeWire user config | quantum, sample_rate |
+| `user_service_mask` | Mask user systemd services | tracker, baloo |
+| `baloo_disable` | Disable KDE Baloo via balooctl | baloo |
+| `group_membership` | Add user to groups | audio_group |
 | `read_only` | Info/test only | stack_detect |
 
 ### Step 3: Add implementation (if new kind)
@@ -106,41 +167,69 @@ if k.id == "qjackctl_server_prefix_rt":
 
 ---
 
-## Current Knobs (22)
+## Current Knobs (22) - ALL IMPLEMENTED ✓
 
-### Implemented ✓
-| Knob | Category | Status |
-|------|----------|--------|
-| Join audio groups | permissions | ✓ |
-| Realtime limits | permissions | ✓ |
-| Disable irqbalance | irq | ✓ |
-| CPU governor: performance | cpu | ✓ |
-| Reduce swappiness | vm | ✓ |
-| THP: madvise | vm | ✓ |
-| QjackCtl: realtime flags | stack | ✓ |
-| Audio stack info | testing | ✓ |
-| Scheduler jitter test | testing | ✓ |
-| RT config scan | testing | ✓ |
+### Permissions
+| Knob | Kind | Status |
+|------|------|--------|
+| Join audio groups | group_membership | ✓ |
+| Realtime limits for @audio | pam_limits_audio_group | ✓ |
 
-### Placeholders (Need Implementation)
-| Knob | Category | Notes |
-|------|----------|-------|
-| Enable rtirq | irq | Needs rtirq package |
-| CPU DMA latency udev | cpu | Needs group check |
-| Increase inotify | vm | sysctl.d |
-| Reduce dirty writeback | vm | sysctl.d |
-| Disable USB autosuspend | power | udev rule |
-| Threaded IRQs | kernel | cmdline edit |
-| Disable audit | kernel | cmdline edit |
-| Disable mitigations | kernel | cmdline edit, HIGH RISK |
-| PipeWire quantum | stack | user config |
-| PipeWire sample rate | stack | user config |
-| Disable GNOME tracker | services | user service |
-| Disable KDE Baloo | services | user service |
+### IRQ
+| Knob | Kind | Status |
+|------|------|--------|
+| Disable irqbalance | systemd_unit_toggle | ✓ |
+| Enable rtirq service | systemd_unit_toggle | ✓ |
+
+### CPU
+| Knob | Kind | Status |
+|------|------|--------|
+| CPU governor: performance | sysfs_glob_kv | ✓ |
+| CPU DMA latency udev rule | udev_rule | ✓ |
+
+### VM
+| Knob | Kind | Status |
+|------|------|--------|
+| Reduce swappiness | sysctl_conf | ✓ |
+| THP: madvise mode | sysfs_glob_kv | ✓ |
+| Increase inotify watches | sysctl_conf | ✓ |
+| Reduce dirty writeback | sysctl_conf | ✓ |
+
+### Power
+| Knob | Kind | Status |
+|------|------|--------|
+| Disable USB autosuspend | udev_rule | ✓ |
+
+### Kernel (requires reboot)
+| Knob | Kind | Status |
+|------|------|--------|
+| Enable threaded IRQs | kernel_cmdline | ✓ |
+| Disable kernel audit | kernel_cmdline | ✓ |
+| Disable CPU mitigations | kernel_cmdline | ✓ (HIGH RISK) |
+
+### Stack
+| Knob | Kind | Status |
+|------|------|--------|
+| QjackCtl: realtime flags | qjackctl_server_prefix | ✓ |
+| PipeWire quantum (buffer) | pipewire_conf | ✓ |
+| PipeWire sample rate | pipewire_conf | ✓ |
+
+### Services
+| Knob | Kind | Status |
+|------|------|--------|
+| Disable GNOME tracker | user_service_mask | ✓ |
+| Disable KDE Baloo | baloo_disable | ✓ |
+
+### Testing (Read-only)
+| Knob | Kind | Status |
+|------|------|--------|
+| Audio stack info | read_only | ✓ |
+| Scheduler jitter test | read_only | ✓ |
+| RT config scan | read_only | ✓ |
 
 ### Future Phases
 **Phase 4: Audio Hardware**
-- Interface selection, sample rate, buffer, bit depth
+- Interface selection, sample rate, buffer, bit depth (via config dialog)
 
 **Phase 5: Monitoring**  
 - Underrun counter, interrupt inspector
@@ -153,13 +242,49 @@ if k.id == "qjackctl_server_prefix_rt":
 | Distro | Method |
 |--------|--------|
 | openSUSE TW | Edit `/etc/kernel/cmdline`, run `sdbootutil update-all-entries` |
-| openSUSE Leap | Edit `/etc/default/grub`, run `grub2-mkconfig` |
-| Fedora | Edit `/etc/default/grub`, run `grub2-mkconfig` |
+| openSUSE Leap | Edit `/etc/default/grub`, run `grub2-mkconfig -o /boot/grub2/grub.cfg` |
+| Fedora | Edit `/etc/default/grub`, run `grub2-mkconfig -o /boot/grub2/grub.cfg` |
 | Debian/Ubuntu | Edit `/etc/default/grub`, run `update-grub` |
 
 ### Audio group
 - Most distros: `audio`
 - Arch: `realtime` (from `realtime-privileges` package)
+
+---
+
+## Registry Sync Policy
+
+The registry exists in two locations:
+
+| Location | Purpose |
+|----------|---------|
+| `config/registry.json` | **Canonical source** — edit here |
+| `audioknob_gui/data/registry.json` | Packaged copy for installed builds |
+| `config/registry.schema.json` | Schema (canonical) |
+| `audioknob_gui/data/registry.schema.json` | Packaged schema copy |
+
+**Why two copies?**
+- `config/` is at repo root for easy discovery/editing
+- `audioknob_gui/data/` is inside the package so `importlib.resources` can find it when installed via pip
+
+**Sync procedure (after any registry edit):**
+```bash
+cp config/registry.json audioknob_gui/data/registry.json
+cp config/registry.schema.json audioknob_gui/data/registry.schema.json
+git add config/registry.json config/registry.schema.json audioknob_gui/data/registry.json audioknob_gui/data/registry.schema.json
+```
+
+**Pre-commit check (recommended):**
+```bash
+diff config/registry.json audioknob_gui/data/registry.json || echo "REGISTRY OUT OF SYNC"
+diff config/registry.schema.json audioknob_gui/data/registry.schema.json || echo "REGISTRY SCHEMA OUT OF SYNC"
+```
+
+**Resolution order** (in `core/paths.py`):
+1. `AUDIOKNOB_REGISTRY` env var (explicit override)
+2. `AUDIOKNOB_DEV_REPO/config/registry.json` (dev mode)
+3. Package data via `importlib.resources` (production)
+4. File-relative fallback (legacy dev mode)
 
 ---
 
@@ -170,6 +295,20 @@ if k.id == "qjackctl_server_prefix_rt":
 3. **User knows best** - Show status, let them choose
 4. **One click actions** - No dropdowns, no batch mode, no preview step
 5. **Lock until ready** - Missing groups? 🔒. Missing packages? 📦 Install.
+6. **Docs match code** - `PROJECT_STATE.md` and `PLAN.md` are first-class deliverables
+
+---
+
+## Scope / Non-goals (to keep the project on course)
+
+We are explicitly NOT doing these unless the docs are updated first:
+
+- A background daemon or always-on service
+- Automatic “apply everything” / batch apply workflows (the UX is per-knob, one-click)
+- Auto-modifying system settings without an explicit user click + visible status change
+- Complex multi-step wizards or hidden state machines
+- Network/cloud features
+
 
 ---
 
@@ -208,4 +347,4 @@ See `audioknob_gui/testing/rtcheck.py`
 
 ---
 
-*Last updated: 2025-06-20*
+*Last updated: 2025-12-20*

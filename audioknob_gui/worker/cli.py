@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,12 +30,8 @@ def _require_root() -> None:
 
 
 def _registry_default_path() -> str:
-    here = Path(__file__).resolve()
-    # parents[0] = audioknob_gui/worker/
-    # parents[1] = audioknob_gui/
-    # parents[2] = repo root
-    repo_root = here.parents[2]
-    return str(repo_root / "config" / "registry.json")
+    from audioknob_gui.core.paths import get_registry_path
+    return get_registry_path()
 
 
 def _load_gui_state() -> dict:
@@ -132,6 +129,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
     qjackctl_override = _qjackctl_cpu_cores_override(state)
 
     backups: list[dict] = []
+    effects: list[dict] = []
     applied: list[str] = []
 
     for kid in args.knob:
@@ -167,6 +165,77 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 path, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores
             )
 
+        elif kind == "pipewire_conf":
+            path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
+            path = Path(path_str).expanduser()
+            backups.append(backup_file(tx, str(path)))
+            
+            # Build config content
+            lines = ["# audioknob-gui PipeWire configuration"]
+            quantum = params.get("quantum")
+            rate = params.get("rate")
+            
+            if quantum or rate:
+                lines.append("context.properties = {")
+                if quantum:
+                    lines.append(f"    default.clock.quantum = {quantum}")
+                    lines.append(f"    default.clock.min-quantum = {quantum}")
+                if rate:
+                    lines.append(f"    default.clock.rate = {rate}")
+                lines.append("}")
+            
+            content = "\n".join(lines) + "\n"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+        elif kind == "user_service_mask":
+            import subprocess
+            
+            services = params.get("services", [])
+            if isinstance(services, str):
+                services = [services]
+            
+            masked_services: list[dict] = []
+            for svc in services:
+                # Capture pre-state so restore doesn't unmask services that were already masked.
+                pre_enabled = subprocess.run(
+                    ["systemctl", "--user", "is-enabled", svc],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                pre_active = subprocess.run(
+                    ["systemctl", "--user", "is-active", svc],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+                # Stop and mask the service
+                subprocess.run(["systemctl", "--user", "stop", svc], check=False, capture_output=True)
+                result = subprocess.run(["systemctl", "--user", "mask", svc], check=False, capture_output=True)
+                if result.returncode == 0:
+                    masked_services.append({"unit": svc, "pre_enabled": pre_enabled, "pre_active": pre_active})
+            
+            if masked_services:
+                effects.append({
+                    "kind": "user_service_mask",
+                    "services": masked_services,
+                })
+
+        elif kind == "baloo_disable":
+            import shutil
+            import subprocess
+            
+            if shutil.which("balooctl"):
+                result = subprocess.run(["balooctl", "disable"], check=False, capture_output=True)
+                effects.append({
+                    "kind": "baloo_disable",
+                    "result": {"returncode": result.returncode},
+                })
+            else:
+                raise SystemExit("balooctl not found - KDE may not be installed")
+
         else:
             raise SystemExit(f"Unsupported non-root knob kind: {kind}")
 
@@ -177,7 +246,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         "txid": tx.txid,
         "applied": applied,
         "backups": backups,
-        "effects": [],
+        "effects": effects,
     }
     write_manifest(tx, manifest)
 
@@ -249,18 +318,124 @@ def cmd_apply(args: argparse.Namespace) -> int:
             Path(path).write_text(after, encoding="utf-8")
 
         elif kind == "systemd_unit_toggle":
-            from audioknob_gui.worker.ops import systemd_disable_now
+            from audioknob_gui.worker.ops import systemd_disable_now, systemd_enable_now
 
             unit = str(params["unit"])
             action = str(params.get("action", ""))
-            if action != "disable_now":
+            if action == "disable_now":
+                effects.append(systemd_disable_now(unit))
+            elif action == "enable_now":
+                effects.append(systemd_enable_now(unit))
+            elif action == "enable":
+                effects.append(systemd_enable_now(unit, start=False))
+            elif action == "disable":
+                effects.append(systemd_disable_now(unit))
+            else:
                 raise SystemExit(f"Unsupported systemd action: {action}")
-            effects.append(systemd_disable_now(unit))
 
         elif kind == "sysfs_glob_kv":
             from audioknob_gui.worker.ops import write_sysfs_values
 
             effects.extend(write_sysfs_values(str(params["glob"]), str(params["value"])))
+
+        elif kind == "udev_rule":
+            path = str(params["path"])
+            content = str(params["content"])
+            backups.append(backup_file(tx, path))
+            
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(content.rstrip("\n") + "\n", encoding="utf-8")
+            
+            # Reload udev rules
+            import subprocess
+            subprocess.run(["udevadm", "control", "--reload-rules"], check=False)
+            subprocess.run(["udevadm", "trigger"], check=False)
+
+        elif kind == "kernel_cmdline":
+            from audioknob_gui.worker.ops import detect_distro
+            
+            param = str(params.get("param", ""))
+            if not param:
+                raise SystemExit("No kernel parameter specified")
+            
+            distro = detect_distro()
+            if distro.boot_system == "unknown" or not distro.kernel_cmdline_file:
+                raise SystemExit(f"Unknown boot system for {distro.distro_id}; cannot modify kernel cmdline")
+            
+            cmdline_file = distro.kernel_cmdline_file
+            backups.append(backup_file(tx, cmdline_file))
+            
+            before = ""
+            try:
+                before = Path(cmdline_file).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                before = ""
+
+            def _tokens_for_existing(before_text: str, boot_system: str) -> list[str]:
+                if boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                    return before_text.strip().split()
+                if boot_system == "grub2":
+                    for line in before_text.splitlines():
+                        if not line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                            continue
+                        _, _, rhs = line.partition("=")
+                        rhs = rhs.strip()
+                        if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                            rhs = rhs[1:-1]
+                        try:
+                            return shlex.split(rhs)
+                        except Exception:
+                            return rhs.split()
+                    return []
+                return before_text.strip().split()
+
+            def _param_present(param_str: str, tokens: list[str]) -> bool:
+                if not param_str:
+                    return False
+                if "=" in param_str:
+                    return any(t == param_str for t in tokens)
+                return any(t == param_str or t.startswith(param_str + "=") for t in tokens)
+
+            tokens = _tokens_for_existing(before, distro.boot_system)
+            if _param_present(param, tokens):
+                # Already present, skip
+                pass
+            elif distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                # BLS style: single line file
+                after = before.strip() + " " + param + "\n" if before.strip() else param + "\n"
+                Path(cmdline_file).parent.mkdir(parents=True, exist_ok=True)
+                Path(cmdline_file).write_text(after, encoding="utf-8")
+            elif distro.boot_system == "grub2":
+                # GRUB2 style: modify GRUB_CMDLINE_LINUX_DEFAULT
+                before_lines = before.splitlines() if before else []
+                after_lines = list(before_lines)
+                found = False
+                for i, line in enumerate(after_lines):
+                    if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                        if '="' in line and line.rstrip().endswith('"'):
+                            after_lines[i] = line.rstrip()[:-1] + " " + param + '"'
+                        else:
+                            after_lines[i] = line.rstrip() + " " + param
+                        found = True
+                        break
+                if not found:
+                    after_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{param}"')
+                after = "\n".join(after_lines)
+                if after and not after.endswith("\n"):
+                    after += "\n"
+                Path(cmdline_file).write_text(after, encoding="utf-8")
+            
+            # Run bootloader update command
+            if distro.kernel_cmdline_update_cmd:
+                import subprocess
+                result = subprocess.run(distro.kernel_cmdline_update_cmd, capture_output=True, text=True)
+                effects.append({
+                    "kind": "kernel_cmdline",
+                    "param": param,
+                    "file": cmdline_file,
+                    "update_cmd": distro.kernel_cmdline_update_cmd,
+                    "result": {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
+                })
 
         elif kind == "read_only":
             pass
@@ -303,16 +478,26 @@ def cmd_restore(args: argparse.Namespace) -> int:
     for meta in manifest.get("backups", []):
         restore_file(type("Tx", (), {"root": tx_root})(), meta)
 
-    # Restore effects (only for root transactions)
+    # Restore effects
+    effects = manifest.get("effects", [])
+    
     if is_root:
         _require_root()
-        effects = manifest.get("effects", [])
         sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
         systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
 
         restore_sysfs(sysfs)
         for e in systemd:
             systemd_restore(e)
+    
+    # User-scope effects
+    from audioknob_gui.worker.ops import user_service_restore, baloo_enable
+    
+    for e in effects:
+        if e.get("kind") == "user_service_mask":
+            user_service_restore(e)
+        elif e.get("kind") == "baloo_disable":
+            baloo_enable()
 
     print(json.dumps({"schema": 1, "restored": args.txid, "was_root": is_root}, indent=2))
     return 0
@@ -385,13 +570,19 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         
         # Check if this is a root transaction and we need root
         if scope == "root":
-            # Check for package resets which need root
-            needs_root = any(
-                b.get("reset_strategy") == RESET_PACKAGE 
+            effects = tx_info.get("effects", [])
+            # Need root if: package resets, OR any root-scope effects (sysfs, systemd)
+            has_package_reset = any(
+                b.get("reset_strategy") == RESET_PACKAGE
                 for b in backups
             )
+            has_root_effects = any(
+                e.get("kind") in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline")
+                for e in effects
+            )
+            needs_root = has_package_reset or has_root_effects or bool(backups)
             if needs_root and os.geteuid() != 0:
-                errors.append(f"Transaction {txid} has package-owned files; run with root to reset")
+                errors.append(f"Transaction {txid} needs root to reset (files or effects); run with pkexec")
                 continue
         
         # Create a Transaction object for backup restore
@@ -424,34 +615,50 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             else:
                 errors.append(message)
         
-        # Also handle effects (sysfs, systemd) for root transactions
-        if scope == "root":
-            effects = tx_info.get("effects", [])
-            # Read manifest for effects since they're not in the summary
-            manifest_path = tx_root / "manifest.json"
-            if manifest_path.exists():
-                try:
-                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                    effects = manifest.get("effects", [])
-                except Exception:
-                    pass
-            
-            if effects and os.geteuid() == 0:
-                sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
-                systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
-                
-                try:
-                    restore_sysfs(sysfs)
-                    for e in systemd:
-                        systemd_restore(e)
+        # Handle effects (sysfs, systemd, user services, etc.)
+        effects = tx_info.get("effects", [])
+        
+        if scope == "root" and effects and os.geteuid() == 0:
+            sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
+            systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+
+            try:
+                restore_sysfs(sysfs)
+                for e in systemd:
+                    systemd_restore(e)
+                if sysfs or systemd:
                     results.append({
-                        "path": "(effects)",
+                        "path": "(root effects)",
                         "strategy": "effects",
                         "success": True,
                         "message": f"Restored {len(sysfs)} sysfs + {len(systemd)} systemd effects",
                     })
+            except Exception as ex:
+                errors.append(f"Failed to restore root effects: {ex}")
+        
+        # User-scope effects (services, baloo)
+        if scope == "user" and effects:
+            from audioknob_gui.worker.ops import user_service_restore, baloo_enable
+            
+            user_effects_restored = 0
+            for e in effects:
+                try:
+                    if e.get("kind") == "user_service_mask":
+                        user_service_restore(e)
+                        user_effects_restored += 1
+                    elif e.get("kind") == "baloo_disable":
+                        baloo_enable()
+                        user_effects_restored += 1
                 except Exception as ex:
-                    errors.append(f"Failed to restore effects: {ex}")
+                    errors.append(f"Failed to restore user effect: {ex}")
+            
+            if user_effects_restored:
+                results.append({
+                    "path": "(user effects)",
+                    "strategy": "effects",
+                    "success": True,
+                    "message": f"Restored {user_effects_restored} user effect(s)",
+                })
     
     print(json.dumps({
         "schema": 1,
@@ -465,16 +672,21 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
 
 
 def cmd_list_changes(_: argparse.Namespace) -> int:
-    """List all files modified by audioknob-gui across all transactions."""
+    """List all files/effects modified by audioknob-gui across all transactions."""
     paths = default_paths()
-    
+
     root_txs = list_transactions(paths.var_lib_dir)
     user_txs = list_transactions(paths.user_state_dir)
-    
+
     all_files: dict[str, dict] = {}
-    
+    all_effects: list[dict] = []
+    has_root_effects = False
+    has_user_effects = False
+
     for tx_info in root_txs + user_txs:
         scope = "root" if tx_info in root_txs else "user"
+        
+        # Collect file backups
         for meta in tx_info.get("backups", []):
             file_path = meta.get("path", "")
             if file_path and file_path not in all_files:
@@ -486,11 +698,27 @@ def cmd_list_changes(_: argparse.Namespace) -> int:
                     "package": meta.get("package"),
                     "we_created": meta.get("we_created", False),
                 }
-    
+        
+        # Collect effects (sysfs, systemd, user services, etc.)
+        for effect in tx_info.get("effects", []):
+            effect_copy = dict(effect)
+            effect_copy["scope"] = scope
+            effect_copy["txid"] = tx_info["txid"]
+            all_effects.append(effect_copy)
+            
+            if scope == "root":
+                has_root_effects = True
+            else:
+                has_user_effects = True
+
     print(json.dumps({
         "schema": 1,
         "files": list(all_files.values()),
         "count": len(all_files),
+        "effects": all_effects,
+        "effects_count": len(all_effects),
+        "has_root_effects": has_root_effects,
+        "has_user_effects": has_user_effects,
     }, indent=2))
     return 0
 
@@ -584,8 +812,9 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
             errors.append(message)
     
     # Also restore effects if present
+    effects = manifest.get("effects", [])
+    
     if scope == "root" and os.geteuid() == 0:
-        effects = manifest.get("effects", [])
         sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
         systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
         
@@ -597,6 +826,24 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
                 restored.append(f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd)")
         except Exception as ex:
             errors.append(f"Failed to restore effects: {ex}")
+    
+    # User-scope effects
+    from audioknob_gui.worker.ops import user_service_restore, baloo_enable
+    
+    user_effects_restored = 0
+    for e in effects:
+        try:
+            if e.get("kind") == "user_service_mask":
+                user_service_restore(e)
+                user_effects_restored += 1
+            elif e.get("kind") == "baloo_disable":
+                baloo_enable()
+                user_effects_restored += 1
+        except Exception as ex:
+            errors.append(f"Failed to restore user effect: {ex}")
+    
+    if user_effects_restored:
+        restored.append(f"(user effects: {user_effects_restored})")
     
     print(json.dumps({
         "schema": 1,

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure PySide6 from user site-packages is available
-export PYTHONPATH="${HOME}/.local/lib/python3.13/site-packages:${PYTHONPATH:-}"
+# For development, set AUDIOKNOB_DEV_REPO to the repo path
+if [ -n "${AUDIOKNOB_DEV_REPO:-}" ]; then
+    export PYTHONPATH="${AUDIOKNOB_DEV_REPO}:${PYTHONPATH:-}"
+fi
 
-cd "$(dirname "$0")/.."
 exec python3 -m audioknob_gui.gui.app "$@"

@@ -21,6 +21,9 @@ package-dir = {"" = "."}
 where = ["."]
 include = ["audioknob_gui*"]
 
+[tool.setuptools.package-data]
+audioknob_gui = ["data/*.json"]
+
 [build-system]
 requires = ["setuptools>=75", "wheel"]
 build-backend = "setuptools.build_meta"
