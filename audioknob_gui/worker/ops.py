@@ -908,4 +908,40 @@ def check_knob_status(knob: Any) -> str:
         except Exception:
             return "unknown"
     
+    if kind == "group_membership":
+        # Check if user is in the required audio groups
+        import grp
+        import os
+        
+        groups_to_check = params.get("groups", ["audio", "realtime"])
+        if isinstance(groups_to_check, str):
+            groups_to_check = [groups_to_check]
+        
+        try:
+            user_gids = set(os.getgroups())
+            in_count = 0
+            exist_count = 0
+            
+            for group_name in groups_to_check:
+                try:
+                    gr = grp.getgrnam(group_name)
+                    exist_count += 1
+                    if gr.gr_gid in user_gids:
+                        in_count += 1
+                except KeyError:
+                    # Group doesn't exist on this system - skip it
+                    pass
+            
+            if exist_count == 0:
+                # No required groups exist on this system
+                return "unknown"
+            
+            if in_count == exist_count:
+                return "applied"
+            elif in_count > 0:
+                return "partial"
+            return "not_applied"
+        except Exception:
+            return "unknown"
+    
     return "unknown"

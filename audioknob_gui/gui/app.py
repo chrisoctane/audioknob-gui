@@ -160,6 +160,7 @@ def main() -> int:
             QDialogButtonBox,
             QGridLayout,
             QHBoxLayout,
+            QHeaderView,
             QLabel,
             QMainWindow,
             QMessageBox,
@@ -298,16 +299,22 @@ def main() -> int:
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
-            self.table = QTableWidget(0, 6)
-            self.table.setHorizontalHeaderLabels(["Knob", "Status", "Category", "Risk", "Action", ""])
+            self.table = QTableWidget(0, 7)
+            self.table.setHorizontalHeaderLabels(["Knob", "Status", "Category", "Risk", "Action", "Config", ""])
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(True)
-            self.table.setColumnWidth(0, 200)  # Knob
-            self.table.setColumnWidth(1, 80)   # Status
-            self.table.setColumnWidth(2, 100)  # Category
-            self.table.setColumnWidth(3, 60)   # Risk
-            self.table.setColumnWidth(4, 80)   # Action
-            self.table.setColumnWidth(5, 50)   # Info
+            # Layout: Action column gets a single button, Config column gets dropdowns/config controls.
+            # We hide the row-number gutter to reclaim horizontal space.
+            self.table.verticalHeader().setVisible(False)
+            header = self.table.horizontalHeader()
+            header.setSectionResizeMode(0, QHeaderView.Stretch)          # Knob
+            header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Status
+            header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Category
+            header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Risk
+            header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Action
+            header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Config
+            header.setSectionResizeMode(6, QHeaderView.Fixed)            # Info
+            self.table.setColumnWidth(6, 34)
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
@@ -478,11 +485,17 @@ def main() -> int:
                     btn.clicked.connect(self.on_check_blockers)
                     self.table.setCellWidget(r, 4, btn)
                 elif k.id == "pipewire_quantum" and not locked:
-                    # Visible control: pick quantum and Apply/Reset in-row.
-                    wrap = QWidget()
-                    row = QHBoxLayout(wrap)
-                    row.setContentsMargins(0, 0, 0, 0)
+                    # Action column: Apply/Reset button
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status == "applied":
+                        btn = QPushButton("Reset")
+                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                    else:
+                        btn = QPushButton("Apply")
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    self.table.setCellWidget(r, 4, btn)
 
+                    # Config column: quantum selector
                     combo = QComboBox()
                     values = [32, 64, 128, 256, 512, 1024]
                     for v in values:
@@ -494,7 +507,6 @@ def main() -> int:
                             current = int(k.impl.params.get("quantum")) if k.impl.params.get("quantum") is not None else None
                         except Exception:
                             current = None
-                    # Block signals during init to prevent triggering change handler
                     combo.blockSignals(True)
                     if current in values:
                         combo.setCurrentIndex(values.index(int(current)))
@@ -503,13 +515,14 @@ def main() -> int:
                     def _on_change(_: int) -> None:
                         self.state["pipewire_quantum"] = int(combo.currentData())
                         save_state(self.state)
-                        # Status depends on expected quantum; refresh so UI reflects new expectation immediately.
                         self._refresh_statuses()
                         self._populate()
 
                     combo.currentIndexChanged.connect(_on_change)
-                    row.addWidget(combo)
+                    self.table.setCellWidget(r, 5, combo)
 
+                elif k.id == "pipewire_sample_rate" and not locked:
+                    # Action column: Apply/Reset button
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status == "applied":
                         btn = QPushButton("Reset")
@@ -517,15 +530,9 @@ def main() -> int:
                     else:
                         btn = QPushButton("Apply")
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-                    row.addWidget(btn)
+                    self.table.setCellWidget(r, 4, btn)
 
-                    self.table.setCellWidget(r, 4, wrap)
-                elif k.id == "pipewire_sample_rate" and not locked:
-                    # Visible control: pick sample rate and Apply/Reset in-row.
-                    wrap = QWidget()
-                    row = QHBoxLayout(wrap)
-                    row.setContentsMargins(0, 0, 0, 0)
-
+                    # Config column: sample rate selector
                     combo = QComboBox()
                     values = [44100, 48000, 88200, 96000, 192000]
                     for v in values:
@@ -537,7 +544,6 @@ def main() -> int:
                             current = int(k.impl.params.get("rate")) if k.impl.params.get("rate") is not None else None
                         except Exception:
                             current = None
-                    # Block signals during init to prevent triggering change handler
                     combo.blockSignals(True)
                     if current in values:
                         combo.setCurrentIndex(values.index(int(current)))
@@ -550,18 +556,7 @@ def main() -> int:
                         self._populate()
 
                     combo.currentIndexChanged.connect(_on_rate_change)
-                    row.addWidget(combo)
-
-                    status = self._knob_statuses.get(k.id, "unknown")
-                    if status == "applied":
-                        btn = QPushButton("Reset")
-                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
-                    else:
-                        btn = QPushButton("Apply")
-                        btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-                    row.addWidget(btn)
-
-                    self.table.setCellWidget(r, 4, wrap)
+                    self.table.setCellWidget(r, 5, combo)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
                     btn = QPushButton("—")
@@ -579,11 +574,11 @@ def main() -> int:
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
                     self.table.setCellWidget(r, 4, btn)
 
-                # Column 5: Info button (shows details popup)
+                # Column 6: Info button (shows details popup)
                 info_btn = QPushButton("ℹ")
                 info_btn.setFixedWidth(30)
                 info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
-                self.table.setCellWidget(r, 5, info_btn)
+                self.table.setCellWidget(r, 6, info_btn)
             
             # Re-enable sorting after population
             self.table.setSortingEnabled(True)
@@ -779,21 +774,70 @@ def main() -> int:
                 stack = detect_stack()
                 devices = list_alsa_playback_devices()
                 
-                info_lines = [
-                    "<b>Audio Stack Detection</b>",
-                    "",
-                    f"<b>PipeWire:</b> {'✓ Active' if stack.pipewire_active else '○ Not active'}",
-                    f"<b>WirePlumber:</b> {'✓ Active' if stack.wireplumber_active else '○ Not active'}",
-                    f"<b>JACK:</b> {'✓ Active' if stack.jack_active else '○ Not active'}",
-                    "",
-                    f"<b>ALSA Playback Devices ({len(devices)}):</b>",
+                html_lines = [
+                    "<h3>Audio Stack Detection</h3>",
+                    "<table style='width:100%'>",
+                    f"<tr><td><b>PipeWire:</b></td><td>{'✓ Active' if stack.pipewire_active else '○ Not active'}</td></tr>",
+                    f"<tr><td><b>WirePlumber:</b></td><td>{'✓ Active' if stack.wireplumber_active else '○ Not active'}</td></tr>",
+                    f"<tr><td><b>JACK:</b></td><td>{'✓ Active' if stack.jack_active else '○ Not active'}</td></tr>",
+                    "</table>",
+                    "<hr/>",
+                    f"<h4>ALSA Playback Devices ({len(devices)})</h4>",
+                    "<table style='width:100%'>",
                 ]
-                for dev in devices[:5]:  # Show first 5
-                    info_lines.append(f"  • {dev.get('raw', 'Unknown')}")
-                if len(devices) > 5:
-                    info_lines.append(f"  ... and {len(devices) - 5} more")
                 
-                QMessageBox.information(self, "Audio Stack", "<br/>".join(info_lines))
+                # Show ALL devices - no truncation
+                for dev in devices:
+                    name = dev.get("name", "")
+                    desc = dev.get("desc", dev.get("raw", "Unknown"))
+                    html_lines.append(f"<tr><td><b>{name}</b></td><td>{desc}</td></tr>")
+                
+                html_lines.append("</table>")
+                
+                if not devices:
+                    html_lines.append("<p style='color:#666'>No ALSA devices found.</p>")
+                
+                html = "".join(html_lines)
+                
+                # Show in resizable dialog
+                dialog = QDialog(self)
+                dialog.setWindowTitle("Audio Stack Detection")
+                dialog.resize(600, 450)
+                layout = QVBoxLayout(dialog)
+                
+                text = QTextEdit()
+                text.setReadOnly(True)
+                text.setHtml(html)
+                layout.addWidget(text)
+                
+                # Button row
+                btn_layout = QHBoxLayout()
+                
+                def copy_to_clipboard():
+                    # Plain text version for clipboard
+                    plain = []
+                    plain.append("Audio Stack Detection")
+                    plain.append(f"PipeWire: {'Active' if stack.pipewire_active else 'Not active'}")
+                    plain.append(f"WirePlumber: {'Active' if stack.wireplumber_active else 'Not active'}")
+                    plain.append(f"JACK: {'Active' if stack.jack_active else 'Not active'}")
+                    plain.append("")
+                    plain.append(f"ALSA Playback Devices ({len(devices)}):")
+                    for dev in devices:
+                        plain.append(f"  {dev.get('name', '')} - {dev.get('desc', dev.get('raw', ''))}")
+                    QApplication.clipboard().setText("\n".join(plain))
+                
+                copy_btn = QPushButton("Copy to Clipboard")
+                copy_btn.clicked.connect(copy_to_clipboard)
+                btn_layout.addWidget(copy_btn)
+                btn_layout.addStretch()
+                
+                close_btn = QPushButton("Close")
+                close_btn.clicked.connect(dialog.reject)
+                btn_layout.addWidget(close_btn)
+                layout.addLayout(btn_layout)
+                
+                dialog.exec()
+                
             except Exception as e:
                 QMessageBox.critical(self, "Detection Failed", f"Could not detect audio stack: {e}")
 
@@ -878,26 +922,68 @@ def main() -> int:
 
         def on_check_blockers(self) -> None:
             """Run comprehensive realtime configuration scan."""
-            from audioknob_gui.testing.rtcheck import run_full_scan, format_scan_html
+            from audioknob_gui.testing.rtcheck import run_full_scan, format_scan_html, CheckStatus
             
             # Run the scan
             result = run_full_scan()
-            html = format_scan_html(result)
+            
+            # Filter to actionable checks: show only those with fix_knob
+            # (This is what user can actually improve via the knob menu)
+            actionable_checks = [c for c in result.checks if c.fix_knob is not None]
+            actionable_issues = [c for c in actionable_checks if c.status not in (CheckStatus.PASS, CheckStatus.SKIP)]
+            
+            # Build focused HTML (actionable items only)
+            html = ["<h3>RT Configuration Issues You Can Fix</h3>"]
+            
+            if actionable_issues:
+                html.append(f"<p>Found {len(actionable_issues)} issue(s) with available fixes.</p>")
+                html.append("<table style='width:100%'>")
+                for c in actionable_issues:
+                    color = {"warn": "#f57c00", "fail": "#d32f2f"}.get(c.status.value, "#000")
+                    icon = {"warn": "⚠", "fail": "✗"}.get(c.status.value, "?")
+                    html.append(f"<tr><td style='color:{color}'>{icon}</td>")
+                    html.append(f"<td><b>{c.name}</b></td>")
+                    html.append(f"<td>{c.message}</td></tr>")
+                    html.append("<tr><td></td><td colspan='2' style='color:#666; font-size:0.9em'>")
+                    if c.detail:
+                        html.append(f"{c.detail}<br/>")
+                    html.append(f"<i>Fix: Use '{c.fix_knob}' knob in the main menu</i>")
+                    html.append("</td></tr>")
+                html.append("</table>")
+            else:
+                html.append("<p style='color:#2e7d32'>✓ All fixable checks passed!</p>")
+            
+            # Show full stats
+            html.append("<hr/>")
+            html.append(f"<p style='color:#666; font-size:0.9em'>Full scan: {result.passed} passed, {result.warnings} warnings, {result.failed} failed (score: {result.score}%)</p>")
             
             # Show in a resizable dialog
             dialog = QDialog(self)
-            dialog.setWindowTitle(f"RT Config Scan - Score: {result.score}%")
-            dialog.resize(600, 500)
+            dialog.setWindowTitle("RT Config Scan")
+            dialog.resize(600, 400)
             layout = QVBoxLayout(dialog)
             
             text = QTextEdit()
             text.setReadOnly(True)
-            text.setHtml(html)
+            text.setHtml("".join(html))
             layout.addWidget(text)
             
-            btns = QDialogButtonBox(QDialogButtonBox.Close)
-            btns.rejected.connect(dialog.reject)
-            layout.addWidget(btns)
+            # Button row with Show Full Scan option
+            btn_layout = QHBoxLayout()
+            
+            def show_full_scan():
+                text.setHtml(format_scan_html(result))
+                dialog.setWindowTitle(f"RT Config Scan (Full) - Score: {result.score}%")
+            
+            full_btn = QPushButton("Show Full Scan")
+            full_btn.clicked.connect(show_full_scan)
+            btn_layout.addWidget(full_btn)
+            btn_layout.addStretch()
+            
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.reject)
+            btn_layout.addWidget(close_btn)
+            layout.addLayout(btn_layout)
             
             dialog.exec()
 
