@@ -455,7 +455,20 @@ Captured system state with multiple applied changes:
 
 ### Bugs Found During Testing
 
-1. **Transaction cleanup**: After reset, transaction directories and metadata remain in `/var/lib/audioknob-gui/transactions/` and `~/.local/state/audioknob-gui/transactions/`. `list-changes` shows stale entries for files that no longer exist. **Severity**: Cosmetic / P2.
+1. **Reset All UX: user-phase `reset-defaults` reports expected root work as “errors”**:
+   - What happened: GUI runs `python3 -m audioknob_gui.worker.cli reset-defaults` first (user phase). The worker currently scans **both** root+user transactions; for root txs it emits: “needs root to reset; run with pkexec”.
+   - Why this is a bug: those messages are expected, but they surface as user-facing “errors”, which is confusing and makes “Reset All” look partially failed when it didn’t.
+   - Fix direction (worker): add a scope option (e.g. `reset-defaults --scope user|root|all`) OR make non-root runs automatically ignore root txs and report a structured “needs_root=true” summary instead of errors.
+   - Fix direction (GUI): call `reset-defaults --scope user` first, then pkexec `reset-defaults --scope root`.
+   - Severity: **P1** (release UX correctness).
+
+2. **Semantics mismatch: `list-changes` is historical, but GUI uses it as “current pending reset”**:
+   - Fact: `list-changes` is defined as “across all transactions” (audit/history). It will continue to show paths even after they were reset.
+   - Why this matters: GUI uses `list-changes` to preview what “Reset All” will reset, so users perceive “stale entries”.
+   - Fix direction: introduce `list-current` (or `list-pending-reset`) that represents *currently-applied* state, and have GUI use that for preview. Keep `list-changes` as history/audit.
+   - Severity: **P2** (mostly UX/clarity; can be done after P0/P1 blockers).
+
+3. **Optional: transaction cleanup**: Transactions remaining in `/var/lib/audioknob-gui/transactions/` and `~/.local/state/audioknob-gui/transactions/` is acceptable as an audit trail. If desired, add a separate cleanup command (e.g. `cleanup --older-than 30d`) and document retention policy. **Severity**: **P2**.
 
 ---
 
