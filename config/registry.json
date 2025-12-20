@@ -282,7 +282,7 @@
     {
       "id": "pipewire_quantum",
       "title": "PipeWire quantum (buffer)",
-      "description": "Configures PipeWire buffer size (quantum). Lower = less latency, more CPU. PipeWire will be restarted automatically after applying (best-effort). File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
+      "description": "Configures PipeWire buffer size (quantum). Lower = less latency, more CPU. System default is 1024; we recommend 128-256 for pro audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
       "category": "stack",
       "risk_level": "low",
       "requires_root": false,
@@ -301,7 +301,7 @@
     {
       "id": "pipewire_sample_rate",
       "title": "PipeWire sample rate",
-      "description": "Configures PipeWire default sample rate. PipeWire will be restarted automatically after applying (best-effort). File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
+      "description": "Configures PipeWire default sample rate. System default is 48000 Hz. Higher rates (96k/192k) for hi-res audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
       "category": "stack",
       "risk_level": "low",
       "requires_root": false,

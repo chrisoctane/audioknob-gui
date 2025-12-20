@@ -30,9 +30,32 @@ Columns: Knob | Status | Category | Risk | Action | ℹ
 ```
 
 ### Next Steps
-1. Test all knobs on real system
+1. ~~Test all knobs on real system~~ ✓ Complete (2025-12-20)
 2. Add more PipeWire configuration options (via info popup config dialog)
 3. Package for distribution
+
+### Future Enhancements (P2)
+
+#### Three-State Model for Knob Status
+
+**Problem:** Currently, if a setting is already in the "optimized" state before audioknob touches it (e.g., user manually configured, or distro default), clicking Reset fails with "no transaction found".
+
+**Proposed Solution:** Track three states per knob:
+
+| State | Meaning | Actions |
+|-------|---------|---------|
+| **Default** | Current matches system default | Apply → Optimized |
+| **Optimized** | Current matches our recommendation | Reset → Default (if we have tx) |
+| **Custom** | Neither default nor optimized | Set Default / Set Optimized / Adopt |
+
+**"Adopt" action:** Records current custom value as the user's baseline. Future resets restore to this adopted value.
+
+**Implementation notes:**
+- Would require `default_value` and `optimized_value` in registry for each knob
+- Status check returns `{ state: "default" | "optimized" | "custom", current_value, has_transaction }`
+- GUI shows different actions based on state
+
+**Status:** Proposal only. Not blocking for v1.0. Current workaround: only show Reset if transaction exists.
 
 ---
 
@@ -986,6 +1009,18 @@ systemctl status pipewire.service  # WRONG - will show inactive
 
 **Apply behavior:** after writing, the worker best-effort restarts PipeWire user services:
 `systemctl --user restart pipewire.service pipewire-pulse.service`
+
+**PipeWire Upstream Defaults (verified 2025-12-20):**
+| Setting | System Default | Our Recommendation |
+|---------|----------------|-------------------|
+| Sample rate | 48000 Hz | 48000 Hz (or higher for hi-res) |
+| Quantum (buffer) | 1024 frames | 128-256 frames (low latency) |
+
+**Design decision:** We do NOT encode "system defaults" in registry. The registry values are our *recommendations* for pro audio use. When user applies:
+- If value differs from what's currently in effect → create/update config file
+- Reset → delete the config file we created (system reverts to defaults)
+
+This avoids the "no-op file" edge case where backup == applied state.
 
 #### Desktop Launcher (dev convenience)
 
