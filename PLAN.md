@@ -42,6 +42,13 @@ This runs `scripts/check_repo_consistency.py` before each commit to catch regist
 python3 -m audioknob_gui.worker.cli --help
 python3 -m audioknob_gui.worker.cli status
 python3 -m audioknob_gui.worker.cli preview rt_limits_audio_group
+
+# Reset/transactions debugging helpers:
+python3 -m audioknob_gui.worker.cli list-changes   # historical audit (all transactions ever)
+python3 -m audioknob_gui.worker.cli list-pending   # current-state preview (what still needs reset)
+python3 -m audioknob_gui.worker.cli reset-defaults --scope user
+# root phase (requires pkexec):
+pkexec /usr/local/libexec/audioknob-gui-worker reset-defaults --scope root
 ```
 
 ---

@@ -873,3 +873,121 @@ Before committing, ensure registry is synced:
 cp config/registry.json audioknob_gui/data/registry.json
 diff config/registry.json audioknob_gui/data/registry.json  # Should show no diff
 ```
+
+---
+
+## PROPOSAL: Three-State Model for Knob Status (2025-12-20)
+
+### Problem Statement
+
+During manual validation, we discovered a fundamental UX issue:
+
+1. **Knob shows "Applied" but has no transaction**: If a system setting was already in the "optimized" state before audioknob-gui ever touched it, the GUI shows "✓ Applied" with a "Reset" button.
+2. **Reset fails with "no transaction found"**: Clicking Reset fails because there's no backup/transaction to restore from.
+3. **No visibility into "odd" states**: If a system update or manual change set a value that is neither default nor optimized, the user has no way to know or handle it.
+
+### Current Model (two states)
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| Not Applied | Current ≠ optimized | Apply |
+| Applied | Current == optimized | Reset (requires transaction) |
+
+### Proposed Model (three states)
+
+| Status | Meaning | Actions |
+|--------|---------|---------|
+| **Default** | Current == system default | Apply → Optimized |
+| **Optimized** | Current == our recommended value | Reset → Default (if transaction exists) |
+| **Custom** | Current ≠ default AND ≠ optimized | Set Default, Set Optimized, Adopt Current |
+
+### Required Changes
+
+#### 1. Registry: Define both values per knob
+
+```json
+{
+  "id": "thp_mode_madvise",
+  "impl": {
+    "kind": "sysfs_glob_kv",
+    "default_value": "always",
+    "optimized_value": "madvise",
+    "paths": ["/sys/kernel/mm/transparent_hugepage/enabled"]
+  }
+}
+```
+
+For knobs where we don't know/care about default:
+- `default_value: null` — Reset not offered unless we have a transaction
+
+#### 2. Status scan returns actual current value
+
+```json
+{
+  "knob_id": "thp_mode_madvise",
+  "current_value": "madvise",
+  "state": "optimized",
+  "has_transaction": true
+}
+```
+
+States:
+- `"default"` — current matches default_value
+- `"optimized"` — current matches optimized_value  
+- `"custom"` — current matches neither
+- `"unknown"` — could not read current value
+
+#### 3. GUI behavior per state
+
+| State | Status Column | Action Button | Config Column |
+|-------|---------------|---------------|---------------|
+| default | — | Apply | — |
+| optimized + has_tx | ✓ Applied | Reset | — |
+| optimized + no_tx | ✓ (pre-existing) | — (disabled) | — |
+| custom | ⚠ Custom | Set Default / Set Optimized | Adopt |
+
+#### 4. "Adopt Current" action
+
+When user clicks "Adopt" on a custom-state knob:
+- Creates a baseline transaction that records current value as the "adopted default"
+- Future resets restore to this adopted value, not the registry default
+
+This handles:
+- System updates that changed a value
+- User modifications outside the app
+- Pre-existing configurations
+
+### Implementation Phases
+
+**Phase 1 (minimal, quick fix):**
+- Only show "Reset" button if `has_transaction == true`
+- Prevents "no transaction found" errors
+- Does NOT require registry changes
+
+**Phase 2 (full model):**
+- Add `default_value` / `optimized_value` to registry
+- Implement three-state detection in status checks
+- Add "Custom" UI with Adopt functionality
+- Update all existing knob definitions
+
+### Questions for Overseer
+
+1. **Scope**: Should we do Phase 1 now (quick fix) and Phase 2 as a follow-up, or implement the full model now?
+
+2. **Default values**: For some knobs (e.g., systemd services), the "default" varies by distro. Options:
+   - (a) Define per-distro defaults in registry
+   - (b) Record baseline on first run
+   - (c) Mark these as "no default known" and skip Reset unless we have a transaction
+
+3. **Adopt semantics**: When user "Adopts" a custom state:
+   - (a) Just record it as baseline for this user/machine (transaction-based)
+   - (b) Persist it in state.json as an override
+   - (c) Both
+
+4. **Priority**: Is this blocking for project completion, or a P1/P2 enhancement?
+
+### Recommendation
+
+**Phase 1 immediately** — Hide Reset when no transaction exists. This is a 10-line fix that eliminates the confusing error.
+
+**Phase 2 as follow-up** — The full three-state model is valuable but adds complexity. Worth doing after core validation is complete.

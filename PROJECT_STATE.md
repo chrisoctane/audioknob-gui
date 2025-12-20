@@ -1310,6 +1310,10 @@ python3 -m audioknob_gui.worker.cli list-changes
 # List pending reset (files that still exist, for GUI preview)
 python3 -m audioknob_gui.worker.cli list-pending
 
+# Reset defaults in two phases (what GUI does for “Reset All”):
+python3 -m audioknob_gui.worker.cli reset-defaults --scope user
+pkexec /usr/local/libexec/audioknob-gui-worker reset-defaults --scope root
+
 # Apply root knob (via pkexec)
 pkexec /usr/local/libexec/audioknob-gui-worker apply rt_limits_audio_group
 
