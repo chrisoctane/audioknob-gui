@@ -151,6 +151,17 @@ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 # Reset → expect pre-value restored
 ```
 
+**cpu_governor_performance_persistent:**
+```bash
+# Before
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+systemctl is-enabled cpupower.service || true
+grep -E '^\s*GOVERNOR\s*=' /etc/sysconfig/cpupower 2>/dev/null || true
+
+# Apply → expect "performance" + cpupower enabled + GOV set to performance
+# Reset → expect pre-values restored (sysfs + config + service) via transaction
+```
+
 **thp_mode_madvise:**
 ```bash
 # Before
@@ -490,7 +501,7 @@ else:
       "cyclictest": {"rpm": "rt-tests", "dpkg": "rt-tests", "pacman": "rt-tests"},
       "rtirq": {"rpm": "rtirq", "dpkg": "rtirq-init", "pacman": "rtirq"},
       "cpupower": {"rpm": "cpupower", "dpkg": "linux-cpupower", "pacman": "cpupower"},
-      "balooctl": {"rpm": "baloo-tools5", "dpkg": "baloo-kf5", "pacman": "baloo"},
+      "balooctl": {"rpm": "kf6-baloo-tools", "dpkg": "baloo-kf5", "pacman": "baloo"},
   }
   ```
 
@@ -836,7 +847,7 @@ Comprehensive realtime readiness scan inspired by `realtimeconfigquickscan` but 
 | Audio group | User in audio/realtime group | audio_group_membership |
 | RT priority | Can use chrt, rtprio limit | rt_limits_audio_group |
 | Memory lock | memlock limit sufficient | rt_limits_audio_group |
-| CPU governor | All CPUs on 'performance' | cpu_governor_performance_temp |
+| CPU governor | All CPUs on 'performance' | cpu_governor_performance_temp (or cpu_governor_performance_persistent) |
 | Swappiness | vm.swappiness ≤ 10 | swappiness |
 | Inotify watches | ≥ 524288 for DAWs | inotify_max_watches |
 | Kernel RT | PREEMPT_RT or threadirqs | kernel_threadirqs |
@@ -862,7 +873,7 @@ Score: 88% (13 passed, 4 warnings, 0 failed)
 
 ✓ Audio group membership: User is in 'audio' group
 ⚠ CPU governor: Not all CPUs on 'performance'
-    Fix: Use 'cpu_governor_performance_temp' knob
+    Fix: Use 'cpu_governor_performance_temp' knob (or persistent knob if you want it to survive reboot)
 ...
 ```
 

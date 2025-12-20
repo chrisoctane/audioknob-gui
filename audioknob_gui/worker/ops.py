@@ -794,10 +794,49 @@ def check_knob_status(knob: Any) -> str:
             except Exception:
                 pass
         if applied_count == len(matches):
-            return "applied"
+            base = "applied"
         elif applied_count > 0:
+            base = "partial"
+        else:
+            base = "not_applied"
+
+        # Special case: persistent CPU governor should also be persisted in cpupower config + service.
+        if knob.id == "cpu_governor_performance_persistent":
+            if base != "applied":
+                return base
+
+            def _read_os_release_id() -> str:
+                try:
+                    for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+                        if line.startswith("ID="):
+                            return line.split("=", 1)[1].strip().strip('"').strip("'")
+                except Exception:
+                    pass
+                return ""
+
+            distro_id = _read_os_release_id()
+            cfg_path = "/etc/default/cpufrequtils" if distro_id in ("debian", "ubuntu", "linuxmint", "pop") else "/etc/sysconfig/cpupower"
+            cfg_ok = False
+            try:
+                text = Path(cfg_path).read_text(encoding="utf-8")
+                # Accept GOV...="performance" or GOV...=performance
+                import re
+                cfg_ok = re.search(r'^\s*GOVERNOR\s*=\s*"?performance"?\s*$', text, flags=re.MULTILINE) is not None
+            except Exception:
+                cfg_ok = False
+
+            svc_ok = False
+            try:
+                r = run(["systemctl", "is-enabled", "cpupower.service"])
+                svc_ok = r.stdout.strip() in ("enabled", "static", "indirect")
+            except Exception:
+                svc_ok = False
+
+            if cfg_ok and svc_ok:
+                return "applied"
             return "partial"
-        return "not_applied"
+
+        return base
     
     if kind == "qjackctl_server_prefix":
         path = Path(str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))).expanduser()

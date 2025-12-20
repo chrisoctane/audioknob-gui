@@ -76,7 +76,7 @@
     },
     {
       "id": "cpu_governor_performance_temp",
-      "title": "CPU Performance",
+      "title": "CPU Performance (until reboot)",
       "description": "Sets CPU frequency governor to 'performance' (until reboot). Prevents CPU frequency scaling which can cause latency spikes. File: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
       "category": "cpu",
       "risk_level": "low",
@@ -84,6 +84,25 @@
       "requires_reboot": false,
       "requires_groups": [],
       "requires_commands": [],
+      "capabilities": {"read": true, "apply": true, "restore": true},
+      "impl": {
+        "kind": "sysfs_glob_kv",
+        "params": {
+          "glob": "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
+          "value": "performance"
+        }
+      }
+    },
+    {
+      "id": "cpu_governor_performance_persistent",
+      "title": "CPU Performance (persistent)",
+      "description": "Sets CPU governor to 'performance' now AND configures it to persist across reboots (best-effort). On openSUSE/Fedora this writes /etc/sysconfig/cpupower and enables cpupower.service. Reset restores original config via transaction backups.",
+      "category": "cpu",
+      "risk_level": "medium",
+      "requires_root": true,
+      "requires_reboot": false,
+      "requires_groups": [],
+      "requires_commands": ["cpupower"],
       "capabilities": {"read": true, "apply": true, "restore": true},
       "impl": {
         "kind": "sysfs_glob_kv",

@@ -216,7 +216,8 @@ PipeWire buffer size (quantum) and sample rate are configurable via in-row selec
 ### CPU
 | Knob | Kind | Status |
 |------|------|--------|
-| CPU governor: performance | sysfs_glob_kv | ✓ |
+| CPU Performance (until reboot) | sysfs_glob_kv | ✓ |
+| CPU Performance (persistent) | sysfs_glob_kv (+ cpupower config + service) | ✓ |
 | CPU DMA latency udev rule | udev_rule | ✓ |
 
 ### VM

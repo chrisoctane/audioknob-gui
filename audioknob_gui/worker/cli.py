@@ -411,6 +411,58 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
             effects.extend(write_sysfs_values(str(params["glob"]), str(params["value"])))
 
+            # Special case: persistent CPU governor requires additional config to survive reboot.
+            if kid == "cpu_governor_performance_persistent":
+                from audioknob_gui.worker.ops import systemd_enable_now
+
+                def _read_os_release_id() -> str:
+                    try:
+                        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+                            if line.startswith("ID="):
+                                return line.split("=", 1)[1].strip().strip('"').strip("'")
+                    except Exception:
+                        pass
+                    return ""
+
+                distro_id = _read_os_release_id()
+                # Best-effort: openSUSE/Fedora use /etc/sysconfig/cpupower; Debian-family uses /etc/default/cpufrequtils.
+                if distro_id in ("debian", "ubuntu", "linuxmint", "pop"):
+                    cfg_path = "/etc/default/cpufrequtils"
+                    key = "GOVERNOR"
+                else:
+                    cfg_path = "/etc/sysconfig/cpupower"
+                    key = "GOVERNOR"
+
+                backups.append(backup_file(tx, cfg_path))
+
+                before = ""
+                try:
+                    before = Path(cfg_path).read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    before = ""
+
+                lines = before.splitlines()
+                out_lines: list[str] = []
+                replaced = False
+                for line in lines:
+                    if line.strip().startswith(key + "="):
+                        out_lines.append(f'{key}="performance"')
+                        replaced = True
+                    else:
+                        out_lines.append(line)
+                if not replaced:
+                    if out_lines and out_lines[-1].strip() != "":
+                        out_lines.append("")
+                    out_lines.append('# Added by audioknob-gui (persistent CPU governor)')
+                    out_lines.append(f'{key}="performance"')
+
+                after = "\n".join(out_lines).rstrip("\n") + "\n"
+                Path(cfg_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(cfg_path).write_text(after, encoding="utf-8")
+
+                # Best-effort: ensure cpupower.service is enabled so setting persists.
+                effects.append(systemd_enable_now("cpupower.service"))
+
         elif kind == "udev_rule":
             path = str(params["path"])
             content = str(params["content"])
