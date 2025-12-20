@@ -207,7 +207,7 @@ def reset_file_to_default(meta: dict, tx: Transaction | None = None) -> tuple[bo
 def list_transactions(root_dir: str | Path) -> list[dict]:
     """List all transactions with their metadata.
     
-    Returns a list of dicts with txid, timestamp, applied knobs, etc.
+    Returns a list of dicts with txid, timestamp, applied knobs, effects, etc.
     """
     root = Path(root_dir)
     tx_dir = root / "transactions"
@@ -235,6 +235,7 @@ def list_transactions(root_dir: str | Path) -> list[dict]:
                 "timestamp": ts_sec,
                 "applied": manifest.get("applied", []),
                 "backups": manifest.get("backups", []),
+                "effects": manifest.get("effects", []),  # Include effects!
                 "root": str(entry),
             })
         except Exception:

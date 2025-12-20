@@ -225,9 +225,62 @@ All P0, P1, and P2 issues from the initial review have been addressed. Current f
 2. ~~Fix packaging/data-path~~ ✅ DONE
 3. ~~Normalize wrappers~~ ✅ DONE
 4. ~~Update registry schema~~ ✅ DONE
-5. Fix doc drift (see “Overseer audit update” above)
+5. ~~Fix doc drift~~ ✅ DONE
 
 Remaining considerations:
 - P1: "restore-knob" granularity (low priority, GUI applies one at a time)
 - P1: RPM restore semantics (may need testing on Fedora)
 - P1: Add timeouts to subprocess calls (nice-to-have)
+
+---
+
+## Secondary Overseer Review (2025-12-20)
+
+### Overall Assessment: ✅ SOLID IMPLEMENTATION
+
+The agent implementing the remaining 12 placeholder knobs followed the architecture correctly:
+
+| Check | Status |
+|-------|--------|
+| Transaction-based (backup before modify) | ✅ All file ops use `backup_file(tx, path)` |
+| Distro detection (kernel cmdline) | ✅ Handles openSUSE TW/Leap, Fedora, Debian/Ubuntu, Arch |
+| New knob kinds implemented | ✅ `udev_rule`, `kernel_cmdline`, `pipewire_conf`, `user_service_mask`, `baloo_disable` |
+| Status checks added | ✅ All new kinds have `check_knob_status()` implementations |
+| Restore functions added | ✅ `user_service_restore()`, `baloo_enable()` |
+| Effects tracking | ✅ User-scope effects tracked in manifests |
+| Docs updated | ✅ PROJECT_STATE.md and PLAN.md both updated |
+| Compiles | ✅ No syntax errors |
+
+### Doc Drift Issues — RESOLVED
+
+The agent fixed the doc drift items identified in the previous audit:
+
+| Issue | Status |
+|-------|--------|
+| Registry structure in PLAN.md | ✅ Now shows `{ "schema": 1, "knobs": [...] }` |
+| Boot loader commands missing `-o` | ✅ Full commands in table |
+| `cpupower` missing from package mappings | ✅ Added to PROJECT_STATE.md |
+| `impl: null` not documented | ✅ Added note that impl may be null |
+| `device` category missing | ✅ Added to PROJECT_STATE.md category enum |
+
+### All Issues Resolved ✅
+
+All doc drift and code issues have been addressed.
+
+### Implementation Quality Notes
+
+1. **`user_service_restore()` is properly stateful** — Records `pre_enabled` and `pre_active` before masking, restores to previous state rather than blindly unmasking. This is the correct approach.
+
+2. **Kernel cmdline checks are now token-based** — Fixed the substring false-positive issue by splitting on spaces and checking exact matches.
+
+3. **Systemd state handling is comprehensive** — Now handles `masked`, `static`, `indirect`, `generated`, `linked` states, not just `enabled`/`disabled`.
+
+4. **PipeWire config uses separate files** — `99-audioknob-quantum.conf` and `99-audioknob-rate.conf` don't clobber each other. Good design.
+
+### Files to Sync
+
+Before committing, ensure registry is synced:
+```bash
+cp config/registry.json audioknob_gui/data/registry.json
+diff config/registry.json audioknob_gui/data/registry.json  # Should show no diff
+```
