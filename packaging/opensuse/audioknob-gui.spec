@@ -1,5 +1,7 @@
+%global pkg_version 0.1.0
+
 Name:           audioknob-gui
-Version:        0.1.0
+Version:        %{pkg_version}
 Release:        0
 Summary:        GUI-first realtime audio tuning app (transactions + preview/apply/undo)
 License:        MIT
@@ -7,9 +9,9 @@ URL:            https://github.com/chrisoctane/audioknob-gui
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
-BuildRequires:  python3-devel
+BuildRequires:  python%{python3_pkgversion}-devel
+BuildRequires:  python-rpm-macros
 BuildRequires:  python3-rpm-macros
-BuildRequires:  pyproject-rpm-macros
 BuildRequires:  desktop-file-utils
 BuildRequires:  fdupes
 

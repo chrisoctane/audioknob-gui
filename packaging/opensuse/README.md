@@ -8,8 +8,8 @@ on openSUSE Tumbleweed.
 Install tools needed to build an RPM:
 
 ```bash
-sudo zypper install -y rpm-build python-rpm-macros python3-rpm-macros pyproject-rpm-macros \
-  desktop-file-utils polkit
+sudo zypper install -y rpm-build python-rpm-macros python3-rpm-macros \
+  python313-devel desktop-file-utils polkit
 ```
 
 Runtime dependencies are handled by the RPM (notably `python3dist(PySide6)`).

@@ -28,7 +28,7 @@ echo "Using spec: ${spec}"
 # Create a source tarball from the current git HEAD.
 git archive --format=tar --prefix="${name}-${version}/" HEAD | gzip -9 > "${tar}"
 
-rpmbuild --define "_topdir ${topdir}" -ba "${spec}"
+rpmbuild --define "_topdir ${topdir}" --define "pkg_version ${version}" -ba "${spec}"
 
 echo ""
 echo "Built RPM(s):"
