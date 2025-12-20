@@ -1254,3 +1254,26 @@ Transaction 1883068784f1b627 (newer): 83 bytes — HAS audit=0 ✗
 
 Core functionality is validated and working. Apply, Reset, and Reset All work correctly for all knob types. Kernel cmdline knobs now show "⟳ Reboot" indicator when changes are pending.
 
+
+---
+
+## P2 Tasks Complete (2025-12-20)
+
+### PipeWire Upstream Defaults — ✅ DONE
+
+**Verified values:**
+- Sample rate: 48000 Hz (system default)
+- Quantum: 1024 frames (system default)
+
+**Decision: Option A implemented**
+- Registry values are *recommendations* (e.g., quantum=256 for low latency)
+- We do NOT encode system defaults; user explicitly chooses non-default values
+- Documented in PROJECT_STATE.md under "PipeWire Configuration"
+
+### Three-State Model — ✅ DOCUMENTED
+
+Proposal documented in PROJECT_STATE.md under "Future Enhancements (P2)".
+Not implemented - marked as future enhancement, not blocking for v1.0.
+
+Current workaround: Reset button works if we have a transaction; "no transaction" cases need manual handling.
+
