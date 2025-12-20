@@ -1034,7 +1034,7 @@ Some workers are reporting they “don’t see updates”. That is almost always
 ### Source of truth
 
 - **Canonical branch**: `origin/master`
-- **Current expected head (as of this note)**: commit `b10e019` (verify via `git rev-parse --short origin/master`)
+- **Expected head**: do **not** rely on a hardcoded hash in this doc; always verify via `git rev-parse --short origin/master` and ensure your `HEAD` matches it.
 
 ### Required sync steps (every session start, before any work)
 
