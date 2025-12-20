@@ -9,7 +9,10 @@ URL:            https://github.com/chrisoctane/audioknob-gui
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
-BuildRequires:  python%{python3_pkgversion}-devel
+# On Tumbleweed the devel packages are versioned (python313-devel, python312-devel, ...).
+# The %python3_pkgversion macro is not guaranteed to exist in all build environments,
+# so we pin to the current Tumbleweed python used by this repo/tooling.
+BuildRequires:  python313-devel
 BuildRequires:  python-rpm-macros
 BuildRequires:  python3-rpm-macros
 BuildRequires:  desktop-file-utils
