@@ -300,21 +300,21 @@ def main() -> int:
             root.addLayout(top)
 
             self.table = QTableWidget(0, 7)
-            self.table.setHorizontalHeaderLabels(["Knob", "Status", "Category", "Risk", "Action", "Config", ""])
+            # New layout: Info button first (column 0), then Knob, Status, etc.
+            self.table.setHorizontalHeaderLabels(["", "Knob", "Status", "Category", "Risk", "Action", "Config"])
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(True)
-            # Layout: Action column gets a single button, Config column gets dropdowns/config controls.
             # We hide the row-number gutter to reclaim horizontal space.
             self.table.verticalHeader().setVisible(False)
             header = self.table.horizontalHeader()
-            header.setSectionResizeMode(0, QHeaderView.Stretch)          # Knob
-            header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Status
-            header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Category
-            header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Risk
-            header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Action
-            header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Config
-            header.setSectionResizeMode(6, QHeaderView.Fixed)            # Info
-            self.table.setColumnWidth(6, 34)
+            header.setSectionResizeMode(0, QHeaderView.Fixed)            # Info
+            header.setSectionResizeMode(1, QHeaderView.Stretch)          # Knob
+            header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Status
+            header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Category
+            header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Risk
+            header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Action
+            header.setSectionResizeMode(6, QHeaderView.ResizeToContents) # Config
+            self.table.setColumnWidth(0, 32)
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
@@ -419,15 +419,36 @@ def main() -> int:
                 elif not commands_ok:
                     lock_reason = f"Install: {', '.join(missing_cmds)}"
                 
-                # Column 0: Knob title (gray if locked)
+                # Column 0: Info button (pretty circle with i)
+                info_btn = QPushButton("ℹ")
+                info_btn.setFixedSize(26, 26)
+                info_btn.setStyleSheet("""
+                    QPushButton {
+                        border-radius: 13px;
+                        background-color: #3498db;
+                        color: white;
+                        font-weight: bold;
+                        font-size: 14px;
+                    }
+                    QPushButton:hover {
+                        background-color: #2980b9;
+                    }
+                    QPushButton:pressed {
+                        background-color: #1f6dad;
+                    }
+                """)
+                info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
+                self.table.setCellWidget(r, 0, info_btn)
+
+                # Column 1: Knob title (gray if locked)
                 title_item = QTableWidgetItem(k.title)
                 title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
                 if locked:
                     title_item.setForeground(QColor("#9e9e9e"))
                     title_item.setToolTip(lock_reason)
-                self.table.setItem(r, 0, title_item)
+                self.table.setItem(r, 1, title_item)
 
-                # Column 1: Status (with color)
+                # Column 2: Status (with color)
                 if locked:
                     if not group_ok:
                         status_item = QTableWidgetItem("🔒")
@@ -441,50 +462,50 @@ def main() -> int:
                     status_text, status_color = self._status_display(status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
-                self.table.setItem(r, 1, status_item)
+                self.table.setItem(r, 2, status_item)
 
-                # Column 2: Category
+                # Column 3: Category
                 cat_item = QTableWidgetItem(str(k.category))
                 if locked:
                     cat_item.setForeground(QColor("#9e9e9e"))
-                self.table.setItem(r, 2, cat_item)
+                self.table.setItem(r, 3, cat_item)
 
-                # Column 3: Risk
+                # Column 4: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
                 if locked:
                     risk_item.setForeground(QColor("#9e9e9e"))
-                self.table.setItem(r, 3, risk_item)
+                self.table.setItem(r, 4, risk_item)
 
-                # Column 4: Action button (context-sensitive)
+                # Column 5: Action button (context-sensitive)
                 if k.id == "audio_group_membership":
                     # Special: group membership knob
                     btn = QPushButton("Join")
                     btn.clicked.connect(self._on_join_groups)
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
                 elif not group_ok:
                     # Locked: user needs to join groups first
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
                 elif not commands_ok:
                     # Locked: needs package install
                     btn = QPushButton("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
                     btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
                 elif k.id == "stack_detect":
                     btn = QPushButton("View")
                     btn.clicked.connect(self.on_view_stack)
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
                 elif k.id == "scheduler_jitter_test":
                     btn = QPushButton("Test")
                     btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
                 elif k.id == "blocker_check":
                     btn = QPushButton("Scan")
                     btn.clicked.connect(self.on_check_blockers)
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
                 elif k.id == "pipewire_quantum" and not locked:
                     # Action column: Apply/Reset button
                     status = self._knob_statuses.get(k.id, "unknown")
@@ -494,7 +515,7 @@ def main() -> int:
                     else:
                         btn = QPushButton("Apply")
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
 
                     # Config column: quantum selector
                     combo = QComboBox()
@@ -520,7 +541,7 @@ def main() -> int:
                         self._populate()
 
                     combo.currentIndexChanged.connect(_on_change)
-                    self.table.setCellWidget(r, 5, combo)
+                    self.table.setCellWidget(r, 6, combo)
 
                 elif k.id == "pipewire_sample_rate" and not locked:
                     # Action column: Apply/Reset button
@@ -531,7 +552,7 @@ def main() -> int:
                     else:
                         btn = QPushButton("Apply")
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
 
                     # Config column: sample rate selector
                     combo = QComboBox()
@@ -557,13 +578,13 @@ def main() -> int:
                         self._populate()
 
                     combo.currentIndexChanged.connect(_on_rate_change)
-                    self.table.setCellWidget(r, 5, combo)
+                    self.table.setCellWidget(r, 6, combo)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
                     btn = QPushButton("—")
                     btn.setEnabled(False)
                     btn.setToolTip("Not implemented yet")
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
                 else:
                     # Normal knob: show Apply or Reset based on current status
                     status = self._knob_statuses.get(k.id, "unknown")
@@ -573,18 +594,12 @@ def main() -> int:
                     else:
                         btn = QPushButton("Apply")
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-                    self.table.setCellWidget(r, 4, btn)
+                    self.table.setCellWidget(r, 5, btn)
 
-                # Column 5: Config - clear if no widget was set for this row
+                # Column 6: Config - clear if no widget was set for this row
                 # (PipeWire rows set their own widgets above; other rows need clearing)
                 if k.id not in ("pipewire_quantum", "pipewire_sample_rate"):
-                    self.table.removeCellWidget(r, 5)
-
-                # Column 6: Info button (shows details popup)
-                info_btn = QPushButton("ℹ")
-                info_btn.setFixedWidth(30)
-                info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
-                self.table.setCellWidget(r, 6, info_btn)
+                    self.table.removeCellWidget(r, 6)
             
             # Re-enable sorting after population
             self.table.setSortingEnabled(True)

@@ -3,7 +3,7 @@
   "knobs": [
     {
       "id": "audio_group_membership",
-      "title": "Join audio groups",
+      "title": "Audio Groups",
       "description": "Adds current user to audio-related groups (audio, realtime, pipewire). Required for RT limits and low-latency audio. Requires logout/login to take effect.",
       "category": "permissions",
       "risk_level": "low",
@@ -21,7 +21,7 @@
     },
     {
       "id": "rt_limits_audio_group",
-      "title": "Realtime limits for @audio",
+      "title": "RT Limits",
       "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio.",
       "category": "permissions",
       "risk_level": "low",
@@ -44,7 +44,7 @@
     },
     {
       "id": "irqbalance_disable",
-      "title": "Disable irqbalance",
+      "title": "IRQ Balance",
       "description": "Stops irqbalance service so audio IRQs don't get moved between CPUs unexpectedly. Reduces latency jitter.",
       "category": "irq",
       "risk_level": "medium",
@@ -60,7 +60,7 @@
     },
     {
       "id": "rtirq_enable",
-      "title": "Enable rtirq service",
+      "title": "RT IRQ",
       "description": "Enables rtirq service which sets high realtime priorities for audio-related IRQ threads. Requires rtirq package. File: /etc/sysconfig/rtirq or /etc/rtirq.conf.",
       "category": "irq",
       "risk_level": "medium",
@@ -76,7 +76,7 @@
     },
     {
       "id": "cpu_governor_performance_temp",
-      "title": "CPU governor: performance",
+      "title": "CPU Performance",
       "description": "Sets CPU frequency governor to 'performance' (until reboot). Prevents CPU frequency scaling which can cause latency spikes. File: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
       "category": "cpu",
       "risk_level": "low",
@@ -95,7 +95,7 @@
     },
     {
       "id": "cpu_dma_latency_udev",
-      "title": "CPU DMA latency udev rule",
+      "title": "DMA Latency",
       "description": "Creates udev rule to allow audio group write access to /dev/cpu_dma_latency. Enables apps to request low C-state latency. File: /etc/udev/rules.d/99-cpu-dma-latency.rules",
       "category": "cpu",
       "risk_level": "low",
@@ -114,7 +114,7 @@
     },
     {
       "id": "swappiness",
-      "title": "Reduce swappiness",
+      "title": "Swappiness",
       "description": "Sets vm.swappiness=10 to reduce swapping, avoiding latency spikes under memory pressure. File: /etc/sysctl.d/99-audioknob-gui.conf",
       "category": "vm",
       "risk_level": "low",
@@ -133,7 +133,7 @@
     },
     {
       "id": "thp_mode_madvise",
-      "title": "THP: madvise mode",
+      "title": "Huge Pages",
       "description": "Sets Transparent Huge Pages to 'madvise' mode. Recommended for latency-sensitive audio workloads. File: /sys/kernel/mm/transparent_hugepage/enabled",
       "category": "vm",
       "risk_level": "medium",
@@ -152,7 +152,7 @@
     },
     {
       "id": "inotify_max_watches",
-      "title": "Increase inotify watches",
+      "title": "Inotify Watches",
       "description": "Sets fs.inotify.max_user_watches=600000 for DAWs that watch many files. Prevents 'too many open files' errors. File: /etc/sysctl.d/99-audioknob-inotify.conf",
       "category": "vm",
       "risk_level": "low",
@@ -171,7 +171,7 @@
     },
     {
       "id": "dirty_bytes",
-      "title": "Reduce dirty writeback",
+      "title": "Dirty Bytes",
       "description": "Lowers vm.dirty_bytes to 50MB and vm.dirty_background_bytes to 16MB to reduce I/O latency from writeback. File: /etc/sysctl.d/99-audioknob-dirty.conf",
       "category": "vm",
       "risk_level": "low",
@@ -193,7 +193,7 @@
     },
     {
       "id": "usb_autosuspend_disable",
-      "title": "Disable USB autosuspend",
+      "title": "USB Power",
       "description": "Disables USB autosuspend to prevent USB audio device dropouts. Creates udev rule. File: /etc/udev/rules.d/99-usb-no-autosuspend.rules",
       "category": "power",
       "risk_level": "low",
@@ -212,7 +212,7 @@
     },
     {
       "id": "kernel_threadirqs",
-      "title": "Enable threaded IRQs",
+      "title": "Threaded IRQs",
       "description": "Adds 'threadirqs' to kernel cmdline. Makes IRQ handlers schedulable for better RT performance. Requires reboot. File: /etc/kernel/cmdline (openSUSE TW) or /etc/default/grub",
       "category": "kernel",
       "risk_level": "medium",
@@ -228,7 +228,7 @@
     },
     {
       "id": "kernel_audit_off",
-      "title": "Disable kernel audit",
+      "title": "Kernel Audit",
       "description": "Adds 'audit=0' to kernel cmdline. Reduces overhead from audit subsystem. Requires reboot. File: /etc/kernel/cmdline or /etc/default/grub",
       "category": "kernel",
       "risk_level": "medium",
@@ -244,7 +244,7 @@
     },
     {
       "id": "kernel_mitigations_off",
-      "title": "Disable CPU mitigations",
+      "title": "CPU Mitigations",
       "description": "Adds 'mitigations=off' to kernel cmdline. SECURITY TRADEOFF: Improves performance but disables Spectre/Meltdown protections. Requires reboot.",
       "category": "kernel",
       "risk_level": "high",
@@ -260,7 +260,7 @@
     },
     {
       "id": "qjackctl_server_prefix_rt",
-      "title": "QjackCtl: realtime flags",
+      "title": "QjackCtl RT",
       "description": "Ensures QjackCtl Server line has -R (realtime) flag. Optional: taskset for CPU pinning. File: ~/.config/rncbc.org/QjackCtl.conf",
       "category": "stack",
       "risk_level": "low",
@@ -281,7 +281,7 @@
     },
     {
       "id": "pipewire_quantum",
-      "title": "PipeWire quantum (buffer)",
+      "title": "PW Buffer",
       "description": "Configures PipeWire buffer size (quantum). Lower = less latency, more CPU. System default is 1024; we recommend 128-256 for pro audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
       "category": "stack",
       "risk_level": "low",
@@ -300,7 +300,7 @@
     },
     {
       "id": "pipewire_sample_rate",
-      "title": "PipeWire sample rate",
+      "title": "PW Sample Rate",
       "description": "Configures PipeWire default sample rate. System default is 48000 Hz. Higher rates (96k/192k) for hi-res audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
       "category": "stack",
       "risk_level": "low",
@@ -319,7 +319,7 @@
     },
     {
       "id": "disable_tracker",
-      "title": "Disable GNOME tracker",
+      "title": "GNOME Indexer",
       "description": "Masks tracker-miner-fs and tracker-extract services (file indexer) which cause latency spikes during indexing. GNOME desktops only.",
       "category": "services",
       "risk_level": "low",
@@ -342,7 +342,7 @@
     },
     {
       "id": "disable_baloo",
-      "title": "Disable KDE Baloo",
+      "title": "KDE Indexer",
       "description": "Disables Baloo file indexer (KDE) which causes latency spikes during indexing. Uses balooctl to disable. KDE desktops only.",
       "category": "services",
       "risk_level": "low",
@@ -358,7 +358,7 @@
     },
     {
       "id": "stack_detect",
-      "title": "Audio stack info",
+      "title": "Audio Stack",
       "description": "Shows what audio server is active: PipeWire, JACK, or ALSA only. Also lists ALSA playback devices.",
       "category": "testing",
       "risk_level": "low",
@@ -371,7 +371,7 @@
     },
     {
       "id": "scheduler_jitter_test",
-      "title": "Scheduler jitter test",
+      "title": "Jitter Test",
       "description": "Runs cyclictest to measure scheduler latency jitter. Shows max latency in microseconds. Lower is better. Requires cyclictest (rt-tests package).",
       "category": "testing",
       "risk_level": "low",
@@ -384,7 +384,7 @@
     },
     {
       "id": "blocker_check",
-      "title": "RT config scan",
+      "title": "RT Scan",
       "description": "Comprehensive realtime readiness scan. Checks: audio group, CPU governor, swappiness, inotify, kernel RT/threadirqs, high-res timers, irqbalance, THP, USB autosuspend, HPET/RTC access, filesystems, and more. Based on realtimeconfigquickscan but improved.",
       "category": "testing",
       "risk_level": "low",
