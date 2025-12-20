@@ -140,6 +140,21 @@ def load_state() -> dict:
             data["pipewire_quantum"] = None
         if "pipewire_sample_rate" not in data:
             data["pipewire_sample_rate"] = None
+        # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
+        try:
+            q = data.get("pipewire_quantum")
+            qv = int(q) if q is not None else None
+            if qv not in (32, 64, 128, 256, 512, 1024):
+                data["pipewire_quantum"] = None
+        except Exception:
+            data["pipewire_quantum"] = None
+        try:
+            r = data.get("pipewire_sample_rate")
+            rv = int(r) if r is not None else None
+            if rv not in (44100, 48000, 88200, 96000, 192000):
+                data["pipewire_sample_rate"] = None
+        except Exception:
+            data["pipewire_sample_rate"] = None
         return data
     except Exception:
         return default
@@ -556,10 +571,10 @@ def main() -> int:
                     self.table.setCellWidget(r, 5, btn)
 
                     # Config column: quantum selector
-                    combo = QComboBox()
+                    q_combo = QComboBox()
                     values = [32, 64, 128, 256, 512, 1024]
                     for v in values:
-                        combo.addItem(str(v), v)
+                        q_combo.addItem(str(v), v)
 
                     current = self._pipewire_quantum_from_state()
                     if current is None and k.impl:
@@ -567,21 +582,23 @@ def main() -> int:
                             current = int(k.impl.params.get("quantum")) if k.impl.params.get("quantum") is not None else None
                         except Exception:
                             current = None
-                    combo.blockSignals(True)
+                    q_combo.blockSignals(True)
                     if current in values:
-                        combo.setCurrentIndex(values.index(int(current)))
-                    combo.blockSignals(False)
+                        q_combo.setCurrentIndex(values.index(int(current)))
+                    q_combo.blockSignals(False)
 
-                    def _on_change(_: int) -> None:
-                        self.state["pipewire_quantum"] = int(combo.currentData())
+                    def _on_change(_: int, *, _combo: QComboBox = q_combo) -> None:
+                        # Capture the correct combo; otherwise a later reassignment in _populate()
+                        # can cause late-binding bugs (e.g. writing sample rate into quantum).
+                        self.state["pipewire_quantum"] = int(_combo.currentData())
                         save_state(self.state)
                         # Optimistic UI: config changed, so action should become Apply until proven otherwise.
                         self._knob_statuses["pipewire_quantum"] = "not_applied"
                         self._refresh_statuses()
                         self._populate()
 
-                    combo.currentIndexChanged.connect(_on_change)
-                    self.table.setCellWidget(r, 6, combo)
+                    q_combo.currentIndexChanged.connect(_on_change)
+                    self.table.setCellWidget(r, 6, q_combo)
 
                 elif k.id == "pipewire_sample_rate" and not locked:
                     # Action column: Apply/Reset button
@@ -595,10 +612,10 @@ def main() -> int:
                     self.table.setCellWidget(r, 5, btn)
 
                     # Config column: sample rate selector
-                    combo = QComboBox()
+                    r_combo = QComboBox()
                     values = [44100, 48000, 88200, 96000, 192000]
                     for v in values:
-                        combo.addItem(f"{v} Hz", v)
+                        r_combo.addItem(f"{v} Hz", v)
 
                     current = self._pipewire_sample_rate_from_state()
                     if current is None and k.impl:
@@ -606,20 +623,20 @@ def main() -> int:
                             current = int(k.impl.params.get("rate")) if k.impl.params.get("rate") is not None else None
                         except Exception:
                             current = None
-                    combo.blockSignals(True)
+                    r_combo.blockSignals(True)
                     if current in values:
-                        combo.setCurrentIndex(values.index(int(current)))
-                    combo.blockSignals(False)
+                        r_combo.setCurrentIndex(values.index(int(current)))
+                    r_combo.blockSignals(False)
 
-                    def _on_rate_change(_: int) -> None:
-                        self.state["pipewire_sample_rate"] = int(combo.currentData())
+                    def _on_rate_change(_: int, *, _combo: QComboBox = r_combo) -> None:
+                        self.state["pipewire_sample_rate"] = int(_combo.currentData())
                         save_state(self.state)
                         self._knob_statuses["pipewire_sample_rate"] = "not_applied"
                         self._refresh_statuses()
                         self._populate()
 
-                    combo.currentIndexChanged.connect(_on_rate_change)
-                    self.table.setCellWidget(r, 6, combo)
+                    r_combo.currentIndexChanged.connect(_on_rate_change)
+                    self.table.setCellWidget(r, 6, r_combo)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
                     btn = QPushButton("—")
