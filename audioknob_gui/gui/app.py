@@ -274,15 +274,29 @@ def main() -> int:
             # Apply saved font size
             self._apply_font_size(self.state.get("font_size", 11))
 
+            # Apply modern stylesheet
+            self._apply_stylesheet()
+
             w = QWidget()
             self.setCentralWidget(w)
             root = QVBoxLayout(w)
+            root.setContentsMargins(16, 16, 16, 16)
+            root.setSpacing(12)
 
+            # Header with title and controls
             top = QHBoxLayout()
-            top.addWidget(QLabel("Pick actions per knob, then Preview and Apply."))
+            top.setSpacing(12)
+            
+            title_label = QLabel("🎛️ Audio Knobs")
+            title_label.setObjectName("titleLabel")
+            top.addWidget(title_label)
+            
+            top.addStretch(1)
             
             # Font size control
-            top.addWidget(QLabel("Font:"))
+            font_label = QLabel("Font:")
+            font_label.setObjectName("controlLabel")
+            top.addWidget(font_label)
             self.font_spinner = QSpinBox()
             self.font_spinner.setRange(8, 24)
             self.font_spinner.setValue(self.state.get("font_size", 11))
@@ -290,11 +304,14 @@ def main() -> int:
             self.font_spinner.valueChanged.connect(self._on_font_change)
             top.addWidget(self.font_spinner)
             
-            self.btn_undo = QPushButton("Undo")
+            top.addSpacing(20)
+            
+            self.btn_undo = QPushButton("↩ Undo")
             self.btn_undo.setToolTip("Undo last change")
-            self.btn_reset = QPushButton("Reset All")
+            self.btn_undo.setObjectName("secondaryButton")
+            self.btn_reset = QPushButton("🔄 Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
-            top.addStretch(1)
+            self.btn_reset.setObjectName("dangerButton")
             top.addWidget(self.btn_undo)
             top.addWidget(self.btn_reset)
             root.addLayout(top)
@@ -304,6 +321,10 @@ def main() -> int:
             self.table.setHorizontalHeaderLabels(["", "Knob", "Status", "Category", "Risk", "Action", "Config"])
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(True)
+            self.table.setAlternatingRowColors(True)
+            self.table.setShowGrid(False)
+            self.table.setSelectionBehavior(QTableWidget.SelectRows)
+            self.table.setSelectionMode(QTableWidget.SingleSelection)
             # We hide the row-number gutter to reclaim horizontal space.
             self.table.verticalHeader().setVisible(False)
             header = self.table.horizontalHeader()
@@ -314,7 +335,7 @@ def main() -> int:
             header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Risk
             header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Action
             header.setSectionResizeMode(6, QHeaderView.ResizeToContents) # Config
-            self.table.setColumnWidth(0, 32)
+            self.table.setColumnWidth(0, 40)  # Slightly wider for rounded info button
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
@@ -380,6 +401,57 @@ def main() -> int:
                         self._knob_statuses[item["knob_id"]] = item["status"]
             except Exception:
                 pass  # Status check failed, leave statuses empty
+
+        def _make_apply_button(self, text: str = "Apply") -> QPushButton:
+            """Create a styled Apply button (green/blue)."""
+            btn = QPushButton(text)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #27ae60;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: 500;
+                }
+                QPushButton:hover { background-color: #219a52; }
+                QPushButton:pressed { background-color: #1e8449; }
+            """)
+            return btn
+
+        def _make_reset_button(self, text: str = "Reset") -> QPushButton:
+            """Create a styled Reset button (orange)."""
+            btn = QPushButton(text)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e67e22;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: 500;
+                }
+                QPushButton:hover { background-color: #cf711a; }
+                QPushButton:pressed { background-color: #b8630f; }
+            """)
+            return btn
+
+        def _make_action_button(self, text: str) -> QPushButton:
+            """Create a styled action button (blue)."""
+            btn = QPushButton(text)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: 500;
+                }
+                QPushButton:hover { background-color: #2980b9; }
+                QPushButton:pressed { background-color: #1f6dad; }
+            """)
+            return btn
 
         def _status_display(self, status: str) -> tuple[str, str]:
             """Return (display_text, color) for a status."""
@@ -479,7 +551,7 @@ def main() -> int:
                 # Column 5: Action button (context-sensitive)
                 if k.id == "audio_group_membership":
                     # Special: group membership knob
-                    btn = QPushButton("Join")
+                    btn = self._make_apply_button("Join")
                     btn.clicked.connect(self._on_join_groups)
                     self.table.setCellWidget(r, 5, btn)
                 elif not group_ok:
@@ -490,30 +562,30 @@ def main() -> int:
                     self.table.setCellWidget(r, 5, btn)
                 elif not commands_ok:
                     # Locked: needs package install
-                    btn = QPushButton("Install")
+                    btn = self._make_action_button("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
                     btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
                     self.table.setCellWidget(r, 5, btn)
                 elif k.id == "stack_detect":
-                    btn = QPushButton("View")
+                    btn = self._make_action_button("View")
                     btn.clicked.connect(self.on_view_stack)
                     self.table.setCellWidget(r, 5, btn)
                 elif k.id == "scheduler_jitter_test":
-                    btn = QPushButton("Test")
+                    btn = self._make_action_button("Test")
                     btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
                     self.table.setCellWidget(r, 5, btn)
                 elif k.id == "blocker_check":
-                    btn = QPushButton("Scan")
+                    btn = self._make_action_button("Scan")
                     btn.clicked.connect(self.on_check_blockers)
                     self.table.setCellWidget(r, 5, btn)
                 elif k.id == "pipewire_quantum" and not locked:
                     # Action column: Apply/Reset button
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
-                        btn = QPushButton("Reset")
+                        btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
-                        btn = QPushButton("Apply")
+                        btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
                     self.table.setCellWidget(r, 5, btn)
 
@@ -547,10 +619,10 @@ def main() -> int:
                     # Action column: Apply/Reset button
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
-                        btn = QPushButton("Reset")
+                        btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
-                        btn = QPushButton("Apply")
+                        btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
                     self.table.setCellWidget(r, 5, btn)
 
@@ -589,10 +661,10 @@ def main() -> int:
                     # Normal knob: show Apply or Reset based on current status
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
-                        btn = QPushButton("Reset")
+                        btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
-                        btn = QPushButton("Apply")
+                        btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
                     self.table.setCellWidget(r, 5, btn)
 
@@ -609,6 +681,177 @@ def main() -> int:
             font = QApplication.instance().font()
             font.setPointSize(size)
             QApplication.instance().setFont(font)
+
+        def _apply_stylesheet(self) -> None:
+            """Apply modern stylesheet to the application."""
+            self.setStyleSheet("""
+                /* Main window background */
+                QMainWindow {
+                    background-color: #f5f5f5;
+                }
+                QWidget {
+                    background-color: #f5f5f5;
+                }
+
+                /* Title label */
+                QLabel#titleLabel {
+                    font-size: 18px;
+                    font-weight: bold;
+                    color: #2c3e50;
+                }
+                QLabel#controlLabel {
+                    color: #7f8c8d;
+                }
+
+                /* Table styling */
+                QTableWidget {
+                    background-color: white;
+                    alternate-background-color: #fafafa;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 8px;
+                    gridline-color: #eeeeee;
+                    selection-background-color: #e3f2fd;
+                    selection-color: #1976d2;
+                }
+                QTableWidget::item {
+                    padding: 8px;
+                    border-bottom: 1px solid #f0f0f0;
+                }
+                QTableWidget::item:hover {
+                    background-color: #f5f5f5;
+                }
+                QHeaderView::section {
+                    background-color: #ecf0f1;
+                    color: #2c3e50;
+                    font-weight: bold;
+                    padding: 10px 8px;
+                    border: none;
+                    border-bottom: 2px solid #bdc3c7;
+                }
+                QHeaderView::section:first {
+                    border-top-left-radius: 8px;
+                }
+                QHeaderView::section:last {
+                    border-top-right-radius: 8px;
+                }
+
+                /* Default buttons in table */
+                QTableWidget QPushButton {
+                    background-color: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: 500;
+                    min-width: 60px;
+                }
+                QTableWidget QPushButton:hover {
+                    background-color: #2980b9;
+                }
+                QTableWidget QPushButton:pressed {
+                    background-color: #1f6dad;
+                }
+                QTableWidget QPushButton:disabled {
+                    background-color: #bdc3c7;
+                    color: #7f8c8d;
+                }
+
+                /* Secondary button (Undo) */
+                QPushButton#secondaryButton {
+                    background-color: #95a5a6;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-weight: 500;
+                }
+                QPushButton#secondaryButton:hover {
+                    background-color: #7f8c8d;
+                }
+                QPushButton#secondaryButton:pressed {
+                    background-color: #6c7a7b;
+                }
+
+                /* Danger button (Reset All) */
+                QPushButton#dangerButton {
+                    background-color: #e74c3c;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-weight: 500;
+                }
+                QPushButton#dangerButton:hover {
+                    background-color: #c0392b;
+                }
+                QPushButton#dangerButton:pressed {
+                    background-color: #a93226;
+                }
+
+                /* Combo boxes */
+                QComboBox {
+                    background-color: white;
+                    border: 1px solid #bdc3c7;
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    min-width: 80px;
+                }
+                QComboBox:hover {
+                    border-color: #3498db;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 20px;
+                }
+                QComboBox::down-arrow {
+                    width: 12px;
+                    height: 12px;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: white;
+                    border: 1px solid #bdc3c7;
+                    selection-background-color: #3498db;
+                    selection-color: white;
+                }
+
+                /* Spin box */
+                QSpinBox {
+                    background-color: white;
+                    border: 1px solid #bdc3c7;
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                }
+                QSpinBox:hover {
+                    border-color: #3498db;
+                }
+
+                /* Scrollbars */
+                QScrollBar:vertical {
+                    background-color: #f5f5f5;
+                    width: 12px;
+                    border-radius: 6px;
+                }
+                QScrollBar::handle:vertical {
+                    background-color: #bdc3c7;
+                    border-radius: 6px;
+                    min-height: 30px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background-color: #95a5a6;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+
+                /* Tooltips */
+                QToolTip {
+                    background-color: #2c3e50;
+                    color: white;
+                    border: none;
+                    padding: 6px 10px;
+                    border-radius: 4px;
+                }
+            """)
 
         def _on_font_change(self, size: int) -> None:
             """Handle font size change from spinner."""
