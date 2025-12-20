@@ -392,6 +392,73 @@ Action taken:
 
 - Manual root validation report must be executed on a test system and recorded in `overseer.md` with PASS/FAIL per knob + reboot-required flows.
 
+---
+
+## Manual Validation Report (2025-12-20, openSUSE Tumbleweed)
+
+### Test System
+- **OS**: openSUSE Tumbleweed
+- **Kernel**: 6.18.1-1-default
+- **CPUs**: 32 cores
+- **Boot**: GRUB2-BLS with sdbootutil (`/etc/kernel/cmdline`)
+
+### STATE 0: Before Reset
+
+Captured system state with multiple applied changes:
+
+| Category | Items |
+|----------|-------|
+| **Files (6)** | udev rule, 2× sysctl, limits, 2× pipewire conf |
+| **Effects (114)** | 32× CPU governor, 6× THP writes, PipeWire restarts |
+| **Kernel cmdline** | `threadirqs` present (pre-existing, not from audioknob) |
+
+### Reset to Defaults
+
+**Action**: Clicked "Reset All" in GUI
+
+**Result**:
+- ✅ 4 system files deleted (udev, sysctl, limits)
+- ✅ 2 user files handled (pipewire quantum restored from backup, rate deleted)
+- ✅ sysfs values restored (THP → `[always]`, CPU governor → `powersave`)
+- ⚠️ Transaction metadata not cleaned up (stale data in `list-changes`, cosmetic bug)
+
+**GUI feedback**: "Reset 4 system file(s)" + showed expected pkexec errors from user-scope pass (not a real error)
+
+### STATE 1: Clean Baseline (Post-Reboot)
+
+| Item | Value | Status |
+|------|-------|--------|
+| Kernel cmdline | `threadirqs` | Pre-existing (not from audioknob) |
+| THP | `[always] madvise never` | ✅ Default |
+| CPU Governor (cpu0) | `performance` | System default on boot |
+| irqbalance | disabled / inactive | Pre-existing |
+| rtirq | enabled / active | Pre-existing |
+| udev 99-* rules | None | ✅ Clean |
+| sysctl audioknob files | None | ✅ Clean |
+| limits audioknob files | None | ✅ Clean |
+
+**Baseline established**: Ready for validation matrix.
+
+### Validation Matrix (in progress)
+
+| Knob | Apply | Status Check | Reset | Restore Verified | Result |
+|------|-------|--------------|-------|------------------|--------|
+| irqbalance_disable | | | | | PENDING |
+| rtirq_enable | | | | | PENDING |
+| cpu_governor_performance_temp | | | | | PENDING |
+| thp_mode_madvise | | | | | PENDING |
+| usb_autosuspend_disable | | | | | PENDING |
+| cpu_dma_latency_udev | | | | | PENDING |
+| kernel_threadirqs | | | | | PENDING (reboot) |
+| kernel_audit_off | | | | | PENDING (reboot) |
+| kernel_mitigations_off | | | | | PENDING (reboot) |
+
+### Bugs Found During Testing
+
+1. **Transaction cleanup**: After reset, transaction directories and metadata remain in `/var/lib/audioknob-gui/transactions/` and `~/.local/state/audioknob-gui/transactions/`. `list-changes` shows stale entries for files that no longer exist. **Severity**: Cosmetic / P2.
+
+---
+
 ### PASS: PipeWire quantum UX + correctness
 
 Verified in codebase:
