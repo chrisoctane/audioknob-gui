@@ -94,26 +94,85 @@ Run (no GUI required):
 
 ### Manual validation (root/system effects)
 
-Do these last, on a test system:
-- systemd toggles: apply/reset, confirm restore
-- sysfs knobs: apply/reset, confirm restore
-- udev rule knobs: apply/reset, confirm udev reload behavior
-- kernel cmdline knobs: apply, confirm bootloader file updated, reboot, confirm status
+Run on a **test system**. For each knob, verify:
+- **Actual system state** (file/service/sysfs/cmdline) changes correctly
+- **GUI status** reflects reality after apply/reset
 
-#### THP (Transparent Huge Pages) validation
+#### 1) systemd toggles (root, no reboot)
 
-The `thp_mode_madvise` knob writes to `/sys/kernel/mm/transparent_hugepage/enabled`.
+**irqbalance_disable:**
+```bash
+# Before
+systemctl is-enabled irqbalance.service
+systemctl is-active irqbalance.service
+# Apply in GUI → expect disabled/inactive
+# Reset in GUI → verify exact pre-state restored
+```
 
-Validation steps:
-1. **Before:** `cat /sys/kernel/mm/transparent_hugepage/enabled` → expect `always [madvise] never` or similar
-2. **Apply knob:** Click Apply in GUI (requires root via pkexec)
-3. **After:** `cat /sys/kernel/mm/transparent_hugepage/enabled` → expect `always madvise [never]` or bracketed value changed
-4. **GUI:** Confirm status refreshes to "Applied"
+**rtirq_enable:**
+```bash
+# Before
+systemctl is-enabled rtirq.service
+systemctl is-active rtirq.service
+# Apply in GUI → expect enabled
+# Reset in GUI → verify exact pre-state restored
+```
 
-If state doesn't change after apply:
-- Check stderr from worker apply command
-- Verify sysfs file is writable (some kernels may have immutable THP settings)
-- Kernel config `CONFIG_TRANSPARENT_HUGEPAGE` must be enabled
+#### 2) sysfs knobs (root, no reboot)
+
+**cpu_governor_performance_temp:**
+```bash
+# Before
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+# Apply → expect "performance"
+# Reset → expect pre-value restored
+```
+
+**thp_mode_madvise:**
+```bash
+# Before
+cat /sys/kernel/mm/transparent_hugepage/enabled
+# Apply → bracketed token becomes [madvise]
+# Reset → bracketed token returns to original
+# If kernel refuses writes: GUI must show stderr, status should become unknown
+```
+
+#### 3) udev rule knobs (root, no reboot)
+
+**usb_autosuspend_disable:**
+```bash
+# Before
+test -f /etc/udev/rules.d/99-usb-no-autosuspend.rules && echo present || echo absent
+# Apply → file present, status applied
+# Reset → file absent, status not_applied
+```
+
+**cpu_dma_latency_udev:**
+```bash
+# Before
+test -f /etc/udev/rules.d/99-cpu-dma-latency.rules && echo present || echo absent
+# Apply/Reset + status checks
+```
+
+#### 4) kernel cmdline knobs (root, requires reboot) — DO LAST
+
+For each: `kernel_threadirqs`, `kernel_audit_off`, `kernel_mitigations_off`
+
+**Apply flow:**
+1. Apply in GUI → verify bootloader file updated:
+   - Tumbleweed: `/etc/kernel/cmdline` contains token
+   - Verify update tool output surfaced (sdbootutil/grub update)
+2. Reboot
+3. Verify:
+```bash
+cat /proc/cmdline | tr ' ' '\n' | grep -E '^(threadirqs|audit=0|mitigations=off)$'
+```
+4. GUI status should show "Applied"
+
+**Reset flow:**
+1. Reset in GUI → verify token removed from bootloader file
+2. Reboot
+3. Token absent in `/proc/cmdline`, GUI status "not_applied"
 
 ## 1. Project Vision & Principles
 
@@ -154,7 +213,8 @@ audioknob-gui/
 ├── bin/audioknob-gui              # Entry point (bash script)
 ├── config/registry.json           # Knob definitions (canonical source)
 ├── packaging/                     # Deployment files
-│   ├── audioknob-gui.desktop      # Desktop launcher (dev convenience; see notes)
+│   ├── audioknob-gui.desktop.template # Desktop entry template (do not install directly)
+│   ├── audioknob-gui-worker       # Root worker launcher (installed to /usr/local/libexec/)
 ├── audioknob_gui/
 │   ├── data/registry.json         # Packaged copy (synced from config/)
 │   ├── gui/app.py                 # UI layer (PySide6)
@@ -163,7 +223,7 @@ audioknob-gui/
 │   ├── platform/                  # OS detection
 │   └── testing/                   # Test tools
 ├── scripts/
-│   └── install-desktop.sh         # Installs the desktop launcher into ~/.local/share/applications/
+│   └── install-desktop.sh         # Generates + installs a dev desktop launcher into ~/.local/share/applications/
 ```
 
 **Why separate worker from GUI?**
@@ -896,9 +956,14 @@ systemctl status pipewire.service  # WRONG - will show inactive
 
 #### Desktop Launcher (dev convenience)
 
-There is a desktop entry at `packaging/audioknob-gui.desktop` and an install helper `scripts/install-desktop.sh`.
+For development, use `scripts/install-desktop.sh`, which generates a working `.desktop` entry at:
+`~/.local/share/applications/audioknob-gui.desktop`
 
-**Important:** the desktop entry’s `Exec=` is currently fixed to a repo checkout path (dev-only). For production packaging, this must be replaced with an installed entrypoint (e.g., `audioknob-gui`) or generated from a template.
+Template reference:
+- `packaging/audioknob-gui.desktop.template` is a **template** and should not be installed directly.
+
+**Important:** the installed `.desktop` generated by the script is **dev mode** and sets `AUDIOKNOB_DEV_REPO` so imports work from your repo checkout.
+For production packaging, the desktop entry should use an installed entrypoint (e.g., `Exec=audioknob-gui`) and must not depend on `AUDIOKNOB_DEV_REPO`.
 
 #### QjackCtl Configuration
 
@@ -1174,8 +1239,8 @@ def detect_boot_system() -> str:
 
 ### Before Each Session
 ```bash
-# Reinstall worker if code changed
-sudo install -D -m 0755 ~/audioknob-gui/packaging/audioknob-gui-worker /usr/local/libexec/audioknob-gui-worker
+# (Dev) ensure polkit + root worker launcher installed (if needed)
+sudo ./packaging/install-polkit.sh
 
 # Run app
 ~/audioknob-gui/bin/audioknob-gui
@@ -1221,8 +1286,8 @@ ls -la ~/.local/state/audioknob-gui/transactions/
 # Run GUI
 ~/audioknob-gui/bin/audioknob-gui
 
-# Reinstall worker
-sudo install -D -m 0755 ~/audioknob-gui/packaging/audioknob-gui-worker /usr/local/libexec/audioknob-gui-worker
+# (Dev) install polkit policy + root worker launcher (fixed pkexec path)
+sudo ./packaging/install-polkit.sh
 
 # Check knob status (CLI)
 python3 -m audioknob_gui.worker.cli status

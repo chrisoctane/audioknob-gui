@@ -275,6 +275,123 @@ Worker fix (P0):
 - Update sysfs status parsing to detect bracketed token anywhere in the line (similar to `write_sysfs_values()`’s token scan).
 - After fix, `thp_mode_madvise` should report `applied` when the bracketed token is `madvise` even if it was pre-existing.
 
+---
+
+## Completion directive (P0/P1) — “Ship it” criteria for worker agents (2025-12-20)
+
+This is the final sprint plan. Do **not** declare “complete” until **every item** below is satisfied and recorded.
+
+### P0 — Manual root validation matrix (end-to-end via GUI)
+
+Goal: prove **apply + status + reset/restore** works and is conservative/correct.
+
+Rules:
+- Run on a **test machine** (or accept risk explicitly).
+- After every Apply/Reset, verify both:
+  - **actual system state** (file/service/sysfs/cmdline)
+  - **GUI status** reflects reality
+- For reboot-required knobs, do the reboot and re-check `/proc/cmdline` and GUI status.
+- Record results (PASS/FAIL + command output snippets) into `overseer.md` under a dated “Manual validation report” section.
+
+#### 1) systemd toggles (root, no reboot)
+- `irqbalance_disable`
+  - Verify before:
+    - `systemctl is-enabled irqbalance.service`
+    - `systemctl is-active irqbalance.service`
+  - Apply in GUI → verify expected “disabled/inactive”
+  - Reset in GUI → verify return to exact pre-state (enabled/disabled/masked + active/inactive)
+- `rtirq_enable`
+  - Same flow:
+    - `systemctl is-enabled rtirq.service`
+    - `systemctl is-active rtirq.service`
+
+#### 2) sysfs knobs (root, no reboot)
+- `cpu_governor_performance_temp`
+  - Verify: `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`
+  - Apply → expect `performance`
+  - Reset → expect pre-value restored
+- `thp_mode_madvise`
+  - Verify: `cat /sys/kernel/mm/transparent_hugepage/enabled`
+  - Apply → bracketed token should become `[madvise]` (format varies)
+  - Reset → bracketed token returns to pre token
+  - If kernel refuses writes, GUI must show stderr and status should become `unknown`/conservative.
+
+#### 3) udev rule knobs (root, no reboot)
+- `usb_autosuspend_disable`
+  - Verify file presence:
+    - `test -f /etc/udev/rules.d/99-usb-no-autosuspend.rules && echo present || echo absent`
+  - Apply → expect present; status applied
+  - Reset → expect absent; status not_applied
+  - Bonus: ensure udev reload behavior is correct (if implemented)
+- `cpu_dma_latency_udev`
+  - Verify:
+    - `test -f /etc/udev/rules.d/99-cpu-dma-latency.rules && echo present || echo absent`
+  - Apply/Reset + status checks
+
+#### 4) kernel cmdline knobs (root, requires reboot) — DO LAST
+- `kernel_threadirqs` (threadirqs)
+- `kernel_audit_off` (audit=0)
+- `kernel_mitigations_off` (mitigations=off)
+
+For each knob:
+- Apply in GUI → verify bootloader file updated:
+  - Tumbleweed: `/etc/kernel/cmdline` contains token
+  - Verify update tool output is surfaced (sdbootutil/grub update)
+- Reboot → verify:
+  - `cat /proc/cmdline | tr ' ' '\\n' | grep -E '^(threadirqs|audit=0|mitigations=off)$'`
+  - GUI status becomes applied
+- Reset in GUI → verify token removed from bootloader file
+- Reboot → verify token absent in `/proc/cmdline` and GUI status not_applied
+
+### P0 — Status correctness sweep (must pass)
+
+For each knob kind, ensure status checks actual state and avoids false positives:
+- `sysfs_glob_kv`: must handle selector formats (THP) and plain values.
+- `systemd_unit_toggle`: handle masked/static/indirect/generator states correctly.
+- `kernel_cmdline`: exact token matching only (no substring matches).
+- `group_membership`: status reflects actual group membership even if applied externally.
+- `udev_rule`: status reflects file content/exists.
+
+### P1 — Installed-mode readiness (packaging quality)
+
+Goal: “works when installed”, not just from repo.
+
+Minimum:
+- Desktop entry `Exec=` should be `audioknob-gui` (installed entrypoint), not repo paths.
+- Dev installer (`scripts/install-desktop.sh`) may generate dev-specific desktop file, but it must be clearly marked “dev mode”.
+- Verify installed-mode registry/resource loading works (importlib.resources) and does not depend on `AUDIOKNOB_DEV_REPO`.
+- Verify pkexec worker invocation path is correct in installed mode.
+
+### P1 — Error surfacing + UX polish
+
+- Any pkexec failure or root write failure must show the underlying stderr in the GUI (not silent).
+- RT scan default view is “fixable issues only”; full scan behind a button/toggle.
+- Audio stack dialog is scrollable and “Copy to clipboard” works.
+
+---
+
+## Overseer checkpoint — “worker updated” review (2025-12-20)
+
+### PASS: Manual root validation matrix added
+
+Observed:
+- `PROJECT_STATE.md` now contains a concrete manual validation matrix (systemd/sysfs/udev/kernel-cmdline) with verify commands and acceptance criteria.
+
+### FIXED: Docs drift in launcher/packaging references
+
+Found:
+- `PROJECT_STATE.md` still referenced `packaging/audioknob-gui.desktop`, but launcher now uses `packaging/audioknob-gui.desktop.template` + `scripts/install-desktop.sh`.
+
+Action taken:
+- Updated `PROJECT_STATE.md` to reflect current reality:
+  - template file name
+  - dev launcher generation semantics
+  - use `./packaging/install-polkit.sh` for installing pkexec policy + worker launcher
+
+### Remaining completion blocker (still P0)
+
+- Manual root validation report must be executed on a test system and recorded in `overseer.md` with PASS/FAIL per knob + reboot-required flows.
+
 ### PASS: PipeWire quantum UX + correctness
 
 Verified in codebase:
