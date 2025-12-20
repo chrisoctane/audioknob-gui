@@ -988,24 +988,25 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def _find_transaction_for_knob(knob_id: str) -> tuple[str | None, dict | None, str | None]:
-    """Find the most recent transaction that applied a specific knob.
+    """Find the oldest transaction that applied a specific knob.
     
     Returns (txid, manifest, scope) or (None, None, None) if not found.
     """
     paths = default_paths()
     
-    # Check root transactions first (most recent first)
+    # Check root transactions first (oldest first), so restore-knob can restore
+    # the original "before" state even if the knob was applied multiple times.
     root_txs = list_transactions(paths.var_lib_dir)
-    for tx_info in root_txs:
+    for tx_info in reversed(root_txs):
         if knob_id in tx_info.get("applied", []):
             manifest_path = Path(tx_info["root"]) / "manifest.json"
             if manifest_path.exists():
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 return tx_info["txid"], manifest, "root"
     
-    # Check user transactions
+    # Check user transactions (oldest first) for non-root knobs.
     user_txs = list_transactions(paths.user_state_dir)
-    for tx_info in user_txs:
+    for tx_info in reversed(user_txs):
         if knob_id in tx_info.get("applied", []):
             manifest_path = Path(tx_info["root"]) / "manifest.json"
             if manifest_path.exists():

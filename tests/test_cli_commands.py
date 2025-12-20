@@ -179,3 +179,46 @@ def test_list_pending_effect_dedup_keeps_oldest():
             effect = output["effects"][0]
             assert effect["before"] == "A"
             assert effect["txid"] == "tx1_older"
+
+
+def test_find_transaction_for_knob_returns_oldest():
+    """_find_transaction_for_knob() must return the OLDEST tx so restore-knob restores original state."""
+    from audioknob_gui.worker.cli import _find_transaction_for_knob
+    from unittest.mock import MagicMock
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        var_lib = Path(tmpdir) / "var"
+        user_state = Path(tmpdir) / "user"
+        (var_lib / "transactions").mkdir(parents=True)
+        (user_state / "transactions").mkdir(parents=True)
+
+        # Create two root transactions for the same knob.
+        # Newer-first is what list_transactions() returns.
+        tx_newer_root = var_lib / "transactions" / "tx_newer"
+        tx_older_root = var_lib / "transactions" / "tx_older"
+        tx_newer_root.mkdir(parents=True)
+        tx_older_root.mkdir(parents=True)
+
+        (tx_newer_root / "manifest.json").write_text(
+            json.dumps({"schema": 1, "applied": ["kernel_audit_off"], "backups": [], "effects": []}),
+            encoding="utf-8",
+        )
+        (tx_older_root / "manifest.json").write_text(
+            json.dumps({"schema": 1, "applied": ["kernel_audit_off"], "backups": [], "effects": []}),
+            encoding="utf-8",
+        )
+
+        mock_root_txs = [
+            {"txid": "tx_newer", "root": str(tx_newer_root), "applied": ["kernel_audit_off"]},
+            {"txid": "tx_older", "root": str(tx_older_root), "applied": ["kernel_audit_off"]},
+        ]
+
+        with patch("audioknob_gui.worker.cli.default_paths") as mock_paths:
+            with patch("audioknob_gui.worker.cli.list_transactions") as mock_list:
+                mock_paths.return_value = MagicMock(var_lib_dir=str(var_lib), user_state_dir=str(user_state))
+                mock_list.side_effect = [mock_root_txs, []]
+
+                txid, manifest, scope = _find_transaction_for_knob("kernel_audit_off")
+                assert txid == "tx_older"
+                assert scope == "root"
+                assert manifest is not None
