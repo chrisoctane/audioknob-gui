@@ -1006,36 +1006,21 @@ Context: `origin/master` now includes:
 - Tests: `pytest` and `scripts/smoke_test.sh` pass on current `master`.
 - GUI: Config-column widget cleanup is correct and low-risk (clears col 5 for non-PipeWire rows).
 
-### Follow-ups (not blockers)
+### Follow-ups (not blockers) — ALL COMPLETE ✅
 
-#### P2 — `list-pending` effect dedup comment vs behavior mismatch
+#### P2 — `list-pending` effect dedup comment vs behavior mismatch — ✅ FIXED
 
-In `cmd_list_pending`, the comment says “keep the oldest (original before state)”, but the code iterates transactions newest-first and keeps the **first encountered** effect, i.e. effectively the newest.
+Fixed dedup logic to keep oldest entry (original before state) by replacing instead of skipping duplicates.
 
-Acceptance criteria:
-- Either change dedup logic to actually keep the oldest entry, OR update the comment to match reality.
-- Ensure dedup is stable across root+user tx ordering.
+#### P2 — `reset-defaults --scope all` help/docstring mismatch — ✅ FIXED
 
-#### P2 — `reset-defaults --scope all` help/docstring mismatch
+Updated docstring to document actual behavior: silently skips root txs when non-root (for GUI two-phase use).
 
-The help/docstring currently implies `--scope all` “will error on root txs if not root”, but implementation **silently skips** root txs when non-root (intended for GUI two-phase behavior).
+#### P2 — `needs_root_reset` field correctness — ✅ FIXED
 
-Acceptance criteria:
-- Update docstring/CLI help to reflect actual behavior.
+Now uses list-pending semantics: only returns true if there are files that still exist OR restorable effects (sysfs_write, systemd_unit_toggle).
 
-#### P2 — `needs_root_reset` field correctness
+#### P2 — Tests: add coverage for new commands — ✅ FIXED
 
-`cmd_reset_defaults --scope user` sets `needs_root_reset = bool(root_txs)`, but root tx directories remain as audit history even after reset, so this flag can stay true “forever” and is not a reliable “pending work” indicator.
-
-Acceptance criteria:
-- Either compute “pending root reset” via `list-pending` semantics, or remove the field if GUI does not use it.
-
-#### P2 — Tests: add coverage for new commands
-
-Current smoke test doesn’t exercise:
-- `list-pending`
-- `reset-defaults --scope user` (and root scope behavior shape)
-
-Acceptance criteria:
-- Add a unit test for `cmd_list_pending` output shape + filtering (mock tx manifests).
-- Extend `scripts/smoke_test.sh` to call `list-pending` and `reset-defaults --scope user` (should be safe non-root).
+- Added `tests/test_cli_commands.py` with unit tests for `list-pending` output shape, filtering, and dedup behavior
+- Extended `scripts/smoke_test.sh` with `list-pending` and `reset-defaults --scope user` commands
