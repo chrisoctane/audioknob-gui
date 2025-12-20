@@ -1143,3 +1143,61 @@ Transaction 1883068784f1b627 (newer): 83 bytes — HAS audit=0 ✗
 - Manually edited `/etc/kernel/cmdline` with `sed -i 's/ audit=0//'`
 - Ran `sdbootutil update-all-entries`
 
+**STATUS:** ✅ FIXED on `origin/master` (restore-knob now uses OLDEST tx; regression test added)
+
+
+---
+
+## Overseer directive (2025-12-20) — stay aligned on roles
+
+- **Overseer**: planning, audits, acceptance criteria, documentation gates, and merge decisions.
+- **Workers**: implement code changes + tests.
+- I will only land code directly if you explicitly request it (or approve a small emergency hotfix).
+
+
+---
+
+## P1 — Surface “reboot required” in GUI for cmdline knobs (2025-12-20)
+
+**Problem:** Applying kernel cmdline knobs changes boot config, but GUI doesn’t clearly indicate that a reboot is required before status can become “Applied”.
+
+**Scope:** GUI only (no worker changes required unless status needs a new state).
+
+**Acceptance criteria:**
+- **After Apply** of any knob with `requires_reboot: true`:
+  - GUI shows an explicit indicator: either
+    - status cell includes a reboot marker (e.g. “Reboot required”), **or**
+    - a dialog/banner appears (“Applied. Reboot required to take effect.”).
+- **Until reboot confirms** (i.e. `/proc/cmdline` contains the token), status should not mislead:
+  - either show “Pending reboot” state, or show “Not applied (reboot required)” with a clear hint.
+- **No drift**: behavior must be driven by registry’s `requires_reboot` flag, not hardcoded knob IDs.
+
+**Suggested implementation notes (worker):**
+- In `audioknob_gui/gui/app.py`, when rendering status/action cells, if `knob.requires_reboot` and the knob is in a “recently applied” set, show a “pending reboot” indicator.
+- “Recently applied” can be tracked in `state.json` (e.g. `pending_reboot_knobs: [ids...]`) and cleared on app start when `/proc/cmdline` confirms.
+
+
+---
+
+## P2 — PipeWire upstream defaults verification + registry decision (2025-12-20)
+
+**Goal:** Resolve the “restore to identical state / no-op apply” edge case with a principled decision about defaults.
+
+**Action required (worker):**
+- Verify upstream/default behavior for:
+  - default sample rate (likely 48000)
+  - default quantum / buffer (value depends on context; may not be a stable “1024”)
+
+**Acceptance criteria:**
+- Provide a short note in `PROJECT_STATE.md` (or `PLAN.md`) stating:
+  - what values are treated as defaults
+  - where these defaults come from (upstream docs / default config behavior)
+  - how our app behaves when no config file existed before apply
+- If changing defaults in `registry.json`:
+  - update both `config/registry.json` and synced `audioknob_gui/data/registry.json`
+  - add/adjust tests so “apply then reset” semantics remain conservative and predictable
+
+**Open design decision (pick one, document it):**
+- **Option A (preferable):** Do NOT encode “defaults” in registry; only write a PipeWire conf file when the user explicitly chooses a non-default value.
+- **Option B:** Encode defaults in registry (only if truly stable), accept that apply may create a no-op file and reset deletes it.
+
