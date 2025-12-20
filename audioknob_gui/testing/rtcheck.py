@@ -565,28 +565,49 @@ def check_filesystem_types() -> CheckResult:
 
 def check_usb_autosuspend() -> CheckResult:
     """Check if USB autosuspend is enabled."""
-    # Check a few USB devices
-    autosuspend_enabled = False
-    for power_path in Path("/sys/bus/usb/devices").glob("*/power/autosuspend"):
-        val = _read_file(power_path)
-        if val and val != "-1" and val != "0":
-            autosuspend_enabled = True
-            break
-    
-    if autosuspend_enabled:
+    # Our knob enforces `power/control=on` via a udev rule. The autosuspend delay value
+    # (power/autosuspend) is not a reliable indicator of whether autosuspend is active.
+    rule_path = Path("/etc/udev/rules.d/99-usb-no-autosuspend.rules")
+
+    controls = list(Path("/sys/bus/usb/devices").glob("*/power/control"))
+    if not controls:
+        return CheckResult(
+            id="usb_autosuspend",
+            name="USB autosuspend",
+            status=CheckStatus.SKIP,
+            message="No USB power controls found"
+        )
+
+    auto = 0
+    on = 0
+    unknown = 0
+    for p in controls:
+        v = (_read_file(p) or "").strip().lower()
+        if v == "auto":
+            auto += 1
+        elif v == "on":
+            on += 1
+        else:
+            unknown += 1
+
+    if auto > 0:
+        detail = f"Devices: on={on}, auto={auto}, unknown={unknown}"
+        if rule_path.exists():
+            detail += "\nRule is installed, but some devices are still in 'auto'. Try replugging the interface or running: sudo udevadm trigger"
         return CheckResult(
             id="usb_autosuspend",
             name="USB autosuspend",
             status=CheckStatus.WARN,
-            message="USB autosuspend enabled",
-            detail="Can cause dropouts with USB audio interfaces",
+            message="Some USB devices are autosuspending ('auto')",
+            detail=detail,
             fix_knob="usb_autosuspend_disable"
         )
+
     return CheckResult(
         id="usb_autosuspend",
         name="USB autosuspend",
         status=CheckStatus.PASS,
-        message="USB autosuspend disabled"
+        message="USB autosuspend disabled (all devices 'on')"
     )
 
 

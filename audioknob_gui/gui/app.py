@@ -295,6 +295,13 @@ def main() -> int:
             self.font_spinner.valueChanged.connect(self._on_font_change)
             top.addWidget(self.font_spinner)
             top.addStretch(1)
+
+            # Global reboot-required banner (shown when any knob is pending reboot).
+            self.reboot_banner = QLabel("")
+            self.reboot_banner.setStyleSheet("color: #f57c00; font-weight: bold;")
+            self.reboot_banner.setVisible(False)
+            top.addWidget(self.reboot_banner)
+
             self.btn_undo = QPushButton("Undo")
             self.btn_undo.setToolTip("Undo last change")
             self.btn_reset = QPushButton("Reset All")
@@ -377,6 +384,8 @@ def main() -> int:
         def _refresh_statuses(self) -> None:
             """Fetch current status of all knobs."""
             try:
+                # Clear old values so we don't keep stale states if status probe fails.
+                self._knob_statuses = {}
                 argv = [
                     sys.executable,
                     "-m",
@@ -392,6 +401,15 @@ def main() -> int:
                         self._knob_statuses[item["knob_id"]] = item["status"]
             except Exception:
                 pass  # Status check failed, leave statuses empty
+            self._update_reboot_banner()
+
+        def _update_reboot_banner(self) -> None:
+            needs_reboot = any(v == "pending_reboot" for v in self._knob_statuses.values())
+            if needs_reboot:
+                self.reboot_banner.setText("Reboot required")
+                self.reboot_banner.setVisible(True)
+            else:
+                self.reboot_banner.setVisible(False)
 
         def _make_apply_button(self, text: str = "Apply") -> QPushButton:
             """Create an Apply button."""
@@ -557,6 +575,8 @@ def main() -> int:
                     def _on_change(_: int) -> None:
                         self.state["pipewire_quantum"] = int(combo.currentData())
                         save_state(self.state)
+                        # Optimistic UI: config changed, so action should become Apply until proven otherwise.
+                        self._knob_statuses["pipewire_quantum"] = "not_applied"
                         self._refresh_statuses()
                         self._populate()
 
@@ -594,6 +614,7 @@ def main() -> int:
                     def _on_rate_change(_: int) -> None:
                         self.state["pipewire_sample_rate"] = int(combo.currentData())
                         save_state(self.state)
+                        self._knob_statuses["pipewire_sample_rate"] = "not_applied"
                         self._refresh_statuses()
                         self._populate()
 
@@ -894,11 +915,14 @@ def main() -> int:
 
         def _update_knob_status(self, knob_id: str, status: str, display: str) -> None:
             """Update the status cell for a specific knob."""
+            # Keep backing store in sync so subsequent _populate() reflects the new state.
+            self._knob_statuses[knob_id] = status
             for r, k in enumerate(self.registry):
                 if k.id == knob_id:
                     status_item = QTableWidgetItem(display)
                     status_item.setForeground(QColor("#1976d2"))
-                    self.table.setItem(r, 1, status_item)
+                    # Status column is col 2 (col 1 is knob title).
+                    self.table.setItem(r, 2, status_item)
                     break
 
         def on_view_stack(self) -> None:
