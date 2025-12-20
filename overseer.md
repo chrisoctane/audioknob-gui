@@ -265,6 +265,16 @@ Directive:
   - verify GUI status refreshes to “Applied”
 - If apply is running but state doesn’t change: capture stderr from sysfs write and surface it in GUI error message.
 
+**Found on Tumbleweed (action required):** `thp_mode_madvise` can be *already* in effect (e.g. `/sys/kernel/mm/transparent_hugepage/enabled` shows `always [madvise] never`), but worker status still reports `not_applied`.
+
+Root cause:
+- `worker/ops.py::check_knob_status(kind=="sysfs_glob_kv")` only strips selector format when the line **starts** with `[` (i.e. `"[madvise] always never"`).
+- Actual THP format is typically `"always [madvise] never"` (bracketed token **not** at start), so status comparison fails.
+
+Worker fix (P0):
+- Update sysfs status parsing to detect bracketed token anywhere in the line (similar to `write_sysfs_values()`’s token scan).
+- After fix, `thp_mode_madvise` should report `applied` when the bracketed token is `madvise` even if it was pre-existing.
+
 ### PASS: PipeWire quantum UX + correctness
 
 Verified in codebase:

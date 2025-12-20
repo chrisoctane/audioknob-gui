@@ -774,10 +774,20 @@ def check_knob_status(knob: Any) -> str:
         applied_count = 0
         for p in matches:
             try:
-                current = Path(p).read_text(encoding="utf-8").strip()
-                # Handle selector format like "[madvise] always never"
-                if current.startswith("[") and "]" in current:
-                    current = current.split("]")[0].strip("[")
+                content = Path(p).read_text(encoding="utf-8").strip()
+                # Handle selector format like "always [madvise] never"
+                # The bracketed token indicates current selection and can be anywhere
+                current = None
+                if "[" in content and "]" in content:
+                    # Extract the bracketed token (e.g., "[madvise]" -> "madvise")
+                    import re
+                    match = re.search(r'\[([^\]]+)\]', content)
+                    if match:
+                        current = match.group(1)
+                else:
+                    # Plain value (no selector format)
+                    current = content
+                
                 if current == wanted:
                     applied_count += 1
             except Exception:
