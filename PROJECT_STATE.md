@@ -82,6 +82,9 @@ Planned / required next:
 - `pytest` unit tests for core logic (registry parsing, config generation, token checks, transaction logic)
 - CI job: `python3 -m pytest -q`
 
+Developer note:
+- To run tests locally: `python3 -m pip install -e .[dev]` then `python3 -m pytest -q`
+
 ### Integration smoke (non-root)
 
 Run (no GUI required):

@@ -335,6 +335,12 @@ We are explicitly NOT doing these unless the docs are updated first:
 
 ### Fast checks (no root required)
 
+If you want to run unit tests, install dev deps:
+
+```bash
+python3 -m pip install -e .[dev]
+```
+
 ```bash
 python3 scripts/check_repo_consistency.py
 python3 -m audioknob_gui.worker.cli status
