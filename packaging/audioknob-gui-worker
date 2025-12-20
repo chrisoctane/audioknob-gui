@@ -2,7 +2,7 @@
 """Root worker launcher.
 
 Intended install location:
-  /usr/local/libexec/audioknob-gui-worker
+  /usr/libexec/audioknob-gui-worker
 
 This must be runnable by root via pkexec.
 For development, set AUDIOKNOB_DEV_REPO env var to the repo path.

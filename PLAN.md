@@ -28,6 +28,33 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
+### Install on openSUSE Tumbleweed (RPM, v0.1)
+
+For v0.1 we support **RPM packaging on openSUSE Tumbleweed**.
+
+Build a local RPM from this repo:
+
+```bash
+cd /home/chris/audioknob-gui
+./packaging/opensuse/build-rpm.sh
+```
+
+Install it:
+
+```bash
+sudo zypper install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
+```
+
+Uninstall it:
+
+```bash
+sudo zypper remove -y audioknob-gui
+```
+
+Notes:
+- This installs the GUI launcher `audioknob-gui` and the worker `audioknob-worker`.
+- Root operations use polkit + a fixed-path worker wrapper at `/usr/libexec/audioknob-gui-worker`.
+
 ### Set up pre-commit hooks (recommended for contributors)
 
 ```bash
@@ -48,7 +75,7 @@ python3 -m audioknob_gui.worker.cli list-changes   # historical audit (all trans
 python3 -m audioknob_gui.worker.cli list-pending   # current-state preview (what still needs reset)
 python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 # root phase (requires pkexec):
-pkexec /usr/local/libexec/audioknob-gui-worker reset-defaults --scope root
+pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 ```
 
 ---

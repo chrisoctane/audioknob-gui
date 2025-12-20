@@ -255,7 +255,7 @@ audioknob-gui/
 ├── config/registry.json           # Knob definitions (canonical source)
 ├── packaging/                     # Deployment files
 │   ├── audioknob-gui.desktop.template # Desktop entry template (do not install directly)
-│   ├── audioknob-gui-worker       # Root worker launcher (installed to /usr/local/libexec/)
+│   ├── audioknob-gui-worker       # Root worker launcher (installed to /usr/libexec/)
 ├── audioknob_gui/
 │   ├── data/registry.json         # Packaged copy (synced from config/)
 │   ├── gui/app.py                 # UI layer (PySide6)
@@ -286,7 +286,7 @@ audioknob-gui/
 1. User clicks "Apply" button in GUI
 2. GUI finds knob in registry, checks requires_root
 3. If requires_root:
-   - GUI calls: pkexec /usr/local/libexec/audioknob-gui-worker apply <knob_id>
+   - GUI calls: pkexec /usr/libexec/audioknob-gui-worker apply <knob_id>
    - User sees polkit password prompt
    - Worker runs as root
 4. If not requires_root:
@@ -331,7 +331,7 @@ audioknob-gui/
 **Security boundary:**
 - GUI (untrusted, user-level) → communicates via subprocess + JSON
 - Worker (trusted, can run as root) → validates all inputs
-- Worker is installed to /usr/local/libexec/ (not in user's PATH)
+- Worker is installed to /usr/libexec/ (not in user's PATH)
 - Polkit policy explicitly allows this specific binary
 
 **Development vs Production:**
@@ -1387,7 +1387,7 @@ python3 -m audioknob_gui.worker.cli list-pending
 
 # Reset defaults in two phases (what GUI does for “Reset All”):
 python3 -m audioknob_gui.worker.cli reset-defaults --scope user
-pkexec /usr/local/libexec/audioknob-gui-worker reset-defaults --scope root
+pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 # Scope behavior:
 # - `--scope user` (non-root): resets only user transactions and silently skips root transactions (GUI two-phase flow)
@@ -1395,10 +1395,10 @@ pkexec /usr/local/libexec/audioknob-gui-worker reset-defaults --scope root
 # - `--scope all`: resets both; silently skips root transactions if non-root (intended for GUI two-phase flow)
 
 # Apply root knob (via pkexec)
-pkexec /usr/local/libexec/audioknob-gui-worker apply rt_limits_audio_group
+pkexec /usr/libexec/audioknob-gui-worker apply rt_limits_audio_group
 
 # Restore a knob
-pkexec /usr/local/libexec/audioknob-gui-worker restore-knob rt_limits_audio_group
+pkexec /usr/libexec/audioknob-gui-worker restore-knob rt_limits_audio_group
 ```
 
 ### Key Files

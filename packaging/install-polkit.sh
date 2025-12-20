@@ -9,7 +9,7 @@ policy_src="$repo_root/polkit/org.audioknob-gui.policy"
 worker_src="$repo_root/packaging/audioknob-gui-worker"
 
 policy_dst="/usr/share/polkit-1/actions/org.audioknob-gui.policy"
-worker_dst="/usr/local/libexec/audioknob-gui-worker"
+worker_dst="/usr/libexec/audioknob-gui-worker"
 
 install -D -m 0644 "$policy_src" "$policy_dst"
 install -D -m 0755 "$worker_src" "$worker_dst"

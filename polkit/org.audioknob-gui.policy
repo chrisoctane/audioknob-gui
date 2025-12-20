@@ -13,8 +13,8 @@
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
 
-    <!-- Fixed path for pkexec -->
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/audioknob-gui-worker</annotate>
+    <!-- Fixed path for pkexec (packaged install) -->
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/audioknob-gui-worker</annotate>
     <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
   </action>
 </policyconfig>

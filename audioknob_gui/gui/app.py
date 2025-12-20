@@ -22,6 +22,7 @@ def _pkexec_available() -> bool:
 def _root_worker_path_candidates() -> list[str]:
     # The polkit policy installs a fixed-path wrapper here by default.
     return [
+        "/usr/libexec/audioknob-gui-worker",
         "/usr/local/libexec/audioknob-gui-worker",
         # Fallback: if packaged as a normal CLI in PATH.
         "/usr/local/bin/audioknob-worker",
