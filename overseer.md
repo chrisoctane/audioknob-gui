@@ -991,3 +991,51 @@ This handles:
 **Phase 1 immediately** — Hide Reset when no transaction exists. This is a 10-line fix that eliminates the confusing error.
 
 **Phase 2 as follow-up** — The full three-state model is valuable but adds complexity. Worth doing after core validation is complete.
+
+---
+
+## Overseer audit (post-merge) — follow-ups after worker Reset All improvements (2025-12-20)
+
+Context: `origin/master` now includes:
+- `reset-defaults --scope {user,root,all}` and GUI uses two-phase reset
+- new `list-pending` used for GUI preview
+- GUI fix clearing stale Config widgets after refresh/sort
+
+### ✅ Confirmed good
+
+- Tests: `pytest` and `scripts/smoke_test.sh` pass on current `master`.
+- GUI: Config-column widget cleanup is correct and low-risk (clears col 5 for non-PipeWire rows).
+
+### Follow-ups (not blockers)
+
+#### P2 — `list-pending` effect dedup comment vs behavior mismatch
+
+In `cmd_list_pending`, the comment says “keep the oldest (original before state)”, but the code iterates transactions newest-first and keeps the **first encountered** effect, i.e. effectively the newest.
+
+Acceptance criteria:
+- Either change dedup logic to actually keep the oldest entry, OR update the comment to match reality.
+- Ensure dedup is stable across root+user tx ordering.
+
+#### P2 — `reset-defaults --scope all` help/docstring mismatch
+
+The help/docstring currently implies `--scope all` “will error on root txs if not root”, but implementation **silently skips** root txs when non-root (intended for GUI two-phase behavior).
+
+Acceptance criteria:
+- Update docstring/CLI help to reflect actual behavior.
+
+#### P2 — `needs_root_reset` field correctness
+
+`cmd_reset_defaults --scope user` sets `needs_root_reset = bool(root_txs)`, but root tx directories remain as audit history even after reset, so this flag can stay true “forever” and is not a reliable “pending work” indicator.
+
+Acceptance criteria:
+- Either compute “pending root reset” via `list-pending` semantics, or remove the field if GUI does not use it.
+
+#### P2 — Tests: add coverage for new commands
+
+Current smoke test doesn’t exercise:
+- `list-pending`
+- `reset-defaults --scope user` (and root scope behavior shape)
+
+Acceptance criteria:
+- Add a unit test for `cmd_list_pending` output shape + filtering (mock tx manifests).
+- Extend `scripts/smoke_test.sh` to call `list-pending` and `reset-defaults --scope user` (should be safe non-root).
