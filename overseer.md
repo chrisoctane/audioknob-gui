@@ -478,6 +478,7 @@ Captured system state with multiple applied changes:
    - Fact: `list-changes` is defined as “across all transactions” (audit/history). It will continue to show paths even after they were reset.
    - Why this matters: GUI uses `list-changes` to preview what “Reset All” will reset, so users perceive “stale entries”.
    - Fix direction: introduce `list-current` (or `list-pending-reset`) that represents *currently-applied* state, and have GUI use that for preview. Keep `list-changes` as history/audit.
+   - **STATUS: ✅ FIXED** — Added `list-pending` command that shows only files that still exist + deduplicated effects. GUI now uses this for Reset All preview.
    - Severity: **P2** (mostly UX/clarity; can be done after P0/P1 blockers).
 
 3. **Optional: transaction cleanup**: Transactions remaining in `/var/lib/audioknob-gui/transactions/` and `~/.local/state/audioknob-gui/transactions/` is acceptable as an audit trail. If desired, add a separate cleanup command (e.g. `cleanup --older-than 30d`) and document retention policy. **Severity**: **P2**.

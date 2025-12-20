@@ -805,6 +805,113 @@ def cmd_list_changes(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_list_pending(_: argparse.Namespace) -> int:
+    """List files/effects that are still pending reset (files exist, not yet restored).
+    
+    Unlike list-changes (historical audit), this only shows what CURRENTLY needs resetting.
+    Use this for GUI preview of "Reset All".
+    """
+    paths = default_paths()
+
+    root_txs = list_transactions(paths.var_lib_dir)
+    user_txs = list_transactions(paths.user_state_dir)
+
+    pending_files: dict[str, dict] = {}
+    pending_effects: list[dict] = []
+    has_root_files = False
+    has_user_files = False
+    has_root_effects = False
+    has_user_effects = False
+
+    for tx_info in root_txs + user_txs:
+        scope = "root" if tx_info in root_txs else "user"
+        
+        # Collect file backups - but only if file still exists (or we created it and it's there)
+        for meta in tx_info.get("backups", []):
+            file_path = meta.get("path", "")
+            if not file_path or file_path in pending_files:
+                continue
+            
+            # Check if file still exists (meaning we still need to reset it)
+            from pathlib import Path
+            p = Path(file_path).expanduser()
+            we_created = meta.get("we_created", False)
+            
+            if we_created:
+                # We created this file - only pending if it still exists
+                if not p.exists():
+                    continue
+            else:
+                # We modified existing file - check if our backup exists
+                # (if backup exists, we can restore; if file is gone, nothing to do)
+                tx_root = Path(tx_info["root"])
+                backup_key = meta.get("backup_key", "")
+                backup_path = tx_root / "backups" / backup_key if backup_key else None
+                if backup_path and not backup_path.exists():
+                    continue
+                if not p.exists():
+                    continue
+            
+            pending_files[file_path] = {
+                "path": file_path,
+                "scope": scope,
+                "txid": tx_info["txid"],
+                "reset_strategy": meta.get("reset_strategy", RESET_BACKUP),
+                "package": meta.get("package"),
+                "we_created": we_created,
+            }
+            
+            if scope == "root":
+                has_root_files = True
+            else:
+                has_user_files = True
+        
+        # For effects, deduplicate by path - only keep the oldest (original "before" state)
+        # sysfs_write: can always be undone if we have the "before" value
+        # systemd_unit_toggle: can be undone
+        # user_service_mask: can be undone
+        for effect in tx_info.get("effects", []):
+            kind = effect.get("kind", "")
+            # Skip pipewire_restart - those are just notifications, not reversible
+            if kind == "pipewire_restart":
+                continue
+            
+            # For sysfs_write, deduplicate by path - we only need to restore once
+            effect_path = effect.get("path", "")
+            effect_key = f"{kind}:{effect_path}"
+            
+            # Check if we already have this effect (from a newer transaction)
+            already_tracked = any(
+                e.get("kind") == kind and e.get("path") == effect_path
+                for e in pending_effects
+            )
+            if already_tracked:
+                continue
+            
+            effect_copy = dict(effect)
+            effect_copy["scope"] = scope
+            effect_copy["txid"] = tx_info["txid"]
+            pending_effects.append(effect_copy)
+            
+            if scope == "root":
+                has_root_effects = True
+            else:
+                has_user_effects = True
+
+    print(json.dumps({
+        "schema": 1,
+        "files": list(pending_files.values()),
+        "count": len(pending_files),
+        "effects": pending_effects,
+        "effects_count": len(pending_effects),
+        "has_root_files": has_root_files,
+        "has_user_files": has_user_files,
+        "has_root_effects": has_root_effects,
+        "has_user_effects": has_user_effects,
+    }, indent=2))
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Check current status of all knobs."""
     reg = load_registry(args.registry)
@@ -1010,8 +1117,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     srd.set_defaults(func=cmd_reset_defaults)
 
-    slc = sub.add_parser("list-changes", help="List all files modified by audioknob-gui")
+    slc = sub.add_parser("list-changes", help="List all files modified by audioknob-gui (historical audit)")
     slc.set_defaults(func=cmd_list_changes)
+
+    slp = sub.add_parser("list-pending", help="List files/effects still pending reset (for GUI preview)")
+    slp.set_defaults(func=cmd_list_pending)
 
     sst = sub.add_parser("status", help="Check current status of all knobs")
     sst.set_defaults(func=cmd_status)

@@ -1252,11 +1252,11 @@ def main() -> int:
                     sys.executable,
                     "-m",
                     "audioknob_gui.worker.cli",
-                    "list-changes",
+                    "list-pending",
                 ]
                 p = subprocess.run(argv, text=True, capture_output=True)
                 if p.returncode != 0:
-                    raise RuntimeError(p.stderr.strip() or "list-changes failed")
+                    raise RuntimeError(p.stderr.strip() or "list-pending failed")
                 changes = json.loads(p.stdout)
             except Exception as e:
                 QMessageBox.critical(self, "Failed", f"Could not list changes: {e}")

@@ -1304,8 +1304,11 @@ python3 -m audioknob_gui.worker.cli status
 # Preview a knob
 python3 -m audioknob_gui.worker.cli preview rt_limits_audio_group
 
-# List all changes
+# List all changes (historical audit)
 python3 -m audioknob_gui.worker.cli list-changes
+
+# List pending reset (files that still exist, for GUI preview)
+python3 -m audioknob_gui.worker.cli list-pending
 
 # Apply root knob (via pkexec)
 pkexec /usr/local/libexec/audioknob-gui-worker apply rt_limits_audio_group
