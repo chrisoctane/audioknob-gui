@@ -1213,3 +1213,44 @@ Transaction 1883068784f1b627 (newer): 83 bytes — HAS audit=0 ✗
 
 **STATUS:** ✅ FIXED on `origin/master` (commit `a5ee4bb`)
 
+
+---
+
+## Manual Validation Complete (2025-12-20)
+
+### Test System
+- **OS**: openSUSE Tumbleweed
+- **Kernel**: 6.18.1-1-default
+- **Desktop**: KDE Plasma
+
+### Validation Matrix Results
+
+| Category | Knobs Tested | Apply | Reset | Result |
+|----------|--------------|-------|-------|--------|
+| **sysfs** | THP madvise mode | ✓ | ✓ | PASS |
+| **udev rules** | USB autosuspend, CPU DMA latency | ✓ | ✓ | PASS |
+| **sysctl** | Swappiness, Inotify, Dirty bytes | ✓ | ✓ | PASS |
+| **PAM limits** | RT limits | ✓ | ✓ | PASS |
+| **PipeWire** | Quantum, Sample rate | ✓ | ✓ | PASS |
+| **User services** | GNOME Tracker (on KDE) | ✓ | ✓ | PASS |
+| **Kernel cmdline** | audit=0 | ✓ | ✓ | PASS |
+| **Reset All** | All categories | — | ✓ | PASS |
+
+### Bugs Found & Fixed During Validation
+
+1. **P0: restore-knob used newest tx instead of oldest** — FIXED
+2. **P0: CI reset-defaults JSON schema inconsistency** — FIXED  
+3. **P1: Reboot indicator for kernel cmdline** — IMPLEMENTED
+4. **P2: list-pending effect dedup** — FIXED
+5. **P2: reset-defaults docstring** — FIXED
+6. **P2: needs_root_reset semantics** — FIXED
+
+### Remaining Items (P2, not blocking)
+
+- PipeWire upstream defaults verification (48kHz / 1024 buffer)
+- Three-state model proposal (for pre-existing states)
+
+### Conclusion
+
+Core functionality is validated and working. Apply, Reset, and Reset All work correctly for all knob types. Kernel cmdline knobs now show "⟳ Reboot" indicator when changes are pending.
+
