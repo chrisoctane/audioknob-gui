@@ -21,8 +21,17 @@ jobs:
         with:
           python-version: '3.11'
       
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest
+          python3 -m pip install -e .
+      
       - name: Run consistency checks
         run: python3 scripts/check_repo_consistency.py
       
       - name: Compile check
         run: python3 -m compileall -q audioknob_gui
+      
+      - name: Run unit tests
+        run: python3 -m pytest -q

@@ -68,6 +68,35 @@ This is the enforcement layer. Any agent making changes MUST satisfy this contra
 - No batch “apply all” UX without an explicit design update in docs
 - No network/cloud features
 
+---
+
+## Testing strategy (machine-operational)
+
+### Automated (CI-safe, non-root)
+
+Required:
+- `python3 scripts/check_repo_consistency.py`
+- `python3 -m compileall -q audioknob_gui`
+
+Planned / required next:
+- `pytest` unit tests for core logic (registry parsing, config generation, token checks, transaction logic)
+- CI job: `python3 -m pytest -q`
+
+### Integration smoke (non-root)
+
+Run (no GUI required):
+- `python3 -m audioknob_gui.worker.cli status`
+- `python3 -m audioknob_gui.worker.cli preview pipewire_quantum pipewire_sample_rate`
+- `python3 -m audioknob_gui.worker.cli apply-user pipewire_quantum`
+
+### Manual validation (root/system effects)
+
+Do these last, on a test system:
+- systemd toggles: apply/reset, confirm restore
+- sysfs knobs: apply/reset, confirm restore
+- udev rule knobs: apply/reset, confirm udev reload behavior
+- kernel cmdline knobs: apply, confirm bootloader file updated, reboot, confirm status
+
 ## 1. Project Vision & Principles
 
 ### The Problem We're Solving
@@ -107,6 +136,7 @@ audioknob-gui/
 ├── bin/audioknob-gui              # Entry point (bash script)
 ├── config/registry.json           # Knob definitions (canonical source)
 ├── packaging/                     # Deployment files
+│   ├── audioknob-gui.desktop      # Desktop launcher (dev convenience; see notes)
 ├── audioknob_gui/
 │   ├── data/registry.json         # Packaged copy (synced from config/)
 │   ├── gui/app.py                 # UI layer (PySide6)
@@ -114,6 +144,8 @@ audioknob-gui/
 │   ├── core/                      # Shared utilities
 │   ├── platform/                  # OS detection
 │   └── testing/                   # Test tools
+├── scripts/
+│   └── install-desktop.sh         # Installs the desktop launcher into ~/.local/share/applications/
 ```
 
 **Why separate worker from GUI?**
@@ -837,7 +869,18 @@ systemctl status pipewire.service  # WRONG - will show inactive
 /etc/pipewire/pipewire.conf.d/
 ```
 
-**Approach:** Write to `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
+**Approach:** Write two drop-ins (separate knobs):
+- Quantum/buffer: `~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf`
+- Sample rate: `~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf`
+
+**Apply behavior:** after writing, the worker best-effort restarts PipeWire user services:
+`systemctl --user restart pipewire.service pipewire-pulse.service`
+
+#### Desktop Launcher (dev convenience)
+
+There is a desktop entry at `packaging/audioknob-gui.desktop` and an install helper `scripts/install-desktop.sh`.
+
+**Important:** the desktop entry’s `Exec=` is currently fixed to a repo checkout path (dev-only). For production packaging, this must be replaced with an installed entrypoint (e.g., `audioknob-gui`) or generated from a template.
 
 #### QjackCtl Configuration
 

@@ -155,6 +155,14 @@ Notes / minor recommendations:
 - `scripts/check_repo_consistency.py` uses `origin/master...HEAD` when no staged files exist. In CI this is usually OK, but on PRs from forks it can be brittle. Consider using `GITHUB_BASE_REF` (or `git merge-base`) for base selection.
 - Keep the waiver string `docs-not-needed:` but require PR template checkbox + overseer approval.
 
+### Note: Desktop launcher hardcodes repo path (dev-only)
+
+`packaging/audioknob-gui.desktop` currently uses:
+- `Exec=/home/chris/audioknob-gui/bin/audioknob-gui`
+
+This is acceptable as a **dev convenience** but must not be treated as production-ready packaging.
+Docs now warn about this; a future packaging task should template/generate `Exec` from install context.
+
 ### PASS: PipeWire quantum UX + correctness
 
 Verified in codebase:
@@ -199,6 +207,68 @@ Observed:
    - Registry synced to package data
 
 **PipeWire work fully DONE with no caveats.**
+
+---
+
+## Project completion directive — finish functions + synthesize tests (2025-12-20)
+
+User requirement: workers should **complete project functions** and **synthesize all tests** into a coherent, repeatable test strategy (manual + automated) with clear pass/fail gates.
+
+### What “complete project functions” means (definition)
+
+The project is “functionally complete” when:
+
+- **All knobs are safe and coherent**:
+  - every knob with `capabilities.apply=true` can be applied and restored (or is gated/disabled with a clear reason)
+  - status reporting is conservative but stable (no hangs, no crashes)
+  - root/non-root separation remains intact (pkexec only for root knobs)
+- **Primary user workflows** are reliable:
+  - start GUI, view status, apply non-root knobs, reset knobs, undo, reset-all
+  - PipeWire quantum/sample-rate are configurable and reflected everywhere
+- **Packaging/dev conveniences do not lie**:
+  - desktop launcher is clearly “dev-only” unless made portable (no silent hard-coded paths in production)
+
+### Test synthesis plan (required deliverable)
+
+Workers must produce a single “Testing” story with:
+
+1. **Automated tests** (fast, non-root, CI-safe)
+   - Add `pytest` and implement unit tests for:
+     - `registry.load_registry()` validation behavior
+     - PipeWire config content generation (quantum/rate) and per-user overrides
+     - QjackCtl config parsing + server command rewriting
+     - kernel cmdline token presence logic (no substring false positives)
+     - transaction backup/restore metadata logic (reset strategy selection)
+   - Add a CI job to run: `python3 -m pytest -q`
+
+2. **Integration smoke tests** (non-root, optional in CI)
+   - A script that runs:
+     - `python3 -m audioknob_gui.worker.cli status`
+     - `python3 -m audioknob_gui.worker.cli preview <representative knobs>`
+     - `python3 -m audioknob_gui.worker.cli apply-user pipewire_quantum` (safe local-only files)
+   - Must run without requiring a GUI or pkexec.
+
+3. **Manual validation checklist** (root knobs + system effects)
+   - A checklist document/section that covers:
+     - apply/reset for systemd toggles (irqbalance/rtirq)
+     - sysfs knobs (cpu governor, THP) on a test machine
+     - udev rule knobs (cpu_dma_latency, usb autosuspend)
+     - kernel cmdline knobs (threadirqs/audit/mitigations) clearly marked “last” and “reboot required”
+     - reset-all correctness (including sysfs/systemd effects)
+
+### Acceptance criteria (must meet)
+
+- `scripts/check_repo_consistency.py` continues to pass.
+- `pytest` suite exists and passes on CI.
+- “Testing” is documented in `PLAN.md` (user oriented) and `PROJECT_STATE.md` (machine oriented).
+- No new knobs or behaviors land without updating tests/docs as above.
+
+### Next worker tasks (open)
+
+1. **Implement test suite + CI** (P0)
+2. **Write test documentation + checklists** (P0)
+3. **Decide launcher portability** (P1):
+   - either generate `.desktop` from current repo path at install time, or switch to installed `Exec=audioknob-gui`
 
 
 ## ✅ Issues Fixed (2025-12-20)

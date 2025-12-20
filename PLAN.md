@@ -13,6 +13,16 @@ python3 -m pip install -e .
 bin/audioknob-gui
 ```
 
+### Desktop launcher (optional, for local testing)
+
+This installs a `.desktop` entry so you can launch from your application menu:
+
+```bash
+./scripts/install-desktop.sh
+```
+
+**Important:** the current desktop file uses a fixed `Exec=` pointing at the repo checkout path. If your repo is not at `/home/chris/audioknob-gui`, edit `packaging/audioknob-gui.desktop` before installing.
+
 ### Set up pre-commit hooks (recommended for contributors)
 
 ```bash
@@ -318,6 +328,36 @@ We are explicitly NOT doing these unless the docs are updated first:
 - Auto-modifying system settings without an explicit user click + visible status change
 - Complex multi-step wizards or hidden state machines
 - Network/cloud features
+
+---
+
+## Testing (how to validate changes)
+
+### Fast checks (no root required)
+
+```bash
+python3 scripts/check_repo_consistency.py
+python3 -m audioknob_gui.worker.cli status
+python3 -m audioknob_gui.worker.cli preview pipewire_quantum pipewire_sample_rate
+```
+
+### GUI smoke test (no root required)
+
+```bash
+bin/audioknob-gui
+```
+
+Verify:
+- table loads and status updates
+- PipeWire quantum/sample-rate selectors work and reflect in ℹ popup
+
+### Root knobs (manual, last)
+
+Only after non-root testing is stable:
+- systemd toggles (irqbalance/rtirq)
+- sysfs knobs (CPU governor, THP)
+- udev rule knobs
+- kernel cmdline knobs (require reboot; do last)
 
 
 ---
