@@ -1201,3 +1201,15 @@ Transaction 1883068784f1b627 (newer): 83 bytes — HAS audit=0 ✗
 - **Option A (preferable):** Do NOT encode “defaults” in registry; only write a PipeWire conf file when the user explicitly chooses a non-default value.
 - **Option B:** Encode defaults in registry (only if truly stable), accept that apply may create a no-op file and reset deletes it.
 
+---
+
+## CI note (2025-12-20) — Consistency Check email failure root cause + fix
+
+**Symptom:** GitHub Actions “Consistency Check” failed on a clean runner with no transactions.
+
+**Root cause:** `reset-defaults --scope user` had an early “nothing to reset” path that returned a smaller JSON payload (missing `results`, `scope`, `needs_root_reset`). Our test expects a stable output schema.
+
+**Fix:** Ensure `cmd_reset_defaults` always returns a stable JSON schema even when there are no transactions.
+
+**STATUS:** ✅ FIXED on `origin/master` (commit `a5ee4bb`)
+
