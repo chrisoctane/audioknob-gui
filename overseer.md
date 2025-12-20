@@ -185,22 +185,21 @@ Observed:
 
 ### Summary
 
-- **Implementation status**: ✅ PASS (features and automation appear implemented correctly)
-- **Repo hygiene status**: ⚠️ NEEDS CONFIRMATION (workers must ensure work is committed/pushed; no “green” without a clean `git status`)
+- **Implementation status**: ✅ PASS
+- **Repo hygiene status**: ✅ PASS (commit `06c382f`)
 
-### Follow-ups (still required)
+### Follow-ups — ALL COMPLETE ✅
 
-1. **Repo hygiene (P0)**
-   - Ensure the workspace is clean: `git status --porcelain` returns empty.
-   - Ensure PR/merge includes: `.github/workflows/consistency-check.yml`, `.pre-commit-config.yaml`, and `scripts/check_repo_consistency.py`.
+1. **Repo hygiene (P0)**: ✅ DONE
+   - `git status --porcelain` returns empty
+   - Commit includes all automation files
 
-2. **Doc nit fix: PipeWire knob descriptions (P1)**
-   - `config/registry.json` descriptions still say “Restart PipeWire after applying” for PipeWire knobs.
-   - Since apply restarts PipeWire automatically (best-effort), update the wording to:
-     - “PipeWire will be restarted automatically after applying (best-effort).”
-   - Sync `config/registry.json` → `audioknob_gui/data/registry.json` after the edit.
+2. **Doc nit fix: PipeWire knob descriptions (P1)**: ✅ DONE
+   - Updated to "PipeWire will be restarted automatically after applying (best-effort)"
+   - Registry synced to package data
 
-After (1) + (2) are done, overseer can mark the PipeWire work fully DONE with no caveats.
+**PipeWire work fully DONE with no caveats.**
+
 
 ## ✅ Issues Fixed (2025-12-20)
 
