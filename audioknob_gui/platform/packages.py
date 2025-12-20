@@ -297,7 +297,15 @@ PACKAGE_MAPPINGS: dict[str, dict[PackageManager, str]] = {
 
 def check_command_available(command: str) -> bool:
     """Check if a command is available in PATH."""
-    return shutil.which(command) is not None
+    if shutil.which(command) is not None:
+        return True
+    # GUI sessions often have a reduced PATH that omits sbin; check common locations
+    # so "Install" buttons unlock immediately after package install.
+    for d in ("/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/local/bin"):
+        p = Path(d) / command
+        if p.exists() and p.is_file() and os.access(p, os.X_OK):
+            return True
+    return False
 
 
 def check_packages_installed(commands: list[str]) -> dict[str, bool]:

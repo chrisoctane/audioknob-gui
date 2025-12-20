@@ -315,18 +315,18 @@ def main() -> int:
             self.table.verticalHeader().setVisible(False)
             header = self.table.horizontalHeader()
             header.setMinimumSectionSize(60)
-            header.setSectionResizeMode(0, QHeaderView.Fixed)            # Info
-            header.setSectionResizeMode(1, QHeaderView.Stretch)          # Knob
-            header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Status
-            header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Category
-            header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Risk
+            # Make every column user-resizable (Interactive). We also set reasonable defaults.
             # NOTE: ResizeToContents does NOT reliably account for cell widgets (buttons/combos),
-            # which causes text clipping like "Apply" -> "Annlv". Use Interactive + defaults.
-            header.setSectionResizeMode(5, QHeaderView.Interactive)      # Action (button)
-            header.setSectionResizeMode(6, QHeaderView.Interactive)      # Config (combo)
-            self.table.setColumnWidth(0, 32)
-            self.table.setColumnWidth(5, 96)   # fits "Apply"/"Reset"
-            self.table.setColumnWidth(6, 140)  # fits "48000 Hz"
+            # which causes text clipping like "Apply" -> "Annlv".
+            for c in range(7):
+                header.setSectionResizeMode(c, QHeaderView.Interactive)
+            self.table.setColumnWidth(0, 32)   # Info button
+            self.table.setColumnWidth(1, 420)  # Knob title
+            self.table.setColumnWidth(2, 120)  # Status
+            self.table.setColumnWidth(3, 110)  # Category
+            self.table.setColumnWidth(4, 80)   # Risk
+            self.table.setColumnWidth(5, 96)   # Action (fits Apply/Reset)
+            self.table.setColumnWidth(6, 160)  # Config (fits 48000 Hz)
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
