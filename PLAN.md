@@ -1,38 +1,82 @@
 # audioknob-gui: Plan
 
+## Quick start (for you)
+
+### Run from a repo checkout (recommended for development)
+
+```bash
+cd /path/to/audioknob-gui
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -U pip
+python3 -m pip install -e .
+bin/audioknob-gui
+```
+
+### Run the worker CLI directly (debugging)
+
+```bash
+python3 -m audioknob_gui.worker.cli --help
+python3 -m audioknob_gui.worker.cli status
+python3 -m audioknob_gui.worker.cli preview rt_limits_audio_group
+```
+
+---
+
+## Working agreement (to prevent drift)
+
+If any agent (including “overseer”) changes behavior, adds a knob, changes packaging, or changes any file path/env var, they MUST:
+
+- Update `PROJECT_STATE.md` (machine reference) and keep it consistent with the code.
+- Update `PLAN.md` (user guide) only for user-relevant steps and keep it consistent with the code.
+- Sync `config/registry*.json` → `audioknob_gui/data/registry*.json` when touched.
+- Prefer conservative behavior: if status cannot be proven, show “unknown/not applied” rather than “applied”.
+
+When in doubt, stop and ask rather than inventing new UX/flows not described here.
+
 ## How to Add a New Knob
 
 ### Step 1: Define in registry.json
 
-Add to `config/registry.json` (**canonical source**), inside the top-level `knobs` array:
+Add a knob object to `config/registry.json` (**canonical source**) inside the top-level `knobs` array.
+
+The file format is:
 
 ```json
 {
   "schema": 1,
   "knobs": [
-    {
-      "id": "my_new_knob",
-      "title": "My New Knob",
-      "description": "What it does",
-      "category": "cpu",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
+    { "id": "example", "title": "…", "description": "…", "category": "cpu", "risk_level": "low",
+      "requires_root": false, "requires_reboot": false, "requires_groups": [], "requires_commands": [],
       "capabilities": { "read": true, "apply": true, "restore": true },
-      "impl": {
-        "kind": "...",
-        "params": { ... }
-      }
+      "impl": { "kind": "read_only", "params": {} }
     }
   ]
+}
+```
+
+Add your new knob object like this:
+
+```json
+{
+  "id": "my_new_knob",
+  "title": "My New Knob",
+  "description": "What it does",
+  "category": "cpu",
+  "risk_level": "low",
+  "requires_root": true,
+  "requires_reboot": false,
+  "requires_groups": [],
+  "requires_commands": [],
+  "capabilities": { "read": true, "apply": true, "restore": true },
+  "impl": { "kind": "...", "params": { ... } }
 }
 ```
 
 **⚠️ IMPORTANT: After editing, sync to package data:**
 ```bash
 cp config/registry.json audioknob_gui/data/registry.json
+cp config/registry.schema.json audioknob_gui/data/registry.schema.json
 ```
 Both files must be committed together. See "Registry Sync Policy" below.
 
@@ -216,6 +260,8 @@ The registry exists in two locations:
 |----------|---------|
 | `config/registry.json` | **Canonical source** — edit here |
 | `audioknob_gui/data/registry.json` | Packaged copy for installed builds |
+| `config/registry.schema.json` | Schema (canonical) |
+| `audioknob_gui/data/registry.schema.json` | Packaged schema copy |
 
 **Why two copies?**
 - `config/` is at repo root for easy discovery/editing
@@ -224,12 +270,14 @@ The registry exists in two locations:
 **Sync procedure (after any registry edit):**
 ```bash
 cp config/registry.json audioknob_gui/data/registry.json
-git add config/registry.json audioknob_gui/data/registry.json
+cp config/registry.schema.json audioknob_gui/data/registry.schema.json
+git add config/registry.json config/registry.schema.json audioknob_gui/data/registry.json audioknob_gui/data/registry.schema.json
 ```
 
 **Pre-commit check (recommended):**
 ```bash
 diff config/registry.json audioknob_gui/data/registry.json || echo "REGISTRY OUT OF SYNC"
+diff config/registry.schema.json audioknob_gui/data/registry.schema.json || echo "REGISTRY SCHEMA OUT OF SYNC"
 ```
 
 **Resolution order** (in `core/paths.py`):
@@ -248,6 +296,19 @@ diff config/registry.json audioknob_gui/data/registry.json || echo "REGISTRY OUT
 4. **One click actions** - No dropdowns, no batch mode, no preview step
 5. **Lock until ready** - Missing groups? 🔒. Missing packages? 📦 Install.
 6. **Docs match code** - `PROJECT_STATE.md` and `PLAN.md` are first-class deliverables
+
+---
+
+## Scope / Non-goals (to keep the project on course)
+
+We are explicitly NOT doing these unless the docs are updated first:
+
+- A background daemon or always-on service
+- Automatic “apply everything” / batch apply workflows (the UX is per-knob, one-click)
+- Auto-modifying system settings without an explicit user click + visible status change
+- Complex multi-step wizards or hidden state machines
+- Network/cloud features
+
 
 ---
 

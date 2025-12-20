@@ -36,6 +36,38 @@ Columns: Knob | Status | Category | Risk | Action | ℹ
 
 ---
 
+## Operator Contract (anti-drift, for AI agents)
+
+This is the enforcement layer. Any agent making changes MUST satisfy this contract before declaring work “done”.
+
+### Source of Truth Map (when things disagree)
+
+1. **Code is truth for behavior**: `audioknob_gui/**` runtime behavior wins over prose.
+2. **Registry canonical**: `config/registry.json` + `config/registry.schema.json` are canonical; packaged copies must be synced.
+3. **Installed-mode truth**: if behavior differs between repo-run and installed package, prefer installed-mode and fix dev-mode to match.
+4. **Docs are constraints**: `PLAN.md` defines UX/process constraints; agents must not introduce new flows without updating docs.
+
+### Definition of Done (must be true before finishing)
+
+- **Behavioral change?** Update the relevant sections in this file (and add a “Bugs Fixed (Prevent Regression)” entry if applicable).
+- **User workflow changed?** Update `PLAN.md`.
+- **Touched registry/schema?**
+  - Update canonical: `config/registry.json`, `config/registry.schema.json`
+  - Sync packaged: `audioknob_gui/data/registry.json`, `audioknob_gui/data/registry.schema.json`
+- **New env var / path / entrypoint?** Document it here with exact name and semantics.
+- **New knob kind?** Implement all three:
+  - preview (`worker/ops.py`)
+  - apply (`worker/cli.py`)
+  - status (`worker/ops.py`)
+- **Safety bar**: if status can’t be proven, report `"unknown"` / conservative state.
+
+### Scope / Non-goals (hard boundaries)
+
+- No background daemons or scheduled auto-tuning
+- No silent system modifications (must be user-initiated and visible in UI)
+- No batch “apply all” UX without an explicit design update in docs
+- No network/cloud features
+
 ## 1. Project Vision & Principles
 
 ### The Problem We're Solving
@@ -132,7 +164,7 @@ audioknob-gui/
    c. Based on reset_strategy:
       - "delete": Remove the file we created
       - "backup": Copy backup file back to original location
-      - "package": Call rpm --restore or apt reinstall
+      - "package": Restore via package manager (best-effort; see notes below)
    d. For effects (sysfs, systemd): restore previous state
 4. GUI refreshes status display
 ```
@@ -318,6 +350,7 @@ else:
       "cyclictest": {"rpm": "rt-tests", "dpkg": "rt-tests", "pacman": "rt-tests"},
       "rtirq": {"rpm": "rtirq", "dpkg": "rtirq-init", "pacman": "rtirq"},
       "cpupower": {"rpm": "cpupower", "dpkg": "linux-cpupower", "pacman": "cpupower"},
+      "balooctl": {"rpm": "baloo-tools5", "dpkg": "baloo-kf5", "pacman": "baloo"},
   }
   ```
 
