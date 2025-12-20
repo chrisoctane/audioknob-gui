@@ -163,6 +163,108 @@ Notes / minor recommendations:
 This is acceptable as a **dev convenience** but must not be treated as production-ready packaging.
 Docs now warn about this; a future packaging task should template/generate `Exec` from install context.
 
+### Desktop launcher bug (dev workflow): missing venv / env wiring
+
+Observed on Tumbleweed: desktop launcher installs and appears, but clicking it does not start the app.
+
+Most likely cause:
+- `.desktop` runs `bin/audioknob-gui`, which uses **system** `python3`.
+- In dev, the project is installed into the repo-local venv (`.venv`) and/or relies on `AUDIOKNOB_DEV_REPO` for `PYTHONPATH`.
+- The `.desktop` entry currently does **not** activate the venv or set `AUDIOKNOB_DEV_REPO`, so imports fail and the GUI never appears.
+
+Quick user workaround (dev-only):
+- Edit `~/.local/share/applications/audioknob-gui.desktop` and set `Exec=` to either:
+  - `Exec=/usr/bin/env AUDIOKNOB_DEV_REPO=/home/chris/audioknob-gui /home/chris/audioknob-gui/bin/audioknob-gui`
+  - OR a venv-activating wrapper: `Exec=/usr/bin/env bash -lc 'source /home/chris/audioknob-gui/.venv/bin/activate && AUDIOKNOB_DEV_REPO=/home/chris/audioknob-gui bin/audioknob-gui'`
+
+Worker task (P0):
+- Update `scripts/install-desktop.sh` to install a dev launcher that actually works:
+  - detect repo root + venv path (`$REPO_ROOT/.venv/bin/python3`)
+  - write the `.desktop` file with a correct `Exec=` (do NOT hardcode `/home/chris`)
+  - optionally add `TryExec=` and pass args (`%U`) safely
+- Add a short “Desktop launcher (dev)” section to `PLAN.md` describing constraints and expected behavior.
+
+## User feedback checkpoint (openSUSE Tumbleweed) — GUI UX + correctness gaps (2025-12-20)
+
+Context: user is happy overall; these are concrete issues discovered in first real GUI run.
+
+### P0: GUI layout — selectors should NOT live in “Action” column
+
+Current behavior:
+- `pipewire_quantum` and `pipewire_sample_rate` render a `QComboBox` **inside column “Action”** next to Apply/Reset.
+- This crowds the Apply/Reset space and scales poorly as we add more “configurable knobs”.
+
+Directive:
+- Introduce a dedicated column (e.g. **Tools** / **Config**) between `Action` and `Info`.
+- Column responsibilities:
+  - **Action**: Apply/Reset/Install/Join/Test/Scan/View (one primary action button)
+  - **Tools/Config**: secondary controls (drop-downs, configure buttons, etc.)
+  - **Info**: ℹ details
+- Move PipeWire selectors into Tools/Config. Keep Action as a single Apply/Reset button.
+- Future-proof: any knob with configurable state should expose controls in Tools/Config, not Action.
+
+### P0: RT config scan — don’t show “unfixable” WARN/SKIP items in the user-facing scanner
+
+User requirement:
+- “Realtime test should have anything we can improve as a knob in the menu. I don’t want to see unfixable fails or warnings in here.”
+
+Current cause:
+- `audioknob_gui/testing/rtcheck.py` produces WARN/SKIP checks that have **no** `fix_knob` (e.g. high-res timers not confirmed, NO_HZ unknown, HPET/RTC access warnings, etc.).
+- GUI shows all checks, including ones we cannot remediate.
+
+Directive:
+- Change GUI presentation to be **fix-focused**:
+  - Default view should show only checks where `status != PASS` AND `fix_knob` is not None.
+  - Everything else (PASS and/or no-fix checks) should be hidden by default (optionally behind an “Advanced / Show full scan” toggle).
+- Additionally: where a check is “not confirmable” (e.g. high-res timers), prefer `SKIP` over `WARN` so it doesn’t drag score or appear as “problem”.
+
+### P0: “Join audio groups” status must reflect system state, not “did we run usermod”
+
+User symptom:
+- “Join Audio groups isn’t applied because I was already in the groups before install. Status should reflect current system state.”
+
+Root cause:
+- Registry defines `impl.kind = "group_membership"` for `audio_group_membership`.
+- Worker status checker (`audioknob_gui/worker/ops.py::check_knob_status`) does **not** implement `group_membership`, so status never becomes “applied”.
+- GUI currently special-cases this knob and runs `pkexec usermod …` directly, bypassing worker status semantics.
+
+Directive:
+- Implement `group_membership` in worker:
+  - **status**: applied if current user is already in all relevant groups that exist on system (or at least one from a required set—decide and document).
+  - **apply**: add user to missing groups (pkexec usermod).
+  - **restore**: not really reversible; define restore semantics explicitly (likely “no-op” + mark knob as non-restorable, or implement “remove from groups” only if we recorded pre-state and user opts in).
+- Remove GUI special-case once worker supports it, so GUI is thin and status becomes correct.
+
+### P1: “Audio stack detection” output is truncated; make it scrollable and complete
+
+User symptom:
+- Detection popup cuts off device list (“… and 14 more”) and is not scrollable.
+
+Current cause:
+- `MainWindow.on_view_stack()` uses `QMessageBox.information()` and intentionally only shows first 5 ALSA devices.
+
+Directive:
+- Replace with a resizable `QDialog` + `QTextEdit` (read-only) like RT scan dialog.
+- Show full device list (or show full list with a “Copy to clipboard” button).
+- Consider including additional details (pipewire graph summary, jack detection details) but at minimum: do not truncate.
+
+### P1: THP “madvise mode” correctness — verify apply actually changes kernel state + status refresh
+
+User symptom:
+- “Madvise mode doesn’t seem to reflect any changes.”
+
+Notes:
+- Knob is `thp_mode_madvise` using `sysfs_glob_kv` at `/sys/kernel/mm/transparent_hugepage/enabled`.
+- Status logic in worker *should* handle bracketed selector formats, but we need to validate end-to-end on TW.
+
+Directive:
+- Add a focused manual validation step in docs (or a small integration test if feasible):
+  - before: read THP state
+  - apply knob
+  - after: confirm bracketed mode is `madvise`
+  - verify GUI status refreshes to “Applied”
+- If apply is running but state doesn’t change: capture stderr from sysfs write and surface it in GUI error message.
+
 ### PASS: PipeWire quantum UX + correctness
 
 Verified in codebase:

@@ -15,13 +15,18 @@ bin/audioknob-gui
 
 ### Desktop launcher (optional, for local testing)
 
-This installs a `.desktop` entry so you can launch from your application menu:
+This generates and installs a `.desktop` entry so you can launch from your application menu:
 
 ```bash
 ./scripts/install-desktop.sh
 ```
 
-**Important:** the current desktop file uses a fixed `Exec=` pointing at the repo checkout path. If your repo is not at `/home/chris/audioknob-gui`, edit `packaging/audioknob-gui.desktop` before installing.
+The script auto-detects:
+- **Repo root**: Uses the script's location to find the repository
+- **Python**: Prefers `.venv/bin/python3` if present, falls back to system `python3`
+- **Environment**: Sets `AUDIOKNOB_DEV_REPO` so imports work correctly
+
+The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
 ### Set up pre-commit hooks (recommended for contributors)
 

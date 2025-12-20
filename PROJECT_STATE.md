@@ -100,6 +100,21 @@ Do these last, on a test system:
 - udev rule knobs: apply/reset, confirm udev reload behavior
 - kernel cmdline knobs: apply, confirm bootloader file updated, reboot, confirm status
 
+#### THP (Transparent Huge Pages) validation
+
+The `thp_mode_madvise` knob writes to `/sys/kernel/mm/transparent_hugepage/enabled`.
+
+Validation steps:
+1. **Before:** `cat /sys/kernel/mm/transparent_hugepage/enabled` → expect `always [madvise] never` or similar
+2. **Apply knob:** Click Apply in GUI (requires root via pkexec)
+3. **After:** `cat /sys/kernel/mm/transparent_hugepage/enabled` → expect `always madvise [never]` or bracketed value changed
+4. **GUI:** Confirm status refreshes to "Applied"
+
+If state doesn't change after apply:
+- Check stderr from worker apply command
+- Verify sysfs file is writable (some kernels may have immutable THP settings)
+- Kernel config `CONFIG_TRANSPARENT_HUGEPAGE` must be enabled
+
 ## 1. Project Vision & Principles
 
 ### The Problem We're Solving

@@ -1,0 +1,19 @@
+# Template for audioknob-gui desktop entry
+# 
+# DO NOT install this file directly. Use scripts/install-desktop.sh
+# which generates a working .desktop file with correct paths for your
+# development environment.
+#
+# For production packaging, the Exec= line should be:
+#   Exec=audioknob-gui
+# (assuming audioknob-gui is installed to $PATH via pip/package manager)
+
+[Desktop Entry]
+Name=AudioKnob GUI
+Comment=Linux realtime audio configuration tool
+Exec=audioknob-gui
+Icon=audio-card
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Settings;
+Keywords=audio;realtime;latency;pipewire;jack;tuning;
