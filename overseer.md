@@ -1073,3 +1073,43 @@ If you can’t reproduce the latest behavior, paste:
 - `git status -sb`
 - `git log --oneline -5`
 - output of `python3 scripts/check_repo_consistency.py`
+
+---
+
+## P2 — PipeWire default values inspection (2025-12-20)
+
+**Context:** During validation, discovered that pre-existing PipeWire config causes "restore to identical state" edge case.
+
+**Proposal:** Set sensible defaults that match typical Linux defaults:
+- `pipewire_sample_rate`: default to **48000 Hz** (standard audio rate)
+- `pipewire_quantum`: default to **1024** (matches PipeWire upstream default)
+
+**Rationale:**
+- If file doesn't exist, applying with these values creates a "no-op" config
+- Reset would delete the file (since `we_created: true`)
+- Reduces edge cases where backup == applied state
+
+**Action required:**
+- Verify 48000 Hz and 1024 are indeed PipeWire upstream defaults
+- Update registry.json with these defaults if confirmed
+- Consider: should "Apply" skip creating file if value matches system default?
+
+
+---
+
+## P1 — Reboot indicator missing for kernel cmdline knobs (2025-12-20)
+
+**Issue:** When applying kernel cmdline knobs (`kernel_threadirqs`, `kernel_audit_off`, `kernel_mitigations_off`), the GUI shows no indication that a reboot is required for changes to take effect.
+
+**Current state:**
+- Registry has `requires_reboot: true` for these knobs
+- GUI does not surface this in status column or after apply
+
+**Expected behavior:**
+- Status column should show "⟳ Reboot" or similar after apply (until reboot confirms change)
+- Alternatively, show a toast/dialog: "Changes applied. Reboot required to take effect."
+
+**Action required:**
+- Update GUI to check `requires_reboot` flag
+- Show indicator in status column or as popup after apply
+
