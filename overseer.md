@@ -402,6 +402,17 @@ Action taken:
 - **CPUs**: 32 cores
 - **Boot**: GRUB2-BLS with sdbootutil (`/etc/kernel/cmdline`)
 
+### Bootloader flags (Tumbleweed GRUB2-BLS) — pitfall note
+
+Operator note (from real testing): inserting flags like `threadirqs` can be confusing because Tumbleweed’s GRUB2+BLS flow may require a manual “push” step.
+
+Acceptance criteria for kernel cmdline knobs on Tumbleweed:
+- Apply/reset must edit `/etc/kernel/cmdline` **and** run `sdbootutil update-all-entries`
+- GUI must surface `sdbootutil` output on failure (do not silently proceed)
+- Verification must include:
+  - token presence/absence in BLS entry files (`/boot/loader/entries/` or `/boot/efi/loader/entries/`)
+  - token presence/absence in `/proc/cmdline` after reboot
+
 ### STATE 0: Before Reset
 
 Captured system state with multiple applied changes:

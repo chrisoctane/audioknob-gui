@@ -161,18 +161,25 @@ For each: `kernel_threadirqs`, `kernel_audit_off`, `kernel_mitigations_off`
 **Apply flow:**
 1. Apply in GUI → verify bootloader file updated:
    - Tumbleweed: `/etc/kernel/cmdline` contains token
-   - Verify update tool output surfaced (sdbootutil/grub update)
-2. Reboot
-3. Verify:
+   - Verify update tool output surfaced (sdbootutil/grub update) and contains no errors
+2. Verify BLS entry regeneration (Tumbleweed GRUB2-BLS):
+   - Confirm the token appears in an entry under `/boot/loader/entries/` or `/boot/efi/loader/entries/` (setup-dependent)
+   - Example:
+```bash
+sudo grep -R --line-number -E '(^| )threadirqs( |$)|(^| )audit=0( |$)|(^| )mitigations=off( |$)' /boot/loader/entries /boot/efi/loader/entries 2>/dev/null || true
+```
+3. Reboot
+4. Verify:
 ```bash
 cat /proc/cmdline | tr ' ' '\n' | grep -E '^(threadirqs|audit=0|mitigations=off)$'
 ```
-4. GUI status should show "Applied"
+5. GUI status should show "Applied"
 
 **Reset flow:**
 1. Reset in GUI → verify token removed from bootloader file
-2. Reboot
-3. Token absent in `/proc/cmdline`, GUI status "not_applied"
+2. Verify BLS entry regeneration (same locations as above) shows token removed
+3. Reboot
+4. Token absent in `/proc/cmdline`, GUI status "not_applied"
 
 ## 1. Project Vision & Principles
 
@@ -868,7 +875,9 @@ Other distros have **placeholders** until we can verify on real systems.
 
 **What this means:**
 - openSUSE Tumbleweed uses Boot Loader Specification (BLS)
-- Kernel entries are in `/boot/loader/entries/*.conf`
+- Kernel entries are in BLS entry files under **either**:
+  - `/boot/loader/entries/*.conf` (common)
+  - `/boot/efi/loader/entries/*.conf` (EFI layout dependent)
 - **NOT** traditional GRUB with `/etc/default/grub`
 - YaST bootloader module may show GRUB2, but the underlying system is BLS
 
@@ -883,7 +892,7 @@ sudo sdbootutil update-all-entries
 # This regenerates boot entries from /etc/kernel/cmdline
 ```
 
-**VERIFIED:** This works on Tumbleweed. Tested with `threadirqs` parameter.
+**VERIFIED:** This works on Tumbleweed, but users have reported a gotcha: if you edit boot flags via YaST, you may still need to manually run `sdbootutil update-all-entries` to “push” changes into the BLS entry files. Always verify by grepping the entry files and then `/proc/cmdline` after reboot.
 
 **CAUTION:**
 - YaST bootloader module does NOT update `/etc/kernel/cmdline` correctly
