@@ -574,6 +574,11 @@ def main() -> int:
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
                     self.table.setCellWidget(r, 4, btn)
 
+                # Column 5: Config - clear if no widget was set for this row
+                # (PipeWire rows set their own widgets above; other rows need clearing)
+                if k.id not in ("pipewire_quantum", "pipewire_sample_rate"):
+                    self.table.removeCellWidget(r, 5)
+
                 # Column 6: Info button (shows details popup)
                 info_btn = QPushButton("ℹ")
                 info_btn.setFixedWidth(30)
