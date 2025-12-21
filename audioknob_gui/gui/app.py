@@ -21,6 +21,22 @@ def _pkexec_available() -> bool:
     return which("pkexec") is not None
 
 
+_PKEXEC_CANCELLED = "__PKEXEC_CANCELLED__"
+
+
+def _is_pkexec_cancel(msg: str) -> bool:
+    if not msg:
+        return False
+    lower = msg.lower()
+    if "authentication cancelled" in lower or "authentication canceled" in lower:
+        return True
+    if "authorization cancelled" in lower or "authorization canceled" in lower:
+        return True
+    if "not authorized" in lower and "incident has been reported" in lower:
+        return True
+    return False
+
+
 def _worker_log_path(*, is_root: bool) -> str:
     from audioknob_gui.core.paths import default_paths
     paths = default_paths()
@@ -94,6 +110,8 @@ def _run_worker_apply_pkexec(knob_ids: list[str]) -> dict:
     if p.returncode != 0:
         log_path = _worker_log_path(is_root=True)
         msg = p.stderr.strip() or "worker apply failed"
+        if _is_pkexec_cancel(msg):
+            raise RuntimeError(_PKEXEC_CANCELLED)
         raise RuntimeError(f"{msg}\n\nLog: {log_path}")
     return json.loads(p.stdout)
 
@@ -1716,6 +1734,10 @@ def main() -> int:
                     pass
 
             if not success:
+                if message == _PKEXEC_CANCELLED:
+                    self._refresh_statuses()
+                    self._populate()
+                    return
                 if action == "apply":
                     _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, message)
                     QMessageBox.critical(self, "Failed", message or "Unknown error")
@@ -1734,11 +1756,15 @@ def main() -> int:
                     p = subprocess.run(argv, text=True, capture_output=True)
                     if not p.stdout.strip():
                         err = p.stderr.strip() or "Unknown error"
+                        if _is_pkexec_cancel(err):
+                            return False, _PKEXEC_CANCELLED
                         return False, err
                     try:
                         result = json.loads(p.stdout)
                     except Exception:
                         err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
+                        if _is_pkexec_cancel(err):
+                            return False, _PKEXEC_CANCELLED
                         return False, err
                     if result.get("success"):
                         return True, f"Reset {knob_id}"
@@ -1757,11 +1783,15 @@ def main() -> int:
                     p = subprocess.run(argv, text=True, capture_output=True)
                     if not p.stdout.strip():
                         err = p.stderr.strip() or "Unknown error"
+                        if _is_pkexec_cancel(err):
+                            return False, _PKEXEC_CANCELLED
                         return False, err
                     try:
                         result = json.loads(p.stdout)
                     except Exception:
                         err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
+                        if _is_pkexec_cancel(err):
+                            return False, _PKEXEC_CANCELLED
                         return False, err
                     if result.get("success"):
                         return True, f"Reset {knob_id}"

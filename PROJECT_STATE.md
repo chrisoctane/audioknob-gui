@@ -49,6 +49,7 @@ Notes:
 - KDE Indexer apply now times out and errors if balooctl hangs or still reports running.
 - KDE Indexer reset triggers balooctl enable in the background to avoid UI hangs.
 - Apply/Reset run in the background with a visible “Updating” status.
+- Cancelling pkexec prompts no longer triggers an error dialog.
 - Reset errors now surface detailed messages instead of a generic "Unknown error".
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
