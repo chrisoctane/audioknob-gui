@@ -742,9 +742,14 @@ def baloo_enable() -> None:
     cmd = which_command("balooctl")
     if cmd:
         try:
-            run([cmd, "enable"], timeout=30)
-        except subprocess.TimeoutExpired:
-            # Allow slow or hung balooctl without failing reset.
+            # Best-effort: don't block the GUI reset path on balooctl.
+            subprocess.Popen(
+                [cmd, "enable"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception:
             return
 
 

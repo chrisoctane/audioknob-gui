@@ -205,6 +205,8 @@ else:
 self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
+Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
+
 ### Read-only info
 ```python
 btn = QPushButton("View")

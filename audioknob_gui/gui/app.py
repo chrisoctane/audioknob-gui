@@ -210,7 +210,7 @@ def save_state(state: dict) -> None:
 
 def main() -> int:
     try:
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QThread, Signal
         from PySide6.QtWidgets import (
             QApplication,
             QAbstractItemView,
@@ -249,6 +249,22 @@ def main() -> int:
 
     from audioknob_gui.gui.tests_dialog import jitter_test_summary
     from audioknob_gui.registry import load_registry
+
+    class KnobTaskWorker(QThread):
+        finished = Signal(str, str, bool, object, str)
+
+        def __init__(self, knob_id: str, action: str, fn, parent: QWidget | None = None) -> None:
+            super().__init__(parent)
+            self._knob_id = knob_id
+            self._action = action
+            self._fn = fn
+
+        def run(self) -> None:
+            try:
+                success, payload, message = self._fn()
+            except Exception as e:
+                success, payload, message = False, None, str(e)
+            self.finished.emit(self._knob_id, self._action, bool(success), payload, message or "")
 
     class ConfirmDialog(QDialog):
         def __init__(self, planned_ids: list[str], parent: QWidget | None = None) -> None:
@@ -400,6 +416,8 @@ def main() -> int:
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
+            self._busy_knobs: set[str] = set()
+            self._task_threads: list[QThread] = []
             self._user_groups: set[str] = set()
             self._refresh_user_groups()
             self._refresh_statuses()
@@ -518,6 +536,11 @@ def main() -> int:
             btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
             return btn
 
+        def _apply_busy_state(self, btn: QPushButton, *, busy: bool) -> None:
+            if busy:
+                btn.setText("Working...")
+                btn.setEnabled(False)
+
         def _status_display(self, status: str) -> tuple[str, str]:
             """Return (display_text, color) for a status."""
             # Handle test results: "result:12 µs" → "12 µs"
@@ -532,7 +555,7 @@ def main() -> int:
                 "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
                 "read_only": ("—", "#9e9e9e"),            # Gray dash
                 "unknown": ("—", "#9e9e9e"),              # Gray dash
-                "running": ("⏳", "#1976d2"),             # Blue spinner
+                "running": ("⏳ Updating", "#1976d2"),    # Blue spinner
                 "done": ("✓", "#2e7d32"),                 # Green check
                 "error": ("✗", "#d32f2f"),                # Red X
             }
@@ -574,6 +597,8 @@ def main() -> int:
 
                 # Column 2: Status (with color)
                 status = self._knob_statuses.get(k.id, "unknown")
+                busy = k.id in self._busy_knobs
+                display_status = "running" if busy else status
                 not_applicable = (status == "not_applicable")
 
                 if locked:
@@ -589,7 +614,7 @@ def main() -> int:
                     status_item.setForeground(QColor("#9e9e9e"))
                     status_item.setToolTip("Not available on this system")
                 else:
-                    status_text, status_color = self._status_display(status)
+                    status_text, status_color = self._status_display(display_status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
                 self.table.setItem(r, 2, status_item)
@@ -615,6 +640,7 @@ def main() -> int:
                         btn.clicked.connect(self._on_leave_groups)
                     else:
                         btn.clicked.connect(self._on_join_groups)
+                    self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
                 elif not group_ok:
                     # Locked: user needs to join groups first
@@ -654,6 +680,7 @@ def main() -> int:
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
 
                     # Config column: quantum selector
@@ -695,6 +722,7 @@ def main() -> int:
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
 
                     # Config column: sample rate selector
@@ -732,6 +760,7 @@ def main() -> int:
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
 
                     # Config column: CPU core selection
@@ -754,6 +783,7 @@ def main() -> int:
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
 
                 # Column 6: Config - clear if no widget was set for this row
@@ -1638,31 +1668,60 @@ def main() -> int:
             k = next((k for k in self.registry if k.id == knob_id), None)
             if not k:
                 return
-            
-            try:
+
+            def _task():
                 if k.requires_root:
                     result = _run_worker_apply_pkexec([knob_id])
-                    self.state["last_root_txid"] = result.get("txid")
-                else:
-                    result = _run_worker_apply_user([knob_id])
-                    self.state["last_user_txid"] = result.get("txid")
-                save_state(self.state)
-            except Exception as e:
-                _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, e)
-                QMessageBox.critical(self, "Failed", str(e))
-                return
-            
-            # Refresh UI
-            self._refresh_statuses()
-            self._populate()
+                    return True, {"result": result, "requires_root": True}, ""
+                result = _run_worker_apply_user([knob_id])
+                return True, {"result": result, "requires_root": False}, ""
+
+            self._run_knob_task(knob_id, "apply", _task)
 
         def _on_reset_knob(self, knob_id: str, requires_root: bool) -> None:
             """Reset a single knob to original."""
-            success, msg = self._restore_knob_internal(knob_id, requires_root)
+            def _task():
+                success, msg = self._restore_knob_internal(knob_id, requires_root)
+                return success, {"message": msg}, msg
+
+            self._run_knob_task(knob_id, "reset", _task)
+
+        def _run_knob_task(self, knob_id: str, action: str, fn) -> None:
+            if knob_id in self._busy_knobs:
+                return
+            self._busy_knobs.add(knob_id)
+            self._knob_statuses[knob_id] = "running"
+            self._populate()
+
+            worker = KnobTaskWorker(knob_id, action, fn, parent=self)
+            worker.finished.connect(self._on_knob_task_finished)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
+
+        def _on_knob_task_finished(self, knob_id: str, action: str, success: bool, payload: object, message: str) -> None:
+            self._busy_knobs.discard(knob_id)
+            self._task_threads = [w for w in self._task_threads if w.isRunning()]
+
+            if success and action == "apply":
+                try:
+                    if isinstance(payload, dict):
+                        result = payload.get("result", {})
+                        if payload.get("requires_root"):
+                            self.state["last_root_txid"] = result.get("txid")
+                        else:
+                            self.state["last_user_txid"] = result.get("txid")
+                        save_state(self.state)
+                except Exception:
+                    pass
+
             if not success:
-                QMessageBox.warning(self, "Reset Failed", msg)
-            
-            # Refresh UI
+                if action == "apply":
+                    _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, message)
+                    QMessageBox.critical(self, "Failed", message or "Unknown error")
+                else:
+                    QMessageBox.warning(self, "Reset Failed", message or "Unknown error")
+
             self._refresh_statuses()
             self._populate()
 
