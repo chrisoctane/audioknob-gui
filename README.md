@@ -19,18 +19,11 @@ rm -f ~/.local/share/applications/audioknob-gui.desktop
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
 ```
 
-### 1) Clone + build prerequisites
-
-```bash
-git clone https://github.com/chrisoctane/audioknobs-gui.git
-cd audioknob-gui
-```
-
-Install build and runtime prerequisites:
+### 1) Install prerequisites (including git)
 
 ```bash
 sudo zypper install -y \
-  git \
+  git-core \
   rpm-build \
   python313 python313-devel python313-pip python313-setuptools python313-wheel \
   python313-pyside6 \
@@ -39,7 +32,16 @@ sudo zypper install -y \
   polkit
 ```
 
-### 2) Build the RPM (local)
+### 2) Clone the repo
+
+```bash
+git clone https://github.com/chrisoctane/audioknob-gui.git
+cd audioknob-gui
+```
+
+Note: the repo name is `audioknob-gui` (singular). If you cloned a plural name by mistake, delete it and re-clone.
+
+### 3) Build the RPM (local)
 
 ```bash
 ./packaging/opensuse/build-rpm.sh
@@ -50,7 +52,7 @@ Expected output includes:
 - `Built RPM(s):`
 - `~/rpmbuild/RPMS/noarch/audioknob-gui-0.1.0-0.noarch.rpm`
 
-### 3) Install the RPM (unsigned local build)
+### 4) Install the RPM (unsigned local build)
 
 Local RPMs are typically **unsigned**, and `zypper` will refuse them unless you opt in:
 
@@ -58,7 +60,7 @@ Local RPMs are typically **unsigned**, and `zypper` will refuse them unless you 
 sudo zypper --no-gpg-checks install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
 ```
 
-### 4) Verify install
+### 5) Verify install
 
 ```bash
 rpm -q audioknob-gui
@@ -77,13 +79,13 @@ Or launch it from your desktop environment’s application menu:
 - **Name**: “AudioKnob GUI”
 - **Desktop entry**: `/usr/share/applications/audioknob-gui.desktop`
 
-### 5) Uninstall
+### 6) Uninstall
 
 ```bash
 sudo zypper remove -y audioknob-gui
 ```
 
-### 6) Cleanup (optional)
+### 7) Cleanup (optional)
 
 Remove user GUI state (this does **not** remove any system changes you applied; use the app’s “Reset All” for that):
 
@@ -127,4 +129,3 @@ The production path is to publish a **signed** RPM via the openSUSE **Open Build
 ## Development
 
 See `PLAN.md` (quick start) and `PROJECT_STATE.md` (architecture + operator contract).
-

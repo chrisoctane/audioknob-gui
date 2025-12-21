@@ -26,7 +26,7 @@ class DistroInfo:
 
 def detect_distro() -> DistroInfo:
     """Detect distribution and boot system configuration."""
-    import shutil
+    from audioknob_gui.platform.packages import which_command
     
     # Parse /etc/os-release
     os_release = {}
@@ -42,15 +42,21 @@ def detect_distro() -> DistroInfo:
     distro_id = os_release.get("ID", "unknown")
     version_id = os_release.get("VERSION_ID", "")
     
+    def _cmd(cmd: str, *args: str) -> list[str]:
+        path = which_command(cmd)
+        if path:
+            return [path, *args]
+        return [cmd, *args]
+
     # Detect boot system and cmdline location
     if distro_id == "opensuse-tumbleweed" or (distro_id == "opensuse" and "tumbleweed" in os_release.get("PRETTY_NAME", "").lower()):
         # openSUSE Tumbleweed uses GRUB2-BLS with sdbootutil
-        if Path("/etc/kernel/cmdline").exists() and shutil.which("sdbootutil"):
+        if Path("/etc/kernel/cmdline").exists() and which_command("sdbootutil"):
             return DistroInfo(
                 distro_id="opensuse-tumbleweed",
                 boot_system="grub2-bls",
                 kernel_cmdline_file="/etc/kernel/cmdline",
-                kernel_cmdline_update_cmd=["sdbootutil", "update-all-entries"],
+                kernel_cmdline_update_cmd=_cmd("sdbootutil", "update-all-entries"),
             )
     
     if distro_id in ("opensuse-leap", "opensuse"):
@@ -59,7 +65,7 @@ def detect_distro() -> DistroInfo:
             distro_id="opensuse-leap",
             boot_system="grub2",
             kernel_cmdline_file="/etc/default/grub",
-            kernel_cmdline_update_cmd=["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+            kernel_cmdline_update_cmd=_cmd("grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"),
         )
     
     if distro_id == "fedora":
@@ -67,7 +73,7 @@ def detect_distro() -> DistroInfo:
             distro_id="fedora",
             boot_system="grub2",
             kernel_cmdline_file="/etc/default/grub",
-            kernel_cmdline_update_cmd=["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+            kernel_cmdline_update_cmd=_cmd("grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"),
         )
     
     if distro_id in ("debian", "ubuntu", "linuxmint", "pop"):
@@ -75,7 +81,7 @@ def detect_distro() -> DistroInfo:
             distro_id=distro_id,
             boot_system="grub2",
             kernel_cmdline_file="/etc/default/grub",
-            kernel_cmdline_update_cmd=["update-grub"],
+            kernel_cmdline_update_cmd=_cmd("update-grub"),
         )
     
     if distro_id == "arch":
@@ -85,13 +91,13 @@ def detect_distro() -> DistroInfo:
                 distro_id="arch",
                 boot_system="systemd-boot",
                 kernel_cmdline_file="/etc/kernel/cmdline",
-                kernel_cmdline_update_cmd=["bootctl", "update"],
+                kernel_cmdline_update_cmd=_cmd("bootctl", "update"),
             )
         return DistroInfo(
             distro_id="arch",
             boot_system="grub2",
             kernel_cmdline_file="/etc/default/grub",
-            kernel_cmdline_update_cmd=["grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
+            kernel_cmdline_update_cmd=_cmd("grub-mkconfig", "-o", "/boot/grub/grub.cfg"),
         )
     
     # Fallback: try to detect boot system heuristically
@@ -110,14 +116,14 @@ def detect_distro() -> DistroInfo:
                 distro_id=distro_id,
                 boot_system="grub2",
                 kernel_cmdline_file="/etc/default/grub",
-                kernel_cmdline_update_cmd=["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+                kernel_cmdline_update_cmd=_cmd("grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"),
             )
         if Path("/boot/grub/grub.cfg").exists():
             return DistroInfo(
                 distro_id=distro_id,
                 boot_system="grub2",
                 kernel_cmdline_file="/etc/default/grub",
-                kernel_cmdline_update_cmd=["grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
+                kernel_cmdline_update_cmd=_cmd("grub-mkconfig", "-o", "/boot/grub/grub.cfg"),
             )
     
     return DistroInfo(
@@ -442,6 +448,26 @@ def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]],
         notes.append("Masking prevents services from starting, even on boot")
     
     return would_run, notes
+
+
+def user_unit_exists(unit: str) -> bool:
+    """Return True if a user systemd unit file exists."""
+    try:
+        result = run(["systemctl", "--user", "list-unit-files", unit])
+    except Exception:
+        return False
+
+    if result.returncode != 0:
+        return False
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line or line.startswith("UNIT FILE"):
+            continue
+        parts = line.split()
+        if parts and parts[0] == unit:
+            return True
+    return False
 
 
 def _baloo_disable_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
@@ -963,9 +989,13 @@ def check_knob_status(knob: Any) -> str:
             services = [services]
         if not services:
             return "unknown"
-        
+
+        existing = [svc for svc in services if user_unit_exists(svc)]
+        if not existing:
+            return "not_applied"
+
         masked_count = 0
-        for svc in services:
+        for svc in existing:
             try:
                 result = run(["systemctl", "--user", "is-enabled", svc])
                 if result.stdout.strip() == "masked":
@@ -973,7 +1003,7 @@ def check_knob_status(knob: Any) -> str:
             except Exception:
                 pass
         
-        if masked_count == len(services):
+        if masked_count == len(existing):
             return "applied"
         elif masked_count > 0:
             return "partial"
@@ -988,7 +1018,8 @@ def check_knob_status(knob: Any) -> str:
         try:
             result = run([cmd, "status"])
             # "Baloo is currently disabled" in output
-            if "disabled" in result.stdout.lower():
+            out = result.stdout.lower()
+            if "disabled" in out or "not running" in out or "stopped" in out:
                 return "applied"
             return "not_applied"
         except Exception:

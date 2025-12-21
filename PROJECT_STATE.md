@@ -6,16 +6,16 @@
 
 ---
 
-## Current Status (2025-12-20)
+## Current Status (rolling)
 
 ### What Works
-- **22 knobs defined** (ALL 22 IMPLEMENTED)
+- **23 knobs defined** (ALL 23 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to apply or undo
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
-- **Info popup** - "?" button shows details + config options
+- **Info popup** - Info column with "?" button shows details + config options
 - **Transaction system** - backups + smart restore
 - **Undo** - restores last transaction
 - **Reset All** - reverts all changes to system defaults
@@ -25,16 +25,23 @@
 
 ### GUI Layout
 ```
-Columns: ? | Knob | Status | Category | Risk | Action | Config
+Columns: Info | Knob | Status | Category | Risk | Action | Config
          (0)  (1)    (2)      (3)       (4)    (5)      (6)
 
 Notes:
-- Column 0 is a small "?" button that opens the knob details popup.
+- Column 0 header is "Info"; each row has a small "?" button that opens the knob details popup.
 - "Config" is used for in-row selectors (currently PipeWire quantum/sample-rate).
 ```
 
+### Bugs Fixed (Prevent Regression)
+- Prevented accidental editing of table cells (table is now non-editable).
+- Clarified the Info column header/tooltip to match the per-row "?" button.
+- Audio Groups join now resolves `usermod` via known paths to avoid missing command errors in GUI sessions.
+- Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
+- User-service masking only targets existing units; Baloo status detection recognizes disabled/not running and surfaces failures.
+
 ### Next Steps
-1. ~~Test all knobs on real system~~ ✓ Complete (2025-12-20)
+1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
 2. Add more PipeWire configuration options (via info popup config dialog)
 3. Package for distribution
 

@@ -327,7 +327,7 @@ def main() -> int:
             root.addLayout(top)
 
             self.table = QTableWidget(0, 7)
-            self.table.setHorizontalHeaderLabels(["", "Knob", "Status", "Category", "Risk", "Action", "Config"])
+            self.table.setHorizontalHeaderLabels(["Info", "Knob", "Status", "Category", "Risk", "Action", "Config"])
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(True)
             self.table.setAlternatingRowColors(True)
@@ -335,9 +335,13 @@ def main() -> int:
             self.table.setTextElideMode(Qt.ElideRight)
             self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
             self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+            self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.table.verticalHeader().setVisible(False)
             header = self.table.horizontalHeader()
             header.setMinimumSectionSize(60)
+            info_header = self.table.horizontalHeaderItem(0)
+            if info_header is not None:
+                info_header.setToolTip("Show details")
             # Make every column user-resizable (Interactive). We also set reasonable defaults.
             # NOTE: ResizeToContents does NOT reliably account for cell widgets (buttons/combos),
             # which causes text clipping like "Apply" -> "Annlv".
@@ -1167,6 +1171,7 @@ def main() -> int:
         def _on_join_groups(self) -> None:
             """Add current user to audio groups."""
             from audioknob_gui.platform.detect import get_available_audio_groups, get_missing_groups
+            from audioknob_gui.platform.packages import which_command
             
             missing = get_missing_groups()
             available = get_available_audio_groups()
@@ -1202,6 +1207,11 @@ def main() -> int:
             
             # Run usermod via pkexec for each group
             import getpass
+            usermod = which_command("usermod")
+            if not usermod:
+                QMessageBox.critical(self, "Error", "usermod not found on this system.")
+                return
+
             user = os.environ.get("USER") or getpass.getuser()
             errors = []
             successes = []
@@ -1209,7 +1219,7 @@ def main() -> int:
             for group in groups_to_add:
                 try:
                     p = subprocess.run(
-                        ["pkexec", "usermod", "-aG", group, user],
+                        ["pkexec", usermod, "-aG", group, user],
                         capture_output=True,
                         text=True
                     )

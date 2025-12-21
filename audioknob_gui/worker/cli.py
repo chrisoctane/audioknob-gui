@@ -21,7 +21,13 @@ from audioknob_gui.core.transaction import (
 )
 from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
-from audioknob_gui.worker.ops import check_knob_status, preview, restore_sysfs, systemd_restore
+from audioknob_gui.worker.ops import (
+    check_knob_status,
+    preview,
+    restore_sysfs,
+    systemd_restore,
+    user_unit_exists,
+)
 
 
 def _require_root() -> None:
@@ -265,9 +271,13 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             services = params.get("services", [])
             if isinstance(services, str):
                 services = [services]
-            
+
+            existing = [svc for svc in services if user_unit_exists(svc)]
+            if not existing:
+                raise SystemExit("No matching user services found to mask")
+
             masked_services: list[dict] = []
-            for svc in services:
+            for svc in existing:
                 # Capture pre-state so restore doesn't unmask services that were already masked.
                 pre_enabled = subprocess.run(
                     ["systemctl", "--user", "is-enabled", svc],
@@ -301,7 +311,10 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             from audioknob_gui.platform.packages import which_command
             cmd = which_command("balooctl")
             if cmd:
-                result = subprocess.run([cmd, "disable"], check=False, capture_output=True)
+                result = subprocess.run([cmd, "disable"], check=False, capture_output=True, text=True)
+                if result.returncode != 0:
+                    err = result.stderr.strip() or result.stdout.strip() or "balooctl disable failed"
+                    raise SystemExit(err)
                 effects.append({
                     "kind": "baloo_disable",
                     "result": {"returncode": result.returncode},

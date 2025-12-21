@@ -179,7 +179,7 @@ In `gui/app.py` → `_populate()`:
 | Read-only test | — | "Test"/"Scan" button | "?" button |
 | Group join knob | — | "Join" button | "?" button |
 
-**Columns**: ? | Knob | Status | Category | Risk | Action | Config
+**Columns**: Info | Knob | Status | Category | Risk | Action | Config
 
 **Sorting**: Click any column header to sort
 
@@ -222,11 +222,11 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the "?" details popup (saved to `state.json`). Applying either PipeWire knob restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). Applying either PipeWire knob restarts PipeWire services automatically.
 
 ---
 
-## Current Knobs (22) - ALL IMPLEMENTED ✓
+## Current Knobs (23) - ALL IMPLEMENTED ✓
 
 ### Permissions
 | Knob | Kind | Status |
@@ -395,7 +395,7 @@ bin/audioknob-gui
 
 Verify:
 - table loads and status updates
-- PipeWire quantum/sample-rate selectors work and reflect in the "?" details popup
+- PipeWire quantum/sample-rate selectors work and reflect in the Info details popup
 
 ### Root knobs (manual, last)
 
