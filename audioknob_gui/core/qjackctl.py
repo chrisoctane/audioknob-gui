@@ -10,6 +10,7 @@ from pathlib import Path
 class QjackCtlConfig:
     def_preset: str
     server_cmd: str | None  # The Server value for the active preset
+    server_prefix: str | None  # The ServerPrefix value for the active preset
 
 
 def _normalize_preset_key(preset: str) -> str:
@@ -51,9 +52,11 @@ def read_config(path: str | Path) -> QjackCtlConfig:
     cp = _read_config(path)
     def_preset = _get_active_preset(cp) or ""
     server_cmd = None
+    server_prefix = None
     if def_preset:
         server_cmd = _get_server_for_preset(cp, def_preset)
-    return QjackCtlConfig(def_preset=def_preset, server_cmd=server_cmd)
+        server_prefix = _get_server_prefix_for_preset(cp, def_preset)
+    return QjackCtlConfig(def_preset=def_preset, server_cmd=server_cmd, server_prefix=server_prefix)
 
 
 def ensure_server_has_flags(cmd: str, *, ensure_rt: bool = True, ensure_priority: bool = False, cpu_cores: str | None = None) -> str:
@@ -125,6 +128,29 @@ def ensure_server_has_flags(cmd: str, *, ensure_rt: bool = True, ensure_priority
     return " ".join(result)
 
 
+def ensure_server_prefix(prefix: str | None, *, cpu_cores: str | None) -> str:
+    """Update ServerPrefix to include (or remove) taskset pinning without adding jackd flags."""
+    if prefix is None:
+        prefix = ""
+    if cpu_cores is None:
+        return prefix
+
+    parts = prefix.split()
+    cleaned: list[str] = []
+    i = 0
+    while i < len(parts):
+        if parts[i] == "taskset" and i + 2 < len(parts) and parts[i + 1] == "-c":
+            i += 3
+            continue
+        cleaned.append(parts[i])
+        i += 1
+
+    if cpu_cores == "":
+        return " ".join(cleaned).strip()
+
+    return " ".join(["taskset", "-c", str(cpu_cores), *cleaned]).strip()
+
+
 def write_config_with_server_update(
     path: str | Path,
     preset: str,
@@ -169,13 +195,22 @@ def ensure_server_flags(
     server_prefix = _get_server_prefix_for_preset(cp, def_preset) if def_preset else None
     if not server_cmd:
         before = ""
-        after = ensure_server_has_flags("", ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
+        after = ensure_server_has_flags(
+            "jackd",
+            ensure_rt=ensure_rt,
+            ensure_priority=ensure_priority,
+            cpu_cores="" if cpu_cores is not None else None,
+        )
     else:
         before = server_cmd
-        after = ensure_server_has_flags(server_cmd, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
+        after = ensure_server_has_flags(
+            server_cmd,
+            ensure_rt=ensure_rt,
+            ensure_priority=ensure_priority,
+            cpu_cores="" if cpu_cores is not None else None,
+        )
 
-    prefix_base = server_prefix or "jackd"
-    prefix_after = ensure_server_has_flags(prefix_base, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
+    prefix_after = ensure_server_prefix(server_prefix, cpu_cores=cpu_cores)
 
     if before != after or defaulted or prefix_after != (server_prefix or ""):
         write_config_with_server_update(path, def_preset, after, server_prefix=prefix_after)

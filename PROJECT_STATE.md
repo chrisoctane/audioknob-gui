@@ -42,6 +42,7 @@ Notes:
 - Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
 - User-service masking only targets existing units; Baloo status detection recognizes disabled/not running and surfaces failures.
 - QjackCtl config applies even if DefPreset is missing (creates default preset).
+- QjackCtl ServerPrefix now shows taskset pinning in the GUI (prefix is written separately from jackd flags).
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
 

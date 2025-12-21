@@ -222,7 +222,7 @@ def _sysfs_glob_preview(params: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
-    from audioknob_gui.core.qjackctl import ensure_server_has_flags
+    from audioknob_gui.core.qjackctl import ensure_server_has_flags, ensure_server_prefix
 
     path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
     path = Path(path_str).expanduser()
@@ -235,31 +235,45 @@ def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
     try:
         cfg = read_config(path)
         before_cmd = cfg.server_cmd or ""
+        before_prefix = cfg.server_prefix or ""
         preset = cfg.def_preset or "default"
     except Exception:
         before_cmd = ""
+        before_prefix = ""
         preset = "default"
 
     # Compute what the after command would be (without modifying file)
     after_cmd = ensure_server_has_flags(
-        before_cmd or "jackd", ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores
+        before_cmd or "jackd",
+        ensure_rt=ensure_rt,
+        ensure_priority=ensure_priority,
+        cpu_cores="" if cpu_cores is not None else None,
     )
+    after_prefix = ensure_server_prefix(before_prefix, cpu_cores=cpu_cores)
 
     before = _read_text(str(path))
     # Generate a realistic diff by finding and replacing the Server line
     after_lines = before.splitlines() if before else []
     server_key = f"{preset}\\Server=" if preset else "Server="
+    prefix_key = f"{preset}\\ServerPrefix=" if preset else "ServerPrefix="
     found = False
+    prefix_found = False
     for i, line in enumerate(after_lines):
         if line.startswith(server_key):
             after_lines[i] = f"{server_key}{after_cmd}"
             found = True
-            break
+        if line.startswith(prefix_key):
+            after_lines[i] = f"{prefix_key}{after_prefix}"
+            prefix_found = True
     if not found and preset:
         # Add the line if missing
         if "[Settings]" not in after_lines:
             after_lines.append("[Settings]")
         after_lines.append(f"{server_key}{after_cmd}")
+    if not prefix_found and preset:
+        if "[Settings]" not in after_lines:
+            after_lines.append("[Settings]")
+        after_lines.append(f"{prefix_key}{after_prefix}")
 
     after = "\n".join(after_lines)
     if after and not after.endswith("\n"):
@@ -890,8 +904,10 @@ def check_knob_status(knob: Any) -> str:
             cfg = read_config(path)
             if not cfg.server_cmd:
                 return "not_applied"
-            cmd = cfg.server_cmd
+            cmd = cfg.server_cmd or ""
+            prefix = cfg.server_prefix or ""
             tokens = cmd.split()
+            prefix_tokens = prefix.split()
             ensure_rt = bool(params.get("ensure_rt", True))
             ensure_prio = bool(params.get("ensure_priority", False))
             cpu_cores = params.get("cpu_cores")
@@ -909,12 +925,15 @@ def check_knob_status(knob: Any) -> str:
             pin_ok = True
             if cpu_cores is not None:
                 if cpu_cores == "":
-                    pin_ok = "taskset" not in tokens
+                    pin_ok = "taskset" not in tokens and "taskset" not in prefix_tokens
                 else:
                     pin_ok = False
-                    for i, tok in enumerate(tokens):
-                        if tok == "taskset" and i + 2 < len(tokens) and tokens[i + 1] == "-c":
-                            pin_ok = tokens[i + 2] == cpu_cores
+                    for parts in (prefix_tokens, tokens):
+                        for i, tok in enumerate(parts):
+                            if tok == "taskset" and i + 2 < len(parts) and parts[i + 1] == "-c":
+                                pin_ok = parts[i + 2] == cpu_cores
+                                break
+                        if pin_ok:
                             break
 
             if rt_ok and prio_ok and pin_ok:
