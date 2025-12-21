@@ -88,7 +88,28 @@ rm -rf ~/rpmbuild/BUILD ~/rpmbuild/BUILDROOT ~/rpmbuild/SOURCES ~/rpmbuild/OTHER
 
 - Root operations are performed via polkit using a fixed-path worker at:
   - `/usr/libexec/audioknob-gui-worker`
-- For a signed RPM and repo-based install (no `--no-gpg-checks`), the next step is publishing via **OBS** (future).
+
+## Signed RPM via OBS (future)
+
+The local-RPM flow above is great for development, but it requires `--no-gpg-checks` because the RPM is unsigned.
+The production path is to publish a **signed** RPM via the openSUSE **Open Build Service (OBS)** so users can install from a repo.
+
+### High-level steps
+
+- **Create OBS project + package**: e.g. `home:<you>:audioknob-gui` and package `audioknob-gui`
+- **Upload sources or use a source service**:
+  - Upload release tarballs (what `rpmbuild` consumes), or
+  - Configure an OBS service to pull from Git and generate the tarball
+- **Use our spec**: `packaging/opensuse/audioknob-gui.spec`
+- **Publish repo + sign**: OBS generates a repository users can add and verify
+- **Install becomes**:
+  - `sudo zypper ar -f <repo_url> audioknob-gui`
+  - `sudo zypper install -y audioknob-gui`
+
+### Non-goals (for now)
+
+- We are **not** attempting to GPG-sign local RPM builds.
+- We are **not** publishing to the official openSUSE distribution repos yet.
 
 ## Development
 
