@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import logging
 import os
@@ -449,11 +448,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
         elif kind == "sysfs_glob_kv":
             from audioknob_gui.worker.ops import write_sysfs_values
 
-            glob_pat = str(params["glob"])
-            matches = glob.glob(glob_pat)
-            if not matches:
+            glob_pat = params["glob"]
+            sysfs_effects = write_sysfs_values(glob_pat, str(params["value"]))
+            if not sysfs_effects:
                 raise SystemExit(f"No sysfs entries found for: {glob_pat}")
-            effects.extend(write_sysfs_values(glob_pat, str(params["value"])))
+            effects.extend(sysfs_effects)
 
             # Special case: persistent CPU governor requires additional config to survive reboot.
             if kid == "cpu_governor_performance_persistent":

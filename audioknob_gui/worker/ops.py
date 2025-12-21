@@ -215,9 +215,9 @@ def _systemd_unit_preview(params: dict[str, Any]) -> tuple[list[list[str]], list
 
 
 def _sysfs_glob_preview(params: dict[str, Any]) -> list[dict[str, Any]]:
-    g = str(params["glob"])
+    g = params["glob"]
     value = str(params["value"])
-    matches = sorted(glob.glob(g))
+    matches = _expand_sysfs_globs(g)
     return [{"path": p, "value": value} for p in matches]
 
 
@@ -621,9 +621,22 @@ def systemd_restore(effect: dict[str, Any]) -> None:
         run(["systemctl", "stop", unit])
 
 
-def write_sysfs_values(glob_pat: str, value: str) -> list[dict[str, Any]]:
+def _expand_sysfs_globs(glob_spec: str | list[str]) -> list[str]:
+    globs = [glob_spec] if isinstance(glob_spec, str) else list(glob_spec)
+    matches: list[str] = []
+    for g in globs:
+        matches.extend(glob.glob(g))
+
+    # Fallback for systems that only expose policy-based cpufreq paths.
+    if not matches and any("cpu*/cpufreq/scaling_governor" in g for g in globs):
+        matches.extend(glob.glob("/sys/devices/system/cpu/cpufreq/policy*/scaling_governor"))
+
+    return sorted(set(matches))
+
+
+def write_sysfs_values(glob_pat: str | list[str], value: str) -> list[dict[str, Any]]:
     effects: list[dict[str, Any]] = []
-    for p in sorted(glob.glob(glob_pat)):
+    for p in _expand_sysfs_globs(glob_pat):
         path = Path(p)
         try:
             raw = path.read_text(encoding="utf-8").strip()
@@ -795,7 +808,7 @@ def check_knob_status(knob: Any) -> str:
     if kind == "sysfs_glob_kv":
         glob_pat = str(params.get("glob", ""))
         wanted = str(params.get("value", ""))
-        matches = sorted(glob.glob(glob_pat))
+        matches = _expand_sysfs_globs(glob_pat)
         if not matches:
             return "not_applicable"
         applied_count = 0

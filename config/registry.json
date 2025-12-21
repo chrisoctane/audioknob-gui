@@ -7,7 +7,7 @@
         "restore": true
       },
       "category": "permissions",
-      "description": "Adds current user to audio-related groups (audio, realtime, pipewire). Required for RT limits and low-latency audio. Requires logout/login to take effect.",
+      "description": "Adds current user to audio-related groups (audio, realtime, pipewire). Required for RT limits and low-latency audio. Reboot required to take effect.",
       "id": "audio_group_membership",
       "impl": {
         "kind": "group_membership",

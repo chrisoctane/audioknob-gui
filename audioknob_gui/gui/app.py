@@ -1288,12 +1288,16 @@ def main() -> int:
             if errors:
                 msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
             if successes:
-                msg.append("<br/><br/><b>Log out, then back in (or reboot) for changes to take effect.</b>")
+                msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
             
             QMessageBox.information(self, "Group Membership", "".join(msg))
             logger.info("join groups user=%s added=%s errors=%s", user, ",".join(successes), "; ".join(errors))
             
             # Refresh (won't show changes until re-login, but update UI state)
+            if successes:
+                self._knob_statuses["audio_group_membership"] = "pending_reboot"
+                self._update_reboot_banner()
+
             self._refresh_user_groups()
             self._populate()
 
@@ -1319,7 +1323,7 @@ def main() -> int:
                 self,
                 "Leave Audio Groups",
                 f"Remove user from these groups?\n\n• {chr(10).join(groups_to_remove)}\n\n"
-                f"Note: You must log out and back in (or reboot) for changes to take effect.",
+                f"Note: A reboot is required for changes to take effect.",
                 QMessageBox.Ok | QMessageBox.Cancel
             )
             if reply != QMessageBox.Ok:
@@ -1381,10 +1385,14 @@ def main() -> int:
             if errors:
                 msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
             if successes:
-                msg.append("<br/><br/><b>Log out, then back in (or reboot) for changes to take effect.</b>")
+                msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
 
             QMessageBox.information(self, "Group Membership", "".join(msg))
             logger.info("leave groups user=%s removed=%s errors=%s", user, ",".join(successes), "; ".join(errors))
+
+            if successes:
+                self._knob_statuses["audio_group_membership"] = "pending_reboot"
+                self._update_reboot_banner()
 
             self._refresh_user_groups()
             self._populate()
@@ -1458,15 +1466,67 @@ def main() -> int:
                 else:
                     stderr = p.stderr.strip()
                     stdout = p.stdout.strip()
-                    hint = ""
                     combined = (stderr + "\n" + stdout).lower()
-                    if "no provider found" in combined and manager == PackageManager.RPM:
-                        hint = "\n\nPackage not found in enabled repos. On Tumbleweed, you may need to enable Packman or multimedia:proaudio."
                     logger.error("install packages failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
+
+                    if "no provider found" in combined and manager == PackageManager.RPM and shutil.which("zypper"):
+                        reply = QMessageBox.question(
+                            self,
+                            "Add Repositories",
+                            "Packages not found in enabled repos.\n\n"
+                            "Add repositories and retry?\n\n"
+                            "• multimedia:proaudio\n"
+                            "• packman",
+                            QMessageBox.Ok | QMessageBox.Cancel
+                        )
+                        if reply == QMessageBox.Ok:
+                            repo_defs = [
+                                ("multimedia:proaudio", "https://download.opensuse.org/repositories/multimedia:/proaudio/openSUSE_Tumbleweed/"),
+                                ("packman", "https://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Tumbleweed/"),
+                            ]
+                            repo_errors = []
+                            for name, url in repo_defs:
+                                add_cmd = ["pkexec", "zypper", "ar", "-f", "-n", name, url, name]
+                                r = subprocess.run(add_cmd, capture_output=True, text=True, timeout=120)
+                                if r.returncode != 0:
+                                    msg = (r.stderr.strip() or r.stdout.strip())
+                                    if "already exists" not in msg.lower():
+                                        repo_errors.append(f"{name}: {msg or 'failed'}")
+
+                            if not repo_errors:
+                                refresh_cmd = ["pkexec", "zypper", "--gpg-auto-import-keys", "refresh"]
+                                r = subprocess.run(refresh_cmd, capture_output=True, text=True, timeout=300)
+                                if r.returncode != 0:
+                                    repo_errors.append(r.stderr.strip() or r.stdout.strip() or "refresh failed")
+
+                            if repo_errors:
+                                logger.error("repo add failed errors=%s", "; ".join(repo_errors))
+                                QMessageBox.critical(
+                                    self,
+                                    "Repo Add Failed",
+                                    "Failed to add repositories:\n\n" + "\n".join(repo_errors)
+                                )
+                                return
+
+                            # Retry install after adding repos.
+                            p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                            if p.returncode == 0:
+                                QMessageBox.information(
+                                    self,
+                                    "Success",
+                                    f"Installed: {', '.join(packages)}"
+                                )
+                                self._populate()
+                                return
+
+                            stderr = p.stderr.strip()
+                            stdout = p.stdout.strip()
+                            logger.error("install retry failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
+
                     QMessageBox.critical(
                         self,
                         "Install Failed",
-                        f"Failed to install packages:\n\n{stderr or stdout}{hint}"
+                        f"Failed to install packages:\n\n{stderr or stdout}"
                     )
             except subprocess.TimeoutExpired:
                 QMessageBox.critical(self, "Timeout", "Package installation timed out")
