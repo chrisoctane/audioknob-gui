@@ -464,7 +464,29 @@ def main() -> int:
                         self._knob_statuses[item["knob_id"]] = item["status"]
             except Exception:
                 pass  # Status check failed, leave statuses empty
+            self._apply_session_dependent_statuses()
             self._update_reboot_banner()
+
+        def _apply_session_dependent_statuses(self) -> None:
+            status = self._knob_statuses.get("rt_limits_audio_group")
+            if status == "applied" and not self._rt_limits_active():
+                self._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
+
+        def _rt_limits_active(self) -> bool:
+            try:
+                import resource
+            except Exception:
+                return False
+
+            try:
+                rt_soft, _ = resource.getrlimit(resource.RLIMIT_RTPRIO)
+                mem_soft, _ = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+            except Exception:
+                return False
+
+            rt_ok = rt_soft == resource.RLIM_INFINITY or rt_soft >= 95
+            mem_ok = mem_soft == resource.RLIM_INFINITY
+            return rt_ok and mem_ok
 
         def _update_reboot_banner(self) -> None:
             needs_reboot = any(v == "pending_reboot" for v in self._knob_statuses.values())

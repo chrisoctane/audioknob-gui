@@ -242,6 +242,8 @@ PipeWire buffer size (quantum) and sample rate are configurable via in-row selec
 | Join audio groups | group_membership | ✓ |
 | Realtime limits for @audio | pam_limits_audio_group | ✓ |
 
+Note: RT limits require a reboot or logout/login to affect the current session; the UI shows “Reboot required” until the limits are active.
+
 ### IRQ
 | Knob | Kind | Status |
 |------|------|--------|

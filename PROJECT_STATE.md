@@ -43,6 +43,7 @@ Notes:
 - User-service masking only targets existing units; Baloo status detection recognizes disabled/not running and surfaces failures.
 - QjackCtl config applies even if DefPreset is missing (creates default preset).
 - QjackCtl ServerPrefix now shows taskset pinning in the GUI (prefix is written separately from jackd flags).
+- RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
 
