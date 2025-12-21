@@ -24,7 +24,8 @@ BuildRequires:  fdupes
 
 Requires:       polkit
 Requires:       desktop-file-utils
-Requires:       python3dist(PySide6) >= 6.9.0
+# openSUSE provides PySide6 as python313-pyside6 (no python3dist()/python313dist() virtual provides).
+Requires:       python313-pyside6 >= 6.9.0
 
 %description
 audioknob-gui is a GUI-first realtime audio tuning tool.
