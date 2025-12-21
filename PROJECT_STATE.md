@@ -47,6 +47,7 @@ Notes:
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - KDE Indexer status now handles balooctl output from stderr (balooctl6 on Tumbleweed).
 - KDE Indexer apply now times out and errors if balooctl hangs or still reports running.
+- Reset errors now surface detailed messages instead of a generic "Unknown error".
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
 

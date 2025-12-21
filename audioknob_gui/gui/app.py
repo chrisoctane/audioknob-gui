@@ -1673,9 +1673,19 @@ def main() -> int:
                     worker = _pick_root_worker_path()
                     argv = ["pkexec", worker, "restore-knob", knob_id]
                     p = subprocess.run(argv, text=True, capture_output=True)
-                    result = json.loads(p.stdout) if p.stdout else {}
+                    if not p.stdout.strip():
+                        err = p.stderr.strip() or "Unknown error"
+                        return False, err
+                    try:
+                        result = json.loads(p.stdout)
+                    except Exception:
+                        err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
+                        return False, err
                     if result.get("success"):
                         return True, f"Reset {knob_id}"
+                    errors = result.get("errors") or []
+                    if errors:
+                        return False, "\n".join(str(e) for e in errors)
                     return False, result.get("error", "Unknown error")
                 except Exception as e:
                     return False, str(e)
@@ -1686,9 +1696,19 @@ def main() -> int:
                         "restore-knob", knob_id
                     ]
                     p = subprocess.run(argv, text=True, capture_output=True)
-                    result = json.loads(p.stdout) if p.stdout else {}
+                    if not p.stdout.strip():
+                        err = p.stderr.strip() or "Unknown error"
+                        return False, err
+                    try:
+                        result = json.loads(p.stdout)
+                    except Exception:
+                        err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
+                        return False, err
                     if result.get("success"):
                         return True, f"Reset {knob_id}"
+                    errors = result.get("errors") or []
+                    if errors:
+                        return False, "\n".join(str(e) for e in errors)
                     return False, result.get("error", "Unknown error")
                 except Exception as e:
                     return False, str(e)
