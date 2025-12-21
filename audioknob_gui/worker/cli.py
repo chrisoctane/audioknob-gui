@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
+import logging
 import os
 import shlex
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,6 +31,25 @@ from audioknob_gui.worker.ops import (
     systemd_restore,
     user_unit_exists,
 )
+
+
+def _setup_worker_logging() -> logging.Logger:
+    is_root = os.geteuid() == 0
+    paths = default_paths()
+    base = Path(paths.var_lib_dir) if is_root else Path(paths.user_state_dir)
+    log_dir = base / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "worker.log"
+
+    logger = logging.getLogger("audioknob.worker")
+    if not logger.handlers:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+    logger.info("start euid=%s argv=%s", os.geteuid(), " ".join(sys.argv))
+    return logger
 
 
 def _require_root() -> None:
@@ -175,6 +197,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
 def cmd_apply_user(args: argparse.Namespace) -> int:
     """Apply non-root knobs (user-scope transactions)."""
+    logger = logging.getLogger("audioknob.worker")
     reg = load_registry(args.registry)
     by_id = {k.id: k for k in reg}
 
@@ -191,6 +214,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
     applied: list[str] = []
 
     for kid in args.knob:
+        logger.info("apply-user knob=%s", kid)
         k = by_id.get(kid)
         if k is None:
             raise SystemExit(f"Unknown knob id: {kid}")
@@ -336,11 +360,13 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
     }
     write_manifest(tx, manifest)
 
+    logger.info("apply-user done txid=%s applied=%s", tx.txid, ",".join(applied))
     print(json.dumps({"schema": 1, "txid": tx.txid, "applied": applied}, indent=2))
     return 0
 
 
 def cmd_apply(args: argparse.Namespace) -> int:
+    logger = logging.getLogger("audioknob.worker")
     _require_root()
 
     reg = load_registry(args.registry)
@@ -354,6 +380,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     applied: list[str] = []
 
     for kid in args.knob:
+        logger.info("apply knob=%s", kid)
         k = by_id.get(kid)
         if k is None:
             raise SystemExit(f"Unknown knob id: {kid}")
@@ -422,7 +449,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
         elif kind == "sysfs_glob_kv":
             from audioknob_gui.worker.ops import write_sysfs_values
 
-            effects.extend(write_sysfs_values(str(params["glob"]), str(params["value"])))
+            glob_pat = str(params["glob"])
+            matches = glob.glob(glob_pat)
+            if not matches:
+                raise SystemExit(f"No sysfs entries found for: {glob_pat}")
+            effects.extend(write_sysfs_values(glob_pat, str(params["value"])))
 
             # Special case: persistent CPU governor requires additional config to survive reboot.
             if kid == "cpu_governor_performance_persistent":
@@ -591,6 +622,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     }
     write_manifest(tx, manifest)
 
+    logger.info("apply done txid=%s applied=%s", tx.txid, ",".join(applied))
     print(json.dumps({"schema": 1, "txid": tx.txid, "applied": applied}, indent=2))
     return 0
 
@@ -1195,6 +1227,7 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    logger = _setup_worker_logging()
     p = argparse.ArgumentParser(prog="audioknob-worker")
     p.add_argument("--registry", default=_registry_default_path())
 
@@ -1246,7 +1279,16 @@ def main(argv: list[str] | None = None) -> int:
     srk.set_defaults(func=cmd_restore_knob)
 
     args = p.parse_args(argv)
-    return int(args.func(args))
+    try:
+        rc = int(args.func(args))
+        logger.info("exit rc=%s", rc)
+        return rc
+    except SystemExit as e:
+        logger.error("exit error=%s", e)
+        raise
+    except Exception:
+        logger.exception("unhandled error")
+        raise
 
 
 if __name__ == "__main__":

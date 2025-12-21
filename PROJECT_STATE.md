@@ -17,6 +17,7 @@
 - **RT config scanner** - 18 checks with score 0-100%
 - **Info popup** - Info column with "?" button shows details + config options
 - **Transaction system** - backups + smart restore
+- **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Undo** - restores last transaction
 - **Reset All** - reverts all changes to system defaults
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
@@ -39,11 +40,18 @@ Notes:
 - Audio Groups join now resolves `usermod` via known paths to avoid missing command errors in GUI sessions.
 - Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
 - User-service masking only targets existing units; Baloo status detection recognizes disabled/not running and surfaces failures.
+- QjackCtl config applies even if DefPreset is missing (creates default preset).
+- Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
 2. Add more PipeWire configuration options (via info popup config dialog)
 3. Package for distribution
+
+### Logs
+- GUI: `~/.local/state/audioknob-gui/logs/gui.log`
+- Worker (user scope): `~/.local/state/audioknob-gui/logs/worker.log`
+- Worker (root scope): `/var/lib/audioknob-gui/logs/worker.log`
 
 ### Future Enhancements (P2)
 

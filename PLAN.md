@@ -78,6 +78,12 @@ python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 ```
 
+### Logs (what the app did and where it failed)
+
+- GUI: `~/.local/state/audioknob-gui/logs/gui.log`
+- Worker (user scope): `~/.local/state/audioknob-gui/logs/worker.log`
+- Worker (root scope): `/var/lib/audioknob-gui/logs/worker.log`
+
 ---
 
 ## Working agreement (to prevent drift)
@@ -177,7 +183,7 @@ In `gui/app.py` → `_populate()`:
 | Missing packages | 📦 | "Install" button | "?" button |
 | Read-only info | — | "View" button | "?" button |
 | Read-only test | — | "Test"/"Scan" button | "?" button |
-| Group join knob | — | "Join" button | "?" button |
+| Group join knob | — | "Join/Leave" button | "?" button |
 
 **Columns**: Info | Knob | Status | Category | Risk | Action | Config
 

@@ -797,7 +797,7 @@ def check_knob_status(knob: Any) -> str:
         wanted = str(params.get("value", ""))
         matches = sorted(glob.glob(glob_pat))
         if not matches:
-            return "unknown"
+            return "not_applicable"
         applied_count = 0
         for p in matches:
             try:
@@ -992,7 +992,7 @@ def check_knob_status(knob: Any) -> str:
 
         existing = [svc for svc in services if user_unit_exists(svc)]
         if not existing:
-            return "not_applied"
+            return "not_applicable"
 
         masked_count = 0
         for svc in existing:

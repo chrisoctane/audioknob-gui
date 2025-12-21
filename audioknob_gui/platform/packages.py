@@ -286,6 +286,11 @@ PACKAGE_MAPPINGS: dict[str, dict[PackageManager, str]] = {
         PackageManager.DPKG: "linux-cpupower",
         PackageManager.PACMAN: "cpupower",
     },
+    "qjackctl": {
+        PackageManager.RPM: "qjackctl",
+        PackageManager.DPKG: "qjackctl",
+        PackageManager.PACMAN: "qjackctl",
+    },
     # Best-effort mapping: package names vary by distro/flavor.
     # If this mapping is wrong on a given distro, install will fail and user must install manually.
     "balooctl": {

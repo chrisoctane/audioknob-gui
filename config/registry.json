@@ -1,352 +1,456 @@
 {
-  "schema": 1,
   "knobs": [
     {
-      "id": "audio_group_membership",
-      "title": "Audio Groups",
-      "description": "Adds current user to audio-related groups (audio, realtime, pipewire). Required for RT limits and low-latency audio. Requires logout/login to take effect.",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "permissions",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Adds current user to audio-related groups (audio, realtime, pipewire). Required for RT limits and low-latency audio. Requires logout/login to take effect.",
+      "id": "audio_group_membership",
       "impl": {
         "kind": "group_membership",
         "params": {
-          "groups": ["audio", "realtime", "pipewire"]
+          "groups": [
+            "audio",
+            "realtime",
+            "pipewire"
+          ]
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "Audio Groups"
     },
     {
-      "id": "rt_limits_audio_group",
-      "title": "RT Limits",
-      "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio.",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "permissions",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": ["audio", "realtime"],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio.",
+      "id": "rt_limits_audio_group",
       "impl": {
         "kind": "pam_limits_audio_group",
         "params": {
-          "path": "/etc/security/limits.d/99-audioknob-gui.conf",
           "lines": [
             "@audio   -  rtprio     95",
             "@audio   -  memlock    unlimited",
             "@audio   -  nice      -10"
-          ]
+          ],
+          "path": "/etc/security/limits.d/99-audioknob-gui.conf"
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [
+        "audio",
+        "realtime"
+      ],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "RT Limits"
     },
     {
-      "id": "irqbalance_disable",
-      "title": "IRQ Balance",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "irq",
       "description": "Stops irqbalance service so audio IRQs don't get moved between CPUs unexpectedly. Reduces latency jitter.",
-      "category": "irq",
-      "risk_level": "medium",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "id": "irqbalance_disable",
       "impl": {
         "kind": "systemd_unit_toggle",
-        "params": {"unit": "irqbalance.service", "action": "disable_now"}
-      }
+        "params": {
+          "action": "disable_now",
+          "unit": "irqbalance.service"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "IRQ Balance"
     },
     {
-      "id": "rtirq_enable",
-      "title": "RT IRQ",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "irq",
       "description": "Enables rtirq service which sets high realtime priorities for audio-related IRQ threads. Requires rtirq package. File: /etc/sysconfig/rtirq or /etc/rtirq.conf.",
-      "category": "irq",
-      "risk_level": "medium",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": ["rtirq"],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "id": "rtirq_enable",
       "impl": {
         "kind": "systemd_unit_toggle",
-        "params": {"unit": "rtirq.service", "action": "enable_now"}
-      }
-    },
-    {
-      "id": "cpu_governor_performance_temp",
-      "title": "CPU Performance (until reboot)",
-      "description": "Sets CPU frequency governor to 'performance' (until reboot). Prevents CPU frequency scaling which can cause latency spikes. File: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-      "category": "cpu",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
-      "impl": {
-        "kind": "sysfs_glob_kv",
         "params": {
-          "glob": "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-          "value": "performance"
+          "action": "enable_now",
+          "unit": "rtirq.service"
         }
-      }
-    },
-    {
-      "id": "cpu_governor_performance_persistent",
-      "title": "CPU Performance (persistent)",
-      "description": "Sets CPU governor to 'performance' now AND configures it to persist across reboots (best-effort). On openSUSE/Fedora this writes /etc/sysconfig/cpupower and enables cpupower.service. Reset restores original config via transaction backups.",
-      "category": "cpu",
+      },
+      "requires_commands": [
+        "rtirq"
+      ],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
       "risk_level": "medium",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": ["cpupower"],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "title": "RT IRQ"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "cpu",
+      "description": "Sets CPU frequency governor to 'performance' (until reboot). Prevents CPU frequency scaling which can cause latency spikes. File: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
+      "id": "cpu_governor_performance_temp",
       "impl": {
         "kind": "sysfs_glob_kv",
         "params": {
           "glob": "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
           "value": "performance"
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "CPU Performance (until reboot)"
     },
     {
-      "id": "cpu_dma_latency_udev",
-      "title": "DMA Latency",
-      "description": "Creates udev rule to allow audio group write access to /dev/cpu_dma_latency. Enables apps to request low C-state latency. File: /etc/udev/rules.d/99-cpu-dma-latency.rules",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "cpu",
-      "risk_level": "low",
-      "requires_root": true,
+      "description": "Sets CPU governor to 'performance' now AND configures it to persist across reboots (best-effort). On openSUSE/Fedora this writes /etc/sysconfig/cpupower and enables cpupower.service. Reset restores original config via transaction backups.",
+      "id": "cpu_governor_performance_persistent",
+      "impl": {
+        "kind": "sysfs_glob_kv",
+        "params": {
+          "glob": "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
+          "value": "performance"
+        }
+      },
+      "requires_commands": [
+        "cpupower"
+      ],
+      "requires_groups": [],
       "requires_reboot": false,
-      "requires_groups": ["audio", "realtime"],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "CPU Performance (persistent)"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "cpu",
+      "description": "Creates udev rule to allow audio group write access to /dev/cpu_dma_latency. Enables apps to request low C-state latency. File: /etc/udev/rules.d/99-cpu-dma-latency.rules",
+      "id": "cpu_dma_latency_udev",
       "impl": {
         "kind": "udev_rule",
         "params": {
-          "path": "/etc/udev/rules.d/99-cpu-dma-latency.rules",
-          "content": "KERNEL==\"cpu_dma_latency\", GROUP=\"audio\", MODE=\"0660\""
+          "content": "KERNEL==\"cpu_dma_latency\", GROUP=\"audio\", MODE=\"0660\"",
+          "path": "/etc/udev/rules.d/99-cpu-dma-latency.rules"
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [
+        "audio",
+        "realtime"
+      ],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "DMA Latency"
     },
     {
-      "id": "swappiness",
-      "title": "Swappiness",
-      "description": "Sets vm.swappiness=10 to reduce swapping, avoiding latency spikes under memory pressure. File: /etc/sysctl.d/99-audioknob-gui.conf",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "vm",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Sets vm.swappiness=10 to reduce swapping, avoiding latency spikes under memory pressure. File: /etc/sysctl.d/99-audioknob-gui.conf",
+      "id": "swappiness",
       "impl": {
         "kind": "sysctl_conf",
         "params": {
-          "path": "/etc/sysctl.d/99-audioknob-gui.conf",
-          "lines": ["vm.swappiness=10"]
+          "lines": [
+            "vm.swappiness=10"
+          ],
+          "path": "/etc/sysctl.d/99-audioknob-gui.conf"
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "Swappiness"
     },
     {
-      "id": "thp_mode_madvise",
-      "title": "Huge Pages",
-      "description": "Sets Transparent Huge Pages to 'madvise' mode. Recommended for latency-sensitive audio workloads. File: /sys/kernel/mm/transparent_hugepage/enabled",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "vm",
-      "risk_level": "medium",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Sets Transparent Huge Pages to 'madvise' mode. Recommended for latency-sensitive audio workloads. File: /sys/kernel/mm/transparent_hugepage/enabled",
+      "id": "thp_mode_madvise",
       "impl": {
         "kind": "sysfs_glob_kv",
         "params": {
           "glob": "/sys/kernel/mm/transparent_hugepage/enabled",
           "value": "madvise"
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "Huge Pages"
     },
     {
-      "id": "inotify_max_watches",
-      "title": "Inotify Watches",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "vm",
       "description": "Sets fs.inotify.max_user_watches=600000 for DAWs that watch many files. Prevents 'too many open files' errors. File: /etc/sysctl.d/99-audioknob-inotify.conf",
-      "category": "vm",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "id": "inotify_max_watches",
       "impl": {
         "kind": "sysctl_conf",
         "params": {
-          "path": "/etc/sysctl.d/99-audioknob-inotify.conf",
-          "lines": ["fs.inotify.max_user_watches=600000"]
+          "lines": [
+            "fs.inotify.max_user_watches=600000"
+          ],
+          "path": "/etc/sysctl.d/99-audioknob-inotify.conf"
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "Inotify Watches"
     },
     {
-      "id": "dirty_bytes",
-      "title": "Dirty Bytes",
-      "description": "Lowers vm.dirty_bytes to 50MB and vm.dirty_background_bytes to 16MB to reduce I/O latency from writeback. File: /etc/sysctl.d/99-audioknob-dirty.conf",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "vm",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Lowers vm.dirty_bytes to 50MB and vm.dirty_background_bytes to 16MB to reduce I/O latency from writeback. File: /etc/sysctl.d/99-audioknob-dirty.conf",
+      "id": "dirty_bytes",
       "impl": {
         "kind": "sysctl_conf",
         "params": {
-          "path": "/etc/sysctl.d/99-audioknob-dirty.conf",
           "lines": [
             "vm.dirty_bytes=52428800",
             "vm.dirty_background_bytes=16777216"
-          ]
+          ],
+          "path": "/etc/sysctl.d/99-audioknob-dirty.conf"
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "Dirty Bytes"
     },
     {
-      "id": "usb_autosuspend_disable",
-      "title": "USB Power",
-      "description": "Disables USB autosuspend to prevent USB audio device dropouts. Creates udev rule. File: /etc/udev/rules.d/99-usb-no-autosuspend.rules",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "power",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Disables USB autosuspend to prevent USB audio device dropouts. Creates udev rule. File: /etc/udev/rules.d/99-usb-no-autosuspend.rules",
+      "id": "usb_autosuspend_disable",
       "impl": {
         "kind": "udev_rule",
         "params": {
-          "path": "/etc/udev/rules.d/99-usb-no-autosuspend.rules",
-          "content": "ACTION==\"add\", SUBSYSTEM==\"usb\", ATTR{power/autosuspend}=\"-1\""
+          "content": "ACTION==\"add\", SUBSYSTEM==\"usb\", ATTR{power/autosuspend}=\"-1\"",
+          "path": "/etc/udev/rules.d/99-usb-no-autosuspend.rules"
         }
-      }
-    },
-    {
-      "id": "kernel_threadirqs",
-      "title": "Threaded IRQs",
-      "description": "Adds 'threadirqs' to kernel cmdline. Makes IRQ handlers schedulable for better RT performance. Requires reboot. File: /etc/kernel/cmdline (openSUSE TW) or /etc/default/grub",
-      "category": "kernel",
-      "risk_level": "medium",
-      "requires_root": true,
-      "requires_reboot": true,
-      "requires_groups": [],
+      },
       "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
-      "impl": {
-        "kind": "kernel_cmdline",
-        "params": {"param": "threadirqs"}
-      }
-    },
-    {
-      "id": "kernel_audit_off",
-      "title": "Kernel Audit",
-      "description": "Adds 'audit=0' to kernel cmdline. Reduces overhead from audit subsystem. Requires reboot. File: /etc/kernel/cmdline or /etc/default/grub",
-      "category": "kernel",
-      "risk_level": "medium",
-      "requires_root": true,
-      "requires_reboot": true,
       "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
-      "impl": {
-        "kind": "kernel_cmdline",
-        "params": {"param": "audit=0"}
-      }
-    },
-    {
-      "id": "kernel_mitigations_off",
-      "title": "CPU Mitigations",
-      "description": "Adds 'mitigations=off' to kernel cmdline. SECURITY TRADEOFF: Improves performance but disables Spectre/Meltdown protections. Requires reboot.",
-      "category": "kernel",
-      "risk_level": "high",
-      "requires_root": true,
-      "requires_reboot": true,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
-      "impl": {
-        "kind": "kernel_cmdline",
-        "params": {"param": "mitigations=off"}
-      }
-    },
-    {
-      "id": "qjackctl_server_prefix_rt",
-      "title": "QjackCtl RT",
-      "description": "Ensures QjackCtl Server line has -R (realtime) flag. Optional: taskset for CPU pinning. File: ~/.config/rncbc.org/QjackCtl.conf",
-      "category": "stack",
-      "risk_level": "low",
-      "requires_root": false,
       "requires_reboot": false,
-      "requires_groups": ["audio", "realtime"],
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "USB Power"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds 'threadirqs' to kernel cmdline. Makes IRQ handlers schedulable for better RT performance. Requires reboot. File: /etc/kernel/cmdline (openSUSE TW) or /etc/default/grub",
+      "id": "kernel_threadirqs",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "threadirqs"
+        }
+      },
       "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "Threaded IRQs"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds 'audit=0' to kernel cmdline. Reduces overhead from audit subsystem. Requires reboot. File: /etc/kernel/cmdline or /etc/default/grub",
+      "id": "kernel_audit_off",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "audit=0"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "Kernel Audit"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds 'mitigations=off' to kernel cmdline. SECURITY TRADEOFF: Improves performance but disables Spectre/Meltdown protections. Requires reboot.",
+      "id": "kernel_mitigations_off",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "mitigations=off"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "CPU Mitigations"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "Ensures QjackCtl Server line has -R (realtime) flag. Optional: taskset for CPU pinning. File: ~/.config/rncbc.org/QjackCtl.conf",
+      "id": "qjackctl_server_prefix_rt",
       "impl": {
         "kind": "qjackctl_server_prefix",
         "params": {
-          "path": "~/.config/rncbc.org/QjackCtl.conf",
-          "ensure_rt": true,
+          "cpu_cores": null,
           "ensure_priority": false,
-          "cpu_cores": null
+          "ensure_rt": true,
+          "path": "~/.config/rncbc.org/QjackCtl.conf"
         }
-      }
+      },
+      "requires_commands": [
+        "qjackctl"
+      ],
+      "requires_groups": [
+        "audio",
+        "realtime"
+      ],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "QjackCtl RT"
     },
     {
-      "id": "pipewire_quantum",
-      "title": "PW Buffer",
-      "description": "Configures PipeWire buffer size (quantum). Lower = less latency, more CPU. System default is 1024; we recommend 128-256 for pro audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "stack",
-      "risk_level": "low",
-      "requires_root": false,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Configures PipeWire buffer size (quantum). Lower = less latency, more CPU. System default is 1024; we recommend 128-256 for pro audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
+      "id": "pipewire_quantum",
       "impl": {
         "kind": "pipewire_conf",
         "params": {
           "path": "~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
           "quantum": 256
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "PW Buffer"
     },
     {
-      "id": "pipewire_sample_rate",
-      "title": "PW Sample Rate",
-      "description": "Configures PipeWire default sample rate. System default is 48000 Hz. Higher rates (96k/192k) for hi-res audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "stack",
-      "risk_level": "low",
-      "requires_root": false,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Configures PipeWire default sample rate. System default is 48000 Hz. Higher rates (96k/192k) for hi-res audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
+      "id": "pipewire_sample_rate",
       "impl": {
         "kind": "pipewire_conf",
         "params": {
           "path": "~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
           "rate": 48000
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "PW Sample Rate"
     },
     {
-      "id": "disable_tracker",
-      "title": "GNOME Indexer",
-      "description": "Masks tracker-miner-fs and tracker-extract services (file indexer) which cause latency spikes during indexing. GNOME desktops only.",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "services",
-      "risk_level": "low",
-      "requires_root": false,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": [],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Masks tracker-miner-fs and tracker-extract services (file indexer) which cause latency spikes during indexing. GNOME desktops only.",
+      "id": "disable_tracker",
       "impl": {
         "kind": "user_service_mask",
         "params": {
@@ -357,62 +461,104 @@
             "tracker-extract.service"
           ]
         }
-      }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "GNOME Indexer"
     },
     {
-      "id": "disable_baloo",
-      "title": "KDE Indexer",
-      "description": "Disables Baloo file indexer (KDE) which causes latency spikes during indexing. Uses balooctl to disable. KDE desktops only.",
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "services",
-      "risk_level": "low",
-      "requires_root": false,
-      "requires_reboot": false,
-      "requires_groups": [],
-      "requires_commands": ["balooctl"],
-      "capabilities": {"read": true, "apply": true, "restore": true},
+      "description": "Disables Baloo file indexer (KDE) which causes latency spikes during indexing. Uses balooctl to disable. KDE desktops only.",
+      "id": "disable_baloo",
       "impl": {
         "kind": "baloo_disable",
         "params": {}
-      }
+      },
+      "requires_commands": [
+        "balooctl"
+      ],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "KDE Indexer"
     },
     {
-      "id": "stack_detect",
-      "title": "Audio Stack",
+      "capabilities": {
+        "apply": false,
+        "read": true,
+        "restore": false
+      },
+      "category": "testing",
       "description": "Shows what audio server is active: PipeWire, JACK, or ALSA only. Also lists ALSA playback devices.",
-      "category": "testing",
-      "risk_level": "low",
-      "requires_root": false,
-      "requires_reboot": false,
-      "requires_groups": [],
+      "id": "stack_detect",
+      "impl": {
+        "kind": "read_only",
+        "params": {
+          "what": "stack_detect"
+        }
+      },
       "requires_commands": [],
-      "capabilities": {"read": true, "apply": false, "restore": false},
-      "impl": {"kind": "read_only", "params": {"what": "stack_detect"}}
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "Audio Stack"
     },
     {
-      "id": "scheduler_jitter_test",
-      "title": "Jitter Test",
+      "capabilities": {
+        "apply": false,
+        "read": true,
+        "restore": false
+      },
+      "category": "testing",
       "description": "Runs cyclictest to measure scheduler latency jitter. Shows max latency in microseconds. Lower is better. Requires cyclictest (rt-tests package).",
-      "category": "testing",
-      "risk_level": "low",
-      "requires_root": true,
-      "requires_reboot": false,
+      "id": "scheduler_jitter_test",
+      "impl": {
+        "kind": "read_only",
+        "params": {
+          "what": "cyclictest"
+        }
+      },
+      "requires_commands": [
+        "cyclictest"
+      ],
       "requires_groups": [],
-      "requires_commands": ["cyclictest"],
-      "capabilities": {"read": true, "apply": false, "restore": false},
-      "impl": {"kind": "read_only", "params": {"what": "cyclictest"}}
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "Jitter Test"
     },
     {
-      "id": "blocker_check",
-      "title": "RT Scan",
-      "description": "Comprehensive realtime readiness scan. Checks: audio group, CPU governor, swappiness, inotify, kernel RT/threadirqs, high-res timers, irqbalance, THP, USB autosuspend, HPET/RTC access, filesystems, and more. Based on realtimeconfigquickscan but improved.",
+      "capabilities": {
+        "apply": false,
+        "read": true,
+        "restore": false
+      },
       "category": "testing",
-      "risk_level": "low",
-      "requires_root": false,
-      "requires_reboot": false,
-      "requires_groups": [],
+      "description": "Comprehensive realtime readiness scan. Checks: audio group, CPU governor, swappiness, inotify, kernel RT/threadirqs, high-res timers, irqbalance, THP, USB autosuspend, HPET/RTC access, filesystems, and more. Based on realtimeconfigquickscan but improved.",
+      "id": "blocker_check",
+      "impl": {
+        "kind": "read_only",
+        "params": {
+          "what": "rtcheck"
+        }
+      },
       "requires_commands": [],
-      "capabilities": {"read": true, "apply": false, "restore": false},
-      "impl": {"kind": "read_only", "params": {"what": "rtcheck"}}
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "RT Scan"
     }
-  ]
+  ],
+  "schema": 1
 }

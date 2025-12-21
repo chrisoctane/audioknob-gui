@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -17,6 +18,13 @@ def _pkexec_available() -> bool:
     from shutil import which
 
     return which("pkexec") is not None
+
+
+def _worker_log_path(*, is_root: bool) -> str:
+    from audioknob_gui.core.paths import default_paths
+    paths = default_paths()
+    base = Path(paths.var_lib_dir) if is_root else Path(paths.user_state_dir)
+    return str(base / "logs" / "worker.log")
 
 
 def _root_worker_path_candidates() -> list[str]:
@@ -62,7 +70,9 @@ def _run_worker_apply_user(knob_ids: list[str]) -> dict:
     ]
     p = subprocess.run(argv, text=True, capture_output=True)
     if p.returncode != 0:
-        raise RuntimeError(p.stderr.strip() or "worker apply-user failed")
+        log_path = _worker_log_path(is_root=False)
+        msg = p.stderr.strip() or "worker apply-user failed"
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
     return json.loads(p.stdout)
 
 
@@ -81,7 +91,9 @@ def _run_worker_apply_pkexec(knob_ids: list[str]) -> dict:
     ]
     p = subprocess.run(argv, text=True, capture_output=True)
     if p.returncode != 0:
-        raise RuntimeError(p.stderr.strip() or "worker apply failed")
+        log_path = _worker_log_path(is_root=True)
+        msg = p.stderr.strip() or "worker apply failed"
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
     return json.loads(p.stdout)
 
 
@@ -98,7 +110,9 @@ def _run_worker_restore_pkexec(txid: str) -> dict:
     ]
     p = subprocess.run(argv, text=True, capture_output=True)
     if p.returncode != 0:
-        raise RuntimeError(p.stderr.strip() or "worker restore failed")
+        log_path = _worker_log_path(is_root=True)
+        msg = p.stderr.strip() or "worker restore failed"
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
     return json.loads(p.stdout)
 
 
@@ -110,6 +124,29 @@ def _state_path() -> Path:
         d = Path.home() / ".local" / "state" / "audioknob-gui"
     d.mkdir(parents=True, exist_ok=True)
     return d / "state.json"
+
+
+_GUI_LOGGER: logging.Logger | None = None
+
+
+def _get_gui_logger() -> logging.Logger:
+    global _GUI_LOGGER
+    if _GUI_LOGGER is not None:
+        return _GUI_LOGGER
+
+    log_dir = _state_path().parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "gui.log"
+
+    logger = logging.getLogger("audioknob.gui")
+    if not logger.handlers:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+    _GUI_LOGGER = logger
+    return logger
 
 
 def load_state() -> dict:
@@ -462,6 +499,7 @@ def main() -> int:
             mapping = {
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
                 "not_applied": ("—", "#757575"),          # Gray dash
+                "not_applicable": ("—", "#9e9e9e"),       # Gray dash
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
                 "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
                 "read_only": ("—", "#9e9e9e"),            # Gray dash
@@ -507,6 +545,9 @@ def main() -> int:
                 self.table.setItem(r, 1, title_item)
 
                 # Column 2: Status (with color)
+                status = self._knob_statuses.get(k.id, "unknown")
+                not_applicable = (status == "not_applicable")
+
                 if locked:
                     if not group_ok:
                         status_item = QTableWidgetItem("🔒")
@@ -515,8 +556,11 @@ def main() -> int:
                         status_item = QTableWidgetItem("📦")
                         status_item.setForeground(QColor("#1976d2"))
                     status_item.setToolTip(lock_reason)
+                elif not_applicable:
+                    status_item = QTableWidgetItem("—")
+                    status_item.setForeground(QColor("#9e9e9e"))
+                    status_item.setToolTip("Not available on this system")
                 else:
-                    status = self._knob_statuses.get(k.id, "unknown")
                     status_text, status_color = self._status_display(status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
@@ -537,8 +581,12 @@ def main() -> int:
                 # Column 5: Action button (context-sensitive)
                 if k.id == "audio_group_membership":
                     # Special: group membership knob
-                    btn = self._make_apply_button("Join")
-                    btn.clicked.connect(self._on_join_groups)
+                    label = "Leave" if status == "applied" else "Join"
+                    btn = self._make_apply_button(label)
+                    if label == "Leave":
+                        btn.clicked.connect(self._on_leave_groups)
+                    else:
+                        btn.clicked.connect(self._on_join_groups)
                     self.table.setCellWidget(r, 5, btn)
                 elif not group_ok:
                     # Locked: user needs to join groups first
@@ -551,6 +599,11 @@ def main() -> int:
                     btn = self._make_action_button("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
                     btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
+                    self.table.setCellWidget(r, 5, btn)
+                elif not_applicable:
+                    btn = QPushButton("—")
+                    btn.setEnabled(False)
+                    btn.setToolTip("Not available on this system")
                     self.table.setCellWidget(r, 5, btn)
                 elif k.id == "stack_detect":
                     btn = self._make_action_button("View")
@@ -922,14 +975,10 @@ def main() -> int:
                 headline, _ = jitter_test_summary(duration_s=5)
                 
                 # Update status with result (e.g., "max 12 µs")
-                if "max" in headline:
-                    # Extract just the number: "Scheduler jitter: max 12 µs" → "12 µs"
-                    parts = headline.split("max")
-                    if len(parts) > 1:
-                        result = parts[1].strip()
-                        self._knob_statuses[knob_id] = f"result:{result}"
-                    else:
-                        self._knob_statuses[knob_id] = "done"
+                import re
+                match = re.search(r"max\\s+([0-9]+\\s*µs)", headline)
+                if match:
+                    self._knob_statuses[knob_id] = f"result:{match.group(1)}"
                 else:
                     self._knob_statuses[knob_id] = "error"
                 
@@ -1173,6 +1222,7 @@ def main() -> int:
             from audioknob_gui.platform.detect import get_available_audio_groups, get_missing_groups
             from audioknob_gui.platform.packages import which_command
             
+            logger = _get_gui_logger()
             missing = get_missing_groups()
             available = get_available_audio_groups()
             
@@ -1210,6 +1260,7 @@ def main() -> int:
             usermod = which_command("usermod")
             if not usermod:
                 QMessageBox.critical(self, "Error", "usermod not found on this system.")
+                logger.error("join groups failed: usermod not found")
                 return
 
             user = os.environ.get("USER") or getpass.getuser()
@@ -1237,11 +1288,104 @@ def main() -> int:
             if errors:
                 msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
             if successes:
-                msg.append("<br/><br/><b>Log out and back in for changes to take effect!</b>")
+                msg.append("<br/><br/><b>Log out, then back in (or reboot) for changes to take effect.</b>")
             
             QMessageBox.information(self, "Group Membership", "".join(msg))
+            logger.info("join groups user=%s added=%s errors=%s", user, ",".join(successes), "; ".join(errors))
             
             # Refresh (won't show changes until re-login, but update UI state)
+            self._refresh_user_groups()
+            self._populate()
+
+        def _on_leave_groups(self) -> None:
+            """Remove current user from audio groups."""
+            from audioknob_gui.platform.detect import get_available_audio_groups
+            from audioknob_gui.platform.packages import which_command
+
+            logger = _get_gui_logger()
+            self._refresh_user_groups()
+            available = get_available_audio_groups()
+            groups_to_remove = [g for g in available if g in self._user_groups]
+
+            if not groups_to_remove:
+                QMessageBox.information(
+                    self,
+                    "No Groups",
+                    "You are not currently in any audio groups."
+                )
+                return
+
+            reply = QMessageBox.question(
+                self,
+                "Leave Audio Groups",
+                f"Remove user from these groups?\n\n• {chr(10).join(groups_to_remove)}\n\n"
+                f"Note: You must log out and back in (or reboot) for changes to take effect.",
+                QMessageBox.Ok | QMessageBox.Cancel
+            )
+            if reply != QMessageBox.Ok:
+                return
+
+            import getpass
+            user = os.environ.get("USER") or getpass.getuser()
+            gpasswd = which_command("gpasswd")
+            usermod = which_command("usermod")
+            if not gpasswd and not usermod:
+                QMessageBox.critical(self, "Error", "Neither gpasswd nor usermod found on this system.")
+                logger.error("leave groups failed: no gpasswd/usermod")
+                return
+
+            errors = []
+            successes = []
+
+            if gpasswd:
+                for group in groups_to_remove:
+                    try:
+                        p = subprocess.run(
+                            ["pkexec", gpasswd, "-d", user, group],
+                            capture_output=True,
+                            text=True,
+                        )
+                        if p.returncode == 0:
+                            successes.append(group)
+                        else:
+                            errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
+                    except Exception as e:
+                        errors.append(f"{group}: {e}")
+            else:
+                # Fallback: replace supplementary groups via usermod -G
+                try:
+                    import grp
+                    keep_groups = []
+                    for gid in os.getgroups():
+                        try:
+                            keep_groups.append(grp.getgrgid(gid).gr_name)
+                        except KeyError:
+                            pass
+                    keep_groups = [g for g in keep_groups if g not in groups_to_remove]
+                    group_list = ",".join(sorted(set(keep_groups)))
+                    p = subprocess.run(
+                        ["pkexec", usermod, "-G", group_list, user],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if p.returncode == 0:
+                        successes.extend(groups_to_remove)
+                    else:
+                        errors.append(p.stderr.strip() or "Failed to update groups")
+                except Exception as e:
+                    errors.append(str(e))
+
+            msg = []
+            if successes:
+                msg.append(f"<b style='color: #2e7d32;'>Removed from:</b> {', '.join(successes)}")
+            if errors:
+                msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
+            if successes:
+                msg.append("<br/><br/><b>Log out, then back in (or reboot) for changes to take effect.</b>")
+
+            QMessageBox.information(self, "Group Membership", "".join(msg))
+            logger.info("leave groups user=%s removed=%s errors=%s", user, ",".join(successes), "; ".join(errors))
+
             self._refresh_user_groups()
             self._populate()
 
@@ -1249,6 +1393,7 @@ def main() -> int:
             """Install packages that provide the given commands."""
             from audioknob_gui.platform.packages import get_package_name, detect_package_manager
             
+            logger = _get_gui_logger()
             # Map commands to package names
             packages = []
             unknown = []
@@ -1311,10 +1456,17 @@ def main() -> int:
                     )
                     self._populate()  # Refresh UI
                 else:
+                    stderr = p.stderr.strip()
+                    stdout = p.stdout.strip()
+                    hint = ""
+                    combined = (stderr + "\n" + stdout).lower()
+                    if "no provider found" in combined and manager == PackageManager.RPM:
+                        hint = "\n\nPackage not found in enabled repos. On Tumbleweed, you may need to enable Packman or multimedia:proaudio."
+                    logger.error("install packages failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
                     QMessageBox.critical(
                         self,
                         "Install Failed",
-                        f"Failed to install packages:\n\n{p.stderr.strip()}"
+                        f"Failed to install packages:\n\n{stderr or stdout}{hint}"
                     )
             except subprocess.TimeoutExpired:
                 QMessageBox.critical(self, "Timeout", "Package installation timed out")
@@ -1336,6 +1488,7 @@ def main() -> int:
                     self.state["last_user_txid"] = result.get("txid")
                 save_state(self.state)
             except Exception as e:
+                _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, e)
                 QMessageBox.critical(self, "Failed", str(e))
                 return
             

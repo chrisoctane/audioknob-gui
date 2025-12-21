@@ -125,6 +125,9 @@ def write_config_with_server_update(
 ) -> None:
     """Update the Server value for a preset, preserving the rest of the config."""
     cp = _read_config(path)
+    if "Presets" not in cp:
+        cp.add_section("Presets")
+    cp.set("Presets", "DefPreset", preset)
     if "Settings" not in cp:
         cp.add_section("Settings")
     key = f"{preset}\\Server"
@@ -144,18 +147,22 @@ def ensure_server_flags(
     cpu_cores: str | None = None,
 ) -> tuple[str, str]:
     """Read config, ensure Server command has required flags, return (before, after)."""
-    cfg = read_config(path)
-    if not cfg.def_preset:
-        raise ValueError("No active preset (DefPreset) found in QjackCtl config")
-    if not cfg.server_cmd:
-        # No Server value yet, create a minimal one
+    cp = _read_config(path)
+    def_preset = _get_active_preset(cp)
+    defaulted = False
+    if not def_preset:
+        def_preset = "default"
+        defaulted = True
+
+    server_cmd = _get_server_for_preset(cp, def_preset) if def_preset else None
+    if not server_cmd:
         before = ""
         after = ensure_server_has_flags("", ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
     else:
-        before = cfg.server_cmd
-        after = ensure_server_has_flags(cfg.server_cmd, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
+        before = server_cmd
+        after = ensure_server_has_flags(server_cmd, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
 
-    if before != after:
-        write_config_with_server_update(path, cfg.def_preset, after)
+    if before != after or defaulted:
+        write_config_with_server_update(path, def_preset, after)
 
     return (before, after)
