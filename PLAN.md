@@ -219,6 +219,8 @@ btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
 self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
+The jitter test also stores the most recent per-thread results in the knob info dialog.
+
 ### With config dialog (via info popup)
 ```python
 # In _show_knob_info(), add config button for knobs that need it:
@@ -228,7 +230,7 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). Applying either PipeWire knob restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Applying PipeWire knobs restarts PipeWire services automatically.
 
 ---
 

@@ -40,6 +40,13 @@ def _get_server_for_preset(cp: configparser.ConfigParser, preset: str) -> str | 
     return cp.get("Settings", key, fallback=None)
 
 
+def _get_server_prefix_for_preset(cp: configparser.ConfigParser, preset: str) -> str | None:
+    if "Settings" not in cp:
+        return None
+    key = f"{preset}\\ServerPrefix"
+    return cp.get("Settings", key, fallback=None)
+
+
 def read_config(path: str | Path) -> QjackCtlConfig:
     cp = _read_config(path)
     def_preset = _get_active_preset(cp) or ""
@@ -122,6 +129,7 @@ def write_config_with_server_update(
     path: str | Path,
     preset: str,
     new_server_cmd: str,
+    server_prefix: str | None = None,
 ) -> None:
     """Update the Server value for a preset, preserving the rest of the config."""
     cp = _read_config(path)
@@ -132,6 +140,9 @@ def write_config_with_server_update(
         cp.add_section("Settings")
     key = f"{preset}\\Server"
     cp.set("Settings", key, new_server_cmd)
+    if server_prefix is not None:
+        pkey = f"{preset}\\ServerPrefix"
+        cp.set("Settings", pkey, server_prefix)
 
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -155,6 +166,7 @@ def ensure_server_flags(
         defaulted = True
 
     server_cmd = _get_server_for_preset(cp, def_preset) if def_preset else None
+    server_prefix = _get_server_prefix_for_preset(cp, def_preset) if def_preset else None
     if not server_cmd:
         before = ""
         after = ensure_server_has_flags("", ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
@@ -162,7 +174,10 @@ def ensure_server_flags(
         before = server_cmd
         after = ensure_server_has_flags(server_cmd, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
 
-    if before != after or defaulted:
-        write_config_with_server_update(path, def_preset, after)
+    prefix_base = server_prefix or "jackd"
+    prefix_after = ensure_server_has_flags(prefix_base, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores)
+
+    if before != after or defaulted or prefix_after != (server_prefix or ""):
+        write_config_with_server_update(path, def_preset, after, server_prefix=prefix_after)
 
     return (before, after)

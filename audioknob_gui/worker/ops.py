@@ -781,6 +781,11 @@ def check_knob_status(knob: Any) -> str:
             return "unknown"
         try:
             result = run(["systemctl", "is-enabled", unit])
+            if result.returncode != 0:
+                msg = (result.stderr or result.stdout).lower()
+                if "not-found" in msg or "not found" in msg or "no such file" in msg:
+                    return "not_applicable"
+                return "unknown"
             is_enabled = result.stdout.strip()
             # systemctl is-enabled can return many values:
             # enabled, disabled, masked, static, indirect, generated, linked, etc.
@@ -885,9 +890,37 @@ def check_knob_status(knob: Any) -> str:
             cfg = read_config(path)
             if not cfg.server_cmd:
                 return "not_applied"
-            # Check if -R flag is present
-            if params.get("ensure_rt", True) and "-R" in cfg.server_cmd:
+            cmd = cfg.server_cmd
+            tokens = cmd.split()
+            ensure_rt = bool(params.get("ensure_rt", True))
+            ensure_prio = bool(params.get("ensure_priority", False))
+            cpu_cores = params.get("cpu_cores")
+            if cpu_cores is not None:
+                cpu_cores = str(cpu_cores)
+
+            rt_ok = True
+            if ensure_rt:
+                rt_ok = any(t in ("-R", "--realtime") or t.startswith("--realtime") for t in tokens)
+
+            prio_ok = True
+            if ensure_prio:
+                prio_ok = any(t.startswith("-P") for t in tokens)
+
+            pin_ok = True
+            if cpu_cores is not None:
+                if cpu_cores == "":
+                    pin_ok = "taskset" not in tokens
+                else:
+                    pin_ok = False
+                    for i, tok in enumerate(tokens):
+                        if tok == "taskset" and i + 2 < len(tokens) and tokens[i + 1] == "-c":
+                            pin_ok = tokens[i + 2] == cpu_cores
+                            break
+
+            if rt_ok and prio_ok and pin_ok:
                 return "applied"
+            if rt_ok or prio_ok or pin_ok:
+                return "partial"
             return "not_applied"
         except Exception:
             return "unknown"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_lib
 import json
 import logging
 import os
@@ -161,6 +162,7 @@ def load_state() -> dict:
         "qjackctl_cpu_cores": None,  # list[int] or None
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
+        "jitter_test_last": None,  # dict payload from last run or None
     }
     if not p.exists():
         return default
@@ -178,6 +180,10 @@ def load_state() -> dict:
             data["pipewire_quantum"] = None
         if "pipewire_sample_rate" not in data:
             data["pipewire_sample_rate"] = None
+        if "jitter_test_last" not in data:
+            data["jitter_test_last"] = None
+        if data.get("jitter_test_last") is not None and not isinstance(data.get("jitter_test_last"), dict):
+            data["jitter_test_last"] = None
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
         try:
             q = data.get("pipewire_quantum")
@@ -499,7 +505,7 @@ def main() -> int:
             mapping = {
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
                 "not_applied": ("—", "#757575"),          # Gray dash
-                "not_applicable": ("—", "#9e9e9e"),       # Gray dash
+                "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
                 "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
                 "read_only": ("—", "#9e9e9e"),            # Gray dash
@@ -557,7 +563,7 @@ def main() -> int:
                         status_item.setForeground(QColor("#1976d2"))
                     status_item.setToolTip(lock_reason)
                 elif not_applicable:
-                    status_item = QTableWidgetItem("—")
+                    status_item = QTableWidgetItem("N/A")
                     status_item.setForeground(QColor("#9e9e9e"))
                     status_item.setToolTip("Not available on this system")
                 else:
@@ -601,7 +607,7 @@ def main() -> int:
                     btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
                     self.table.setCellWidget(r, 5, btn)
                 elif not_applicable:
-                    btn = QPushButton("—")
+                    btn = QPushButton("N/A")
                     btn.setEnabled(False)
                     btn.setToolTip("Not available on this system")
                     self.table.setCellWidget(r, 5, btn)
@@ -695,6 +701,22 @@ def main() -> int:
 
                     r_combo.currentIndexChanged.connect(_on_rate_change)
                     self.table.setCellWidget(r, 6, r_combo)
+                elif k.id == "qjackctl_server_prefix_rt":
+                    # Normal apply/reset button in Action column
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status in ("applied", "pending_reboot"):
+                        btn = self._make_reset_button()
+                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                    else:
+                        btn = self._make_apply_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+                    self.table.setCellWidget(r, 5, btn)
+
+                    # Config column: CPU core selection
+                    cfg_btn = QPushButton("Cores")
+                    cfg_btn.setToolTip("Configure CPU cores for taskset")
+                    cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                    self.table.setCellWidget(r, 6, cfg_btn)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
                     btn = QPushButton("—")
@@ -714,7 +736,7 @@ def main() -> int:
 
                 # Column 6: Config - clear if no widget was set for this row
                 # (PipeWire rows set their own widgets above; other rows need clearing)
-                if k.id not in ("pipewire_quantum", "pipewire_sample_rate"):
+                if k.id not in ("pipewire_quantum", "pipewire_sample_rate", "qjackctl_server_prefix_rt"):
                     self.table.removeCellWidget(r, 6)
             
             # Re-enable sorting after population
@@ -962,25 +984,30 @@ def main() -> int:
             return
 
         def on_tests(self) -> None:
-            headline, detail = jitter_test_summary(duration_s=5)
+            headline, detail, payload = jitter_test_summary(duration_s=5, use_pkexec=True)
+            self.state["jitter_test_last"] = payload
+            save_state(self.state)
             QMessageBox.information(self, headline, detail)
 
         def on_run_test(self, knob_id: str) -> None:
             """Run a test and update the status column with results."""
             if knob_id == "scheduler_jitter_test":
+                k = next((k for k in self.registry if k.id == knob_id), None)
                 # Show a brief "running" indicator
                 self._update_knob_status(knob_id, "running", "⏳ Running...")
                 QApplication.processEvents()  # Update UI immediately
                 
-                headline, _ = jitter_test_summary(duration_s=5)
+                headline, detail, payload = jitter_test_summary(duration_s=5, use_pkexec=False)
+                self.state["jitter_test_last"] = payload
+                save_state(self.state)
                 
                 # Update status with result (e.g., "max 12 µs")
-                import re
-                match = re.search(r"max\\s+([0-9]+\\s*µs)", headline)
-                if match:
-                    self._knob_statuses[knob_id] = f"result:{match.group(1)}"
+                max_us = payload.get("max_us")
+                if isinstance(max_us, int):
+                    self._knob_statuses[knob_id] = f"result:{max_us} µs"
                 else:
                     self._knob_statuses[knob_id] = "error"
+                    QMessageBox.warning(self, "Jitter Test Failed", detail)
                 
                 self._populate()
 
@@ -1103,6 +1130,37 @@ def main() -> int:
                     else:
                         impl_info += f"<b>{key}:</b> {val}<br/>"
             
+            extra_html = ""
+            if k.id == "scheduler_jitter_test":
+                last = self.state.get("jitter_test_last")
+                if isinstance(last, dict):
+                    max_us = last.get("max_us")
+                    returncode = last.get("returncode")
+                    note = last.get("note")
+                    threads = last.get("threads")
+                    extra_html += "<hr/><p><b>Last jitter test:</b></p>"
+                    if isinstance(max_us, int):
+                        extra_html += f"<p>Max: {max_us} µs</p>"
+                    else:
+                        extra_html += "<p>Result: unavailable</p>"
+                    if isinstance(threads, list) and threads:
+                        extra_html += "<table>"
+                        extra_html += "<tr><td><b>Thread</b></td><td><b>Max (µs)</b></td></tr>"
+                        for item in sorted(threads, key=lambda t: t.get("thread", 0)):
+                            t = item.get("thread")
+                            v = item.get("max_us")
+                            if isinstance(t, int) and isinstance(v, int):
+                                extra_html += f"<tr><td>{t}</td><td>{v}</td></tr>"
+                        extra_html += "</table>"
+                    else:
+                        extra_html += "<p>No per-thread results captured yet.</p>"
+                    if note:
+                        extra_html += f"<p><b>Note:</b> {html_lib.escape(str(note))}</p>"
+                    if returncode is not None:
+                        extra_html += f"<p><b>Return code:</b> {returncode}</p>"
+                else:
+                    extra_html += "<hr/><p><b>Last jitter test:</b> not run yet.</p>"
+
             html = f"""
             <h3>{k.title}</h3>
             <p>{k.description}</p>
@@ -1118,6 +1176,7 @@ def main() -> int:
             <hr/>
             <p><b>Implementation:</b></p>
             <p>{impl_info}</p>
+            {extra_html}
             """
             
             dialog = QDialog(self)
@@ -1469,7 +1528,17 @@ def main() -> int:
                     combined = (stderr + "\n" + stdout).lower()
                     logger.error("install packages failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
 
-                    if "no provider found" in combined and manager == PackageManager.RPM and shutil.which("zypper"):
+                    no_provider = any(
+                        needle in combined
+                        for needle in (
+                            "no provider of",
+                            "no provider found",
+                            "nothing provides",
+                            "not found in enabled repositories",
+                            "not found in enabled repos",
+                        )
+                    )
+                    if no_provider and manager == PackageManager.RPM and shutil.which("zypper"):
                         reply = QMessageBox.question(
                             self,
                             "Add Repositories",
@@ -1522,6 +1591,15 @@ def main() -> int:
                             stderr = p.stderr.strip()
                             stdout = p.stdout.strip()
                             logger.error("install retry failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
+                            combined = (stderr + "\n" + stdout).lower()
+                            if any(needle in combined for needle in ("no provider of", "nothing provides")):
+                                QMessageBox.critical(
+                                    self,
+                                    "Install Failed",
+                                    "Package not found in enabled repositories.\n\n"
+                                    "rtirq may not be available for this distro snapshot."
+                                )
+                                return
 
                     QMessageBox.critical(
                         self,

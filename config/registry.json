@@ -373,13 +373,13 @@
         "restore": true
       },
       "category": "stack",
-      "description": "Ensures QjackCtl Server line has -R (realtime) flag. Optional: taskset for CPU pinning. File: ~/.config/rncbc.org/QjackCtl.conf",
+      "description": "Ensures QjackCtl Server command includes taskset pinning (default cores 0,1), -R, and -P90. Optional: change cores via Config. File: ~/.config/rncbc.org/QjackCtl.conf",
       "id": "qjackctl_server_prefix_rt",
       "impl": {
         "kind": "qjackctl_server_prefix",
         "params": {
-          "cpu_cores": null,
-          "ensure_priority": false,
+          "cpu_cores": "0,1",
+          "ensure_priority": true,
           "ensure_rt": true,
           "path": "~/.config/rncbc.org/QjackCtl.conf"
         }

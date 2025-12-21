@@ -31,7 +31,8 @@ Columns: Info | Knob | Status | Category | Risk | Action | Config
 
 Notes:
 - Column 0 header is "Info"; each row has a small "?" button that opens the knob details popup.
-- "Config" is used for in-row selectors (currently PipeWire quantum/sample-rate).
+- "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
+- QjackCtl defaults to taskset cores 0,1 and adds -R and -P90 when applied.
 ```
 
 ### Bugs Fixed (Prevent Regression)
@@ -1353,6 +1354,8 @@ sudo ./packaging/install-polkit.sh
 - [ ] **Config dialog**: Click Config on qjackctl → select cores → save → Apply
 - [ ] **View button**: Click View on stack_detect → shows PipeWire/JACK status
 - [ ] **Test button**: Click Test on jitter → runs 5s → status shows "XX µs"
+- [ ] **Info pane**: Jitter knob info shows the last per-thread max values from the most recent test run
+- If the test fails unprivileged, it retries via pkexec and surfaces errors.
 - [ ] **Undo**: Apply something → click Undo → restored
 - [ ] **Reset All**: Apply multiple → Reset All → all restored
 
