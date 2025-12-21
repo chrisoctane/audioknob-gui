@@ -83,6 +83,12 @@ sudo zypper remove -y audioknob-gui
 
 ### 6) Cleanup (optional)
 
+Remove user GUI state (this does **not** remove any system changes you applied; use the app’s “Reset All” for that):
+
+```bash
+rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/audioknob-gui/state.json"
+```
+
 Remove local build scratch (keeps the produced RPMs):
 
 ```bash
