@@ -795,12 +795,14 @@ def check_knob_status(knob: Any) -> str:
             return "unknown"
         try:
             result = run(["systemctl", "is-enabled", unit])
-            if result.returncode != 0:
-                msg = (result.stderr or result.stdout).lower()
-                if "not-found" in msg or "not found" in msg or "no such file" in msg:
-                    return "not_applicable"
+            msg = (result.stderr or result.stdout or "").strip()
+            msg_lower = msg.lower()
+            if "not-found" in msg_lower or "not found" in msg_lower or "no such file" in msg_lower:
+                return "not_applicable"
+            is_enabled = result.stdout.strip() or msg
+            if not is_enabled:
                 return "unknown"
-            is_enabled = result.stdout.strip()
+            is_enabled = is_enabled.strip()
             # systemctl is-enabled can return many values:
             # enabled, disabled, masked, static, indirect, generated, linked, etc.
             if action in ("disable_now", "disable"):
