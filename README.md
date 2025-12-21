@@ -34,6 +34,15 @@ cd audioknob-gui
 ./packaging/opensuse/build-rpm.sh
 ```
 
+### Refresh & rebuild (pull latest)
+
+```bash
+cd ~/audioknob-gui
+git pull
+./packaging/opensuse/build-rpm.sh
+sudo zypper --no-gpg-checks install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
+```
+
 Expected output includes:
 
 - `Built RPM(s):`
