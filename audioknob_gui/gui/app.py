@@ -109,7 +109,7 @@ def _run_worker_apply_pkexec(knob_ids: list[str]) -> dict:
     p = subprocess.run(argv, text=True, capture_output=True)
     if p.returncode != 0:
         log_path = _worker_log_path(is_root=True)
-        msg = p.stderr.strip() or "worker apply failed"
+        msg = p.stderr.strip() or p.stdout.strip() or "worker apply failed"
         if _is_pkexec_cancel(msg):
             raise RuntimeError(_PKEXEC_CANCELLED)
         raise RuntimeError(f"{msg}\n\nLog: {log_path}")
@@ -130,7 +130,9 @@ def _run_worker_restore_pkexec(txid: str) -> dict:
     p = subprocess.run(argv, text=True, capture_output=True)
     if p.returncode != 0:
         log_path = _worker_log_path(is_root=True)
-        msg = p.stderr.strip() or "worker restore failed"
+        msg = p.stderr.strip() or p.stdout.strip() or "worker restore failed"
+        if _is_pkexec_cancel(msg):
+            raise RuntimeError(_PKEXEC_CANCELLED)
         raise RuntimeError(f"{msg}\n\nLog: {log_path}")
     return json.loads(p.stdout)
 
