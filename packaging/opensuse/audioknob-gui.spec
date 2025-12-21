@@ -5,7 +5,7 @@ Version:        %{pkg_version}
 Release:        0
 Summary:        GUI-first realtime audio tuning app (transactions + preview/apply/undo)
 License:        MIT
-URL:            https://github.com/chrisoctane/audioknob-gui
+URL:            https://github.com/chrisoctane/audioknobs-gui
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
@@ -76,5 +76,4 @@ install -D -m 0644 packaging/audioknob-gui.desktop %{buildroot}%{_datadir}/appli
 
 %{python3_sitelib}/audioknob_gui
 %{python3_sitelib}/audioknob_gui-%{version}.dist-info
-
 

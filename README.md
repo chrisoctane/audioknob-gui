@@ -22,7 +22,7 @@ update-desktop-database ~/.local/share/applications 2>/dev/null || true
 ### 1) Clone + build prerequisites
 
 ```bash
-git clone https://github.com/chrisoctane/audioknob-gui.git
+git clone https://github.com/chrisoctane/audioknobs-gui.git
 cd audioknob-gui
 ```
 
@@ -127,5 +127,4 @@ The production path is to publish a **signed** RPM via the openSUSE **Open Build
 ## Development
 
 See `PLAN.md` (quick start) and `PROJECT_STATE.md` (architecture + operator contract).
-
 
