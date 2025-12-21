@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import subprocess
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -740,7 +741,11 @@ def baloo_enable() -> None:
     from audioknob_gui.platform.packages import which_command
     cmd = which_command("balooctl")
     if cmd:
-        run([cmd, "enable"], timeout=10)
+        try:
+            run([cmd, "enable"], timeout=30)
+        except subprocess.TimeoutExpired:
+            # Allow slow or hung balooctl without failing reset.
+            return
 
 
 def check_knob_status(knob: Any) -> str:
