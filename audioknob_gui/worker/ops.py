@@ -1084,10 +1084,14 @@ def check_knob_status(knob: Any) -> str:
             return "unknown"
         try:
             result = run([cmd, "status"])
-            # "Baloo is currently disabled" in output
-            out = result.stdout.lower()
+            # balooctl6 may write status to stderr; include both.
+            out = (result.stdout + "\n" + result.stderr).lower()
             if "disabled" in out or "not running" in out or "stopped" in out:
                 return "applied"
+            if "enabled" in out or "running" in out:
+                return "not_applied"
+            if result.returncode != 0:
+                return "unknown"
             return "not_applied"
         except Exception:
             return "unknown"

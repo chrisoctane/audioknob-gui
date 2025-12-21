@@ -45,6 +45,7 @@ Notes:
 - QjackCtl ServerPrefix now shows taskset pinning in the GUI (prefix is written separately from jackd flags).
 - RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
+- KDE Indexer status now handles balooctl output from stderr (balooctl6 on Tumbleweed).
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
 
