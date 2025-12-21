@@ -25,6 +25,12 @@ BuildRequires:  python311-pip
 BuildRequires:  python311-setuptools
 BuildRequires:  python311-wheel
 
+# The pyproject macros also install into python312 flavor by default if supported.
+BuildRequires:  python312
+BuildRequires:  python312-pip
+BuildRequires:  python312-setuptools
+BuildRequires:  python312-wheel
+
 Requires:       polkit
 Requires:       desktop-file-utils
 Requires:       python3dist(PySide6) >= 6.9.0

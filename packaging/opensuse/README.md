@@ -9,7 +9,9 @@ Install tools needed to build an RPM:
 
 ```bash
 sudo zypper install -y rpm-build python-rpm-macros python3-rpm-macros \
-  python313-devel python311 python311-pip python311-setuptools python311-wheel \
+  python313-devel \
+  python311 python311-pip python311-setuptools python311-wheel \
+  python312 python312-pip python312-setuptools python312-wheel \
   desktop-file-utils polkit
 ```
 
