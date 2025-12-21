@@ -70,6 +70,11 @@ Launch:
 audioknob-gui
 ```
 
+Or launch it from your desktop environment’s application menu:
+
+- **Name**: “AudioKnob GUI”
+- **Desktop entry**: `/usr/share/applications/audioknob-gui.desktop`
+
 ### 5) Uninstall
 
 ```bash
