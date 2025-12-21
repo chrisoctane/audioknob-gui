@@ -26,9 +26,9 @@ We are keeping the current changes already in the repo. Workers should proceed f
 Goal: user can choose buffer size **32/64/128/256/512/1024** and UI reflects the chosen value everywhere.
 
 Acceptance criteria:
-- **UI visibility**: PipeWire quantum knob row has a visible selector (not hidden behind ℹ).
+- **UI visibility**: PipeWire quantum knob row has a visible selector (not hidden behind the details popup).
 - **Single source of truth**: chosen value is stored in `state.json` and used consistently.
-- **Info popup correctness**: ℹ popup shows current configured quantum (not registry default).
+- **Info popup correctness**: details popup ("?") shows current configured quantum (not registry default).
 - **Worker correctness**:
   - `preview`/`apply-user`/`status` reflect the configured quantum
   - applying pipewire knobs restarts PipeWire automatically (best-effort) so the user doesn’t need manual restart
@@ -199,7 +199,7 @@ Directive:
 - Column responsibilities:
   - **Action**: Apply/Reset/Install/Join/Test/Scan/View (one primary action button)
   - **Tools/Config**: secondary controls (drop-downs, configure buttons, etc.)
-  - **Info**: ℹ details
+  - **Info**: "?" details
 - Move PipeWire selectors into Tools/Config. Keep Action as a single Apply/Reset button.
 - Future-proof: any knob with configurable state should expose controls in Tools/Config, not Action.
 

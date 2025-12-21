@@ -42,7 +42,7 @@ cd /home/chris/audioknob-gui
 Install it:
 
 ```bash
-sudo zypper install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
+sudo zypper --no-gpg-checks install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
 ```
 
 Uninstall it:
@@ -168,18 +168,18 @@ Both files must be committed together. See "Registry Sync Policy" below.
 
 In `gui/app.py` → `_populate()`:
 
-| Knob type | Status | Column 4 (Action) | Column 5 (Info) |
+| Knob type | Status | Column 5 (Action) | Column 0 (Details) |
 |-----------|--------|-------------------|-----------------|
-| Not applied | — | "Apply" button | "ℹ" info button |
-| Applied | ✓ Applied | "Reset" button | "ℹ" info button |
-| Not implemented | — | "—" disabled | "ℹ" info button |
-| Missing groups | 🔒 | "🔒" disabled | "ℹ" info button |
-| Missing packages | 📦 | "Install" button | "ℹ" info button |
-| Read-only info | — | "View" button | "ℹ" info button |
-| Read-only test | — | "Test"/"Scan" button | "ℹ" info button |
-| Group join knob | — | "Join" button | "ℹ" info button |
+| Not applied | — | "Apply" button | "?" button |
+| Applied | ✓ Applied | "Reset" button | "?" button |
+| Not implemented | — | "—" disabled | "?" button |
+| Missing groups | 🔒 | "🔒" disabled | "?" button |
+| Missing packages | 📦 | "Install" button | "?" button |
+| Read-only info | — | "View" button | "?" button |
+| Read-only test | — | "Test"/"Scan" button | "?" button |
+| Group join knob | — | "Join" button | "?" button |
 
-**Columns**: Knob | Status | Category | Risk | Action | ℹ
+**Columns**: ? | Knob | Status | Category | Risk | Action | Config
 
 **Sorting**: Click any column header to sort
 
@@ -196,21 +196,21 @@ if status == "applied":
 else:
     btn = QPushButton("Apply")
     btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
-self.table.setCellWidget(r, 4, btn)  # Column 4 = Action
+self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 ### Read-only info
 ```python
 btn = QPushButton("View")
 btn.clicked.connect(self.on_view_stack)
-self.table.setCellWidget(r, 4, btn)  # Column 4 = Action
+self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 ### Read-only test (updates status)
 ```python
 btn = QPushButton("Test")
 btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
-self.table.setCellWidget(r, 4, btn)  # Column 4 = Action
+self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 ### With config dialog (via info popup)
@@ -222,7 +222,7 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the ℹ info popup (saved to `state.json`). Applying either PipeWire knob restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the "?" details popup (saved to `state.json`). Applying either PipeWire knob restarts PipeWire services automatically.
 
 ---
 
@@ -395,7 +395,7 @@ bin/audioknob-gui
 
 Verify:
 - table loads and status updates
-- PipeWire quantum/sample-rate selectors work and reflect in ℹ popup
+- PipeWire quantum/sample-rate selectors work and reflect in the "?" details popup
 
 ### Root knobs (manual, last)
 

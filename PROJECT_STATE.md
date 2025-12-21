@@ -15,7 +15,7 @@
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
-- **Info popup** - ℹ button shows details + config options
+- **Info popup** - "?" button shows details + config options
 - **Transaction system** - backups + smart restore
 - **Undo** - restores last transaction
 - **Reset All** - reverts all changes to system defaults
@@ -25,8 +25,12 @@
 
 ### GUI Layout
 ```
-Columns: Knob | Status | Category | Risk | Action | ℹ
-         (0)    (1)      (2)       (3)    (4)     (5)
+Columns: ? | Knob | Status | Category | Risk | Action | Config
+         (0)  (1)    (2)      (3)       (4)    (5)      (6)
+
+Notes:
+- Column 0 is a small "?" button that opens the knob details popup.
+- "Config" is used for in-row selectors (currently PipeWire quantum/sample-rate).
 ```
 
 ### Next Steps
@@ -469,7 +473,7 @@ else:
 |-------|------|---------|
 | `id` | string | Unique identifier, used in code and transactions |
 | `title` | string | Human-readable name shown in GUI |
-| `description` | string | Shown in info popup (ℹ button) |
+| `description` | string | Shown in details popup ("?" button) |
 | `category` | enum | Grouping: permissions, cpu, irq, vm, kernel, stack, services, power, testing, device |
 | `risk_level` | enum | low/medium/high - shown in Risk column |
 | `requires_root` | bool | If true, apply uses pkexec |
@@ -806,7 +810,7 @@ If crash occurs:
 **Approach:**
 1. Add single knob: `audio_config`
 2. Kind: `audio_config` (new)
-3. Info popup (ℹ button) shows "Configure..." button
+3. Details popup ("?" button) shows "Configure..." button
 4. Config button opens `AudioConfigDialog`
 5. Dialog shows:
    - Interface dropdown (populated from `aplay -l`)
@@ -818,7 +822,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 6 columns (Knob, Status, Category, Risk, Action, ℹ). Config options are in the info popup, not a separate column.
+**Note:** Current UI has 7 columns (? details, Knob, Status, Category, Risk, Action, Config). Config options may be exposed either as in-row controls (Config column) or via the details popup ("?").
 
 **Detection needed:**
 ```python

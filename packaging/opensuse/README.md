@@ -13,8 +13,7 @@ sudo zypper install -y rpm-build python-rpm-macros python3-rpm-macros \
   desktop-file-utils polkit
 ```
 
-Runtime dependencies are handled by the RPM (notably `python3dist(PySide6)`).
-On Tumbleweed this is provided as the package `python313-pyside6`.
+Runtime dependencies are handled by the RPM (notably `python313-pyside6` on Tumbleweed).
 
 ### Build (local)
 
