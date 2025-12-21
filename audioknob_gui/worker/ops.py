@@ -740,7 +740,7 @@ def baloo_enable() -> None:
     from audioknob_gui.platform.packages import which_command
     cmd = which_command("balooctl")
     if cmd:
-        run([cmd, "enable"])
+        run([cmd, "enable"], timeout=10)
 
 
 def check_knob_status(knob: Any) -> str:
@@ -1083,7 +1083,7 @@ def check_knob_status(knob: Any) -> str:
         if not cmd:
             return "unknown"
         try:
-            result = run([cmd, "status"])
+            result = run([cmd, "status"], timeout=5)
             # balooctl6 may write status to stderr; include both.
             out = (result.stdout + "\n" + result.stderr).lower()
             if "disabled" in out or "not running" in out or "stopped" in out:

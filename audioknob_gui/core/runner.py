@@ -12,8 +12,8 @@ class RunResult:
     stderr: str
 
 
-def run(argv: list[str], *, check: bool = False) -> RunResult:
-    p = subprocess.run(argv, text=True, capture_output=True)
+def run(argv: list[str], *, check: bool = False, timeout: float | None = None) -> RunResult:
+    p = subprocess.run(argv, text=True, capture_output=True, timeout=timeout)
     if check and p.returncode != 0:
         raise RuntimeError(f"command failed ({p.returncode}): {argv}\n{p.stderr}")
     return RunResult(argv=argv, returncode=p.returncode, stdout=p.stdout, stderr=p.stderr)

@@ -334,10 +334,21 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             from audioknob_gui.platform.packages import which_command
             cmd = which_command("balooctl")
             if cmd:
-                result = subprocess.run([cmd, "disable"], check=False, capture_output=True, text=True)
+                try:
+                    result = subprocess.run([cmd, "disable"], check=False, capture_output=True, text=True, timeout=10)
+                except subprocess.TimeoutExpired:
+                    raise SystemExit("balooctl disable timed out")
                 if result.returncode != 0:
                     err = result.stderr.strip() or result.stdout.strip() or "balooctl disable failed"
                     raise SystemExit(err)
+                # Verify state if possible (balooctl6 can write to stderr)
+                try:
+                    status = subprocess.run([cmd, "status"], check=False, capture_output=True, text=True, timeout=5)
+                    out = (status.stdout + "\n" + status.stderr).lower()
+                    if "running" in out and "disabled" not in out and "not running" not in out and "stopped" not in out:
+                        raise SystemExit("balooctl reports running after disable")
+                except subprocess.TimeoutExpired:
+                    pass
                 effects.append({
                     "kind": "baloo_disable",
                     "result": {"returncode": result.returncode},
