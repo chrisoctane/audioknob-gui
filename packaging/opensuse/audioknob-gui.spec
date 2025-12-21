@@ -12,24 +12,15 @@ BuildArch:      noarch
 # On Tumbleweed the devel packages are versioned (python313-devel, python312-devel, ...).
 # The %python3_pkgversion macro is not guaranteed to exist in all build environments,
 # so we pin to the current Tumbleweed python used by this repo/tooling.
+BuildRequires:  python313
 BuildRequires:  python313-devel
+BuildRequires:  python313-pip
+BuildRequires:  python313-setuptools
+BuildRequires:  python313-wheel
 BuildRequires:  python-rpm-macros
 BuildRequires:  python3-rpm-macros
 BuildRequires:  desktop-file-utils
 BuildRequires:  fdupes
-
-# The openSUSE pyproject macros build wheels using a python311 "flavor" by default.
-# Ensure the build backend exists in that interpreter.
-BuildRequires:  python311
-BuildRequires:  python311-pip
-BuildRequires:  python311-setuptools
-BuildRequires:  python311-wheel
-
-# The pyproject macros also install into python312 flavor by default if supported.
-BuildRequires:  python312
-BuildRequires:  python312-pip
-BuildRequires:  python312-setuptools
-BuildRequires:  python312-wheel
 
 Requires:       polkit
 Requires:       desktop-file-utils
@@ -47,17 +38,23 @@ Security model:
 %autosetup -n %{name}-%{version}
 
 %build
-%pyproject_wheel
+%{__python3} -m pip wheel --progress-bar off --disable-pip-version-check \
+  --use-pep517 --no-build-isolation --no-deps \
+  --wheel-dir dist .
 
 %install
-%pyproject_install
+%{__python3} -m pip install --progress-bar off --disable-pip-version-check \
+  --root %{buildroot} --prefix %{_prefix} \
+  --no-compile --ignore-installed --no-deps \
+  --no-warn-script-location \
+  dist/*.whl
 
 # Root worker wrapper + polkit policy + desktop entry
 install -D -m 0755 packaging/audioknob-gui-worker %{buildroot}%{_libexecdir}/audioknob-gui-worker
 install -D -m 0644 polkit/org.audioknob-gui.policy %{buildroot}%{_datadir}/polkit-1/actions/org.audioknob-gui.policy
 install -D -m 0644 packaging/audioknob-gui.desktop %{buildroot}%{_datadir}/applications/audioknob-gui.desktop
 
-%python_expand %fdupes %{buildroot}%{$python_sitelib}
+%fdupes %{buildroot}%{python3_sitelib}
 
 %post
 %desktop_database_post
