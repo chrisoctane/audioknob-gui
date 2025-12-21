@@ -29,8 +29,11 @@ The script writes the SRPM/RPM into `~/rpmbuild/` and prints the resulting RPM p
 ### Install / uninstall
 
 ```bash
-sudo zypper install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
+sudo zypper --no-gpg-checks install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
 sudo zypper remove -y audioknob-gui
 ```
+
+Note: locally built RPMs are typically **unsigned**, and zypper will refuse them unless you pass `--no-gpg-checks`.
+For a signed RPM, build via OBS (future).
 
 
