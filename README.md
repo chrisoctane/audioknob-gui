@@ -8,17 +8,6 @@ GUI-first realtime audio tuning tool for Linux.
 
 This is the **v0.1** install path validated on openSUSE Tumbleweed.
 
-### 0) (Optional) Remove old dev install artifacts
-
-If you previously installed a dev polkit worker/policy under `/usr/local`, remove them:
-
-```bash
-sudo rm -f /usr/local/libexec/audioknob-gui-worker \
-           /usr/share/polkit-1/actions/org.audioknob-gui.policy
-rm -f ~/.local/share/applications/audioknob-gui.desktop
-update-desktop-database ~/.local/share/applications 2>/dev/null || true
-```
-
 ### 1) Install prerequisites (including git)
 
 ```bash
@@ -83,7 +72,18 @@ Or launch it from your desktop environment’s application menu:
 sudo zypper remove -y audioknob-gui
 ```
 
-### 7) Cleanup (optional)
+### 7) Cleanup old dev artifacts (optional)
+
+If you previously installed a dev polkit worker/policy under `/usr/local`, remove them:
+
+```bash
+sudo rm -f /usr/local/libexec/audioknob-gui-worker \
+           /usr/share/polkit-1/actions/org.audioknob-gui.policy
+rm -f ~/.local/share/applications/audioknob-gui.desktop
+update-desktop-database ~/.local/share/applications 2>/dev/null || true
+```
+
+### 8) Cleanup (optional)
 
 Remove user GUI state (this does **not** remove any system changes you applied; use the app’s “Reset All” for that):
 
