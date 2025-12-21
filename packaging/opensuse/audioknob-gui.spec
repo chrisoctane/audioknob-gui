@@ -18,6 +18,13 @@ BuildRequires:  python3-rpm-macros
 BuildRequires:  desktop-file-utils
 BuildRequires:  fdupes
 
+# The openSUSE pyproject macros build wheels using a python311 "flavor" by default.
+# Ensure the build backend exists in that interpreter.
+BuildRequires:  python311
+BuildRequires:  python311-pip
+BuildRequires:  python311-setuptools
+BuildRequires:  python311-wheel
+
 Requires:       polkit
 Requires:       desktop-file-utils
 Requires:       python3dist(PySide6) >= 6.9.0

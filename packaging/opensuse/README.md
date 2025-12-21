@@ -9,7 +9,8 @@ Install tools needed to build an RPM:
 
 ```bash
 sudo zypper install -y rpm-build python-rpm-macros python3-rpm-macros \
-  python313-devel desktop-file-utils polkit
+  python313-devel python311 python311-pip python311-setuptools python311-wheel \
+  desktop-file-utils polkit
 ```
 
 Runtime dependencies are handled by the RPM (notably `python3dist(PySide6)`).
