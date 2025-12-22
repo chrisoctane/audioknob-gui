@@ -183,6 +183,18 @@ def _run_worker_force_reset_user(knob_id: str) -> dict:
     return json.loads(p.stdout)
 
 
+def _run_pkexec_command(cmd: list[str]) -> None:
+    if not _pkexec_available():
+        raise RuntimeError("pkexec not found")
+    argv = ["pkexec", *cmd]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        msg = p.stderr.strip() or p.stdout.strip() or "command failed"
+        if _is_pkexec_cancel(msg):
+            raise RuntimeError(_PKEXEC_CANCELLED)
+        raise RuntimeError(msg)
+
+
 def _state_path() -> Path:
     xdg_state = os.environ.get("XDG_STATE_HOME")
     if xdg_state:
@@ -2010,6 +2022,27 @@ def main() -> int:
                             "Apply Warning",
                             "\n\n".join(str(w) for w in warnings),
                         )
+                    followups = payload.get("result", {}).get("followups") or []
+                    if followups:
+                        label = followups[0].get("label", "Run bootloader update")
+                        cmd = followups[0].get("cmd", [])
+                        if isinstance(cmd, list) and cmd:
+                            box = QMessageBox(self)
+                            box.setIcon(QMessageBox.Warning)
+                            box.setWindowTitle("Bootloader Update Required")
+                            box.setText(
+                                "Kernel cmdline changes need a bootloader update to take effect."
+                            )
+                            box.setInformativeText(label)
+                            run_btn = box.addButton("Run update now", QMessageBox.AcceptRole)
+                            box.addButton("Later", QMessageBox.RejectRole)
+                            box.exec()
+                            if box.clickedButton() == run_btn:
+                                try:
+                                    _run_pkexec_command([str(x) for x in cmd])
+                                except RuntimeError as e:
+                                    if str(e) != _PKEXEC_CANCELLED:
+                                        QMessageBox.warning(self, "Update Failed", str(e))
 
             if not success:
                 if message == _PKEXEC_CANCELLED:

@@ -390,6 +390,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     backups: list[dict] = []
     applied: list[str] = []
     warnings: list[str] = []
+    followups: list[dict] = []
 
     for kid in args.knob:
         logger.info("apply knob=%s", kid)
@@ -626,16 +627,28 @@ def cmd_apply(args: argparse.Namespace) -> int:
                         f"Error: {detail}\n"
                         "Run the command manually and reboot."
                     )
+                    followups.append({
+                        "label": f"Run: {cmd_str}",
+                        "cmd": distro.kernel_cmdline_update_cmd,
+                    })
             elif distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
                 warnings.append(
                     "Kernel cmdline updated but no bootloader update command is configured.\n"
                     "Run sdbootutil update-all-entries and reboot."
                 )
+                followups.append({
+                    "label": "Run: sdbootutil update-all-entries",
+                    "cmd": ["sdbootutil", "update-all-entries"],
+                })
             elif distro.boot_system == "grub2":
                 warnings.append(
                     "Kernel cmdline updated but no bootloader update command is configured.\n"
                     "Run grub2-mkconfig -o /boot/grub2/grub.cfg (or your distro's update-grub) and reboot."
                 )
+                followups.append({
+                    "label": "Run: grub2-mkconfig -o /boot/grub2/grub.cfg",
+                    "cmd": ["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+                })
 
         elif kind == "read_only":
             pass
@@ -657,6 +670,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
     result = {"schema": 1, "txid": tx.txid, "applied": applied}
     if warnings:
         result["warnings"] = warnings
+    if followups:
+        result["followups"] = followups
     print(json.dumps(result, indent=2))
     return 0
 
