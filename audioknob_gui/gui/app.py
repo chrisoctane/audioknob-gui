@@ -471,7 +471,7 @@ def main() -> int:
             self.table = QTableWidget(0, 7)
             self.table.setHorizontalHeaderLabels(["Info", "Knob", "Status", "Category", "Risk", "Action", "Config"])
             self.table.horizontalHeader().setStretchLastSection(False)
-            self.table.setSortingEnabled(True)
+            self.table.setSortingEnabled(False)
             self.table.setAlternatingRowColors(True)
             self.table.setWordWrap(False)
             self.table.setTextElideMode(Qt.ElideRight)
@@ -489,6 +489,10 @@ def main() -> int:
             # which causes text clipping like "Apply" -> "Annlv".
             for c in range(7):
                 header.setSectionResizeMode(c, QHeaderView.Interactive)
+            self._sort_column: int | None = None
+            self._sort_descending = False
+            header.setSortIndicatorShown(True)
+            header.sectionClicked.connect(self._on_header_sort)
             self.table.setColumnWidth(0, 32)   # Info button
             self.table.setColumnWidth(1, 420)  # Knob title
             self.table.setColumnWidth(2, 120)  # Status
@@ -661,12 +665,40 @@ def main() -> int:
         def _populate(self) -> None:
             # Disable sorting during population to avoid issues
             self.table.setSortingEnabled(False)
+            self.table.clearSpans()
             reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
             group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
 
             reboot_knobs = [k for k in self.registry if k.requires_reboot]
             other_knobs = [k for k in self.registry if not k.requires_reboot]
             ordered: list[object] = []
+
+            def _sort_key(k, col: int) -> tuple:
+                status = self._knob_statuses.get(k.id, "unknown")
+                status_order = {
+                    "applied": 0,
+                    "pending_reboot": 1,
+                    "partial": 2,
+                    "not_applied": 3,
+                    "not_applicable": 4,
+                    "unknown": 5,
+                }
+                risk_order = {"low": 0, "medium": 1, "high": 2}
+
+                if col == 2:
+                    return (status_order.get(status, 99), k.title.lower())
+                if col == 3:
+                    return (str(k.category).lower(), k.title.lower())
+                if col == 4:
+                    return (risk_order.get(str(k.risk_level), 99), k.title.lower())
+                if col in (0, 1):
+                    return (k.title.lower(),)
+                return (status_order.get(status, 99), k.title.lower())
+
+            if self._sort_column is not None:
+                col = int(self._sort_column)
+                reboot_knobs = sorted(reboot_knobs, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
+                other_knobs = sorted(other_knobs, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
             ordered.extend(reboot_knobs)
             if reboot_knobs and other_knobs:
                 ordered.append(None)  # separator
@@ -682,6 +714,9 @@ def main() -> int:
                     sep.setTextAlignment(Qt.AlignCenter)
                     self.table.setSpan(r, 0, 1, 7)
                     self.table.setItem(r, 0, sep)
+                    for c in range(1, 7):
+                        self.table.removeCellWidget(r, c)
+                        self.table.setItem(r, c, QTableWidgetItem(""))
                     continue
                 status = self._knob_statuses.get(k.id, "unknown")
                 busy = k.id in self._busy_knobs
@@ -925,8 +960,8 @@ def main() -> int:
                 if k.id not in ("pipewire_quantum", "pipewire_sample_rate", "qjackctl_server_prefix_rt"):
                     self.table.removeCellWidget(r, 6)
             
-            # Re-enable sorting after population
-            self.table.setSortingEnabled(True)
+            # Keep built-in sorting disabled; we handle per-section sorting.
+            self.table.setSortingEnabled(False)
             # Reflow row heights so text/widgets don't clip when font size changes.
             try:
                 self.table.resizeRowsToContents()
@@ -1038,6 +1073,16 @@ def main() -> int:
             """Handle reboot-required knob toggle."""
             self.state["enable_reboot_knobs"] = bool(enabled)
             save_state(self.state)
+            self._populate()
+
+        def _on_header_sort(self, column: int) -> None:
+            if self._sort_column == column:
+                self._sort_descending = not self._sort_descending
+            else:
+                self._sort_column = column
+                self._sort_descending = False
+            order = Qt.DescendingOrder if self._sort_descending else Qt.AscendingOrder
+            self.table.horizontalHeader().setSortIndicator(column, order)
             self._populate()
 
         def _qjackctl_cpu_cores_from_state(self) -> list[int] | None:
