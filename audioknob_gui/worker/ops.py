@@ -1020,13 +1020,15 @@ def check_knob_status(knob: Any) -> str:
                     pass
             
             # Determine status based on both checks
-            if in_running:
+            if in_running and in_boot_config:
                 return "applied"
-            elif in_boot_config:
-                # In boot config but not running = pending reboot
+            if in_running and not in_boot_config:
+                # Removed from boot config but still active until reboot
                 return "pending_reboot"
-            else:
-                return "not_applied"
+            if in_boot_config and not in_running:
+                # Added to boot config but not active until reboot
+                return "pending_reboot"
+            return "not_applied"
         except Exception:
             return "unknown"
     

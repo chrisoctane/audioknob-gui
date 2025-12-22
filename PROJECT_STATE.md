@@ -18,7 +18,6 @@
 - **Info popup** - Info column with "?" button shows details + config options
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
-- **Undo** - restores last transaction
 - **Reset All** - reverts all changes to system defaults
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum and sample rate knobs
@@ -40,6 +39,7 @@ Notes:
 - Clarified the Info column header/tooltip to match the per-row "?" button.
 - Audio Groups join now resolves `usermod` via known paths to avoid missing command errors in GUI sessions.
 - Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
+- Kernel cmdline knobs now show “Reboot required” when removed from boot config but still active.
 - User-service masking only targets existing units; Baloo status detection recognizes disabled/not running and surfaces failures.
 - QjackCtl config applies even if DefPreset is missing (creates default preset).
 - QjackCtl ServerPrefix now shows taskset pinning in the GUI (prefix is written separately from jackd flags).
@@ -388,7 +388,7 @@ Without transactions:
 With transactions:
 - Every change is recorded
 - Original content is preserved
-- Undo is always possible
+- Reset is always possible for changes we recorded
 - User can see history
 
 ### Transaction Structure
@@ -573,7 +573,7 @@ else:
 ```
 
 **Why store txids?**
-- Undo button needs to know which transaction to restore
+- Track the most recent apply per scope (user/root) for debugging/future tooling
 - Separate user/root txids because they're in different directories
 - `last_txid` is legacy compatibility
 
@@ -645,7 +645,7 @@ def _on_apply_knob(self, knob_id):
 - Simpler mental model for user
 - No need to remember what was selected
 - Status updates immediately
-- Undo is per-transaction anyway
+- Reset is per-transaction anyway
 
 ---
 
@@ -657,7 +657,7 @@ def _on_apply_knob(self, knob_id):
 |----------|-----------|
 | Per-knob buttons instead of dropdown | Dropdowns require selecting, then clicking Apply. Two steps vs one. Users found it confusing when "Keep current" was selected for an already-applied knob. |
 | No "Keep current" option | If it's applied, you might want to reset. If not applied, you might want to apply. "Keep current" is the absence of action - just don't click anything. |
-| No batch preview | Original design had: select multiple → preview → apply. Too complex. Now: click Apply, it happens. Click Undo if wrong. |
+| No batch preview | Original design had: select multiple → preview → apply. Too complex. Now: click Apply, it happens. Click Reset if wrong. |
 | Test results in status column | Originally showed popup. But user wanted to see "how good is my system" at a glance. Status column shows "12 µs" - instant visibility. |
 | Check user services for PipeWire | Bug: Originally checked `systemctl is-active pipewire.service` which is system scope. PipeWire runs as user: `systemctl --user is-active pipewire.service`. Wasted 30 min debugging. |
 | Preserve prefixes in QjackCtl | Bug: When adding taskset, we were removing `nice -n -10` prefix. Users had carefully configured commands. Now we preserve everything except taskset. |
@@ -920,7 +920,7 @@ When continuing this project, DO NOT:
 
 1. **Add dropdown menus** - We explicitly removed them for simplicity
 2. **Add batch operations** - Each knob acts independently  
-3. **Add Preview step** - We removed it; users click Apply, then Undo if wrong
+3. **Add Preview step** - We removed it; users click Apply, then Reset if wrong
 4. **Skip status refresh** - Always refresh after any state change
 5. **Assume system services** - PipeWire/WirePlumber are user-scoped
 6. **Modify without backup** - Transaction system is non-negotiable
@@ -1365,7 +1365,6 @@ sudo ./packaging/install-polkit.sh
 - [ ] **Test button**: Click Test on jitter → runs 5s → status shows "XX µs"
 - [ ] **Info pane**: Jitter knob info shows the last per-thread max values from the most recent test run
 - If the test fails unprivileged, it retries via pkexec and surfaces errors.
-- [ ] **Undo**: Apply something → click Undo → restored
 - [ ] **Reset All**: Apply multiple → Reset All → all restored
 
 ### Verification Commands

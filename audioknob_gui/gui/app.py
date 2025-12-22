@@ -37,6 +37,10 @@ def _is_pkexec_cancel(msg: str) -> bool:
     return False
 
 
+def _is_no_transaction_error(msg: str) -> bool:
+    return "no transaction found" in (msg or "").lower()
+
+
 def _worker_log_path(*, is_root: bool) -> str:
     from audioknob_gui.core.paths import default_paths
     paths = default_paths()
@@ -397,11 +401,8 @@ def main() -> int:
             self.reboot_banner.setVisible(False)
             top.addWidget(self.reboot_banner)
 
-            self.btn_undo = QPushButton("Undo")
-            self.btn_undo.setToolTip("Undo last change")
             self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
-            top.addWidget(self.btn_undo)
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
@@ -443,7 +444,6 @@ def main() -> int:
             self._refresh_statuses()
             self._populate()
 
-            self.btn_undo.clicked.connect(self.on_undo)
             self.btn_reset.clicked.connect(self.on_reset_defaults)
 
         def _refresh_user_groups(self) -> None:
@@ -831,7 +831,6 @@ def main() -> int:
                 self.table.setFont(font)
                 self.table.horizontalHeader().setFont(font)
                 self.font_spinner.setFont(font)
-                self.btn_undo.setFont(font)
                 self.btn_reset.setFont(font)
 
                 for r in range(self.table.rowCount()):
@@ -1740,6 +1739,15 @@ def main() -> int:
                     self._refresh_statuses()
                     self._populate()
                     return
+                if action == "reset" and _is_no_transaction_error(message):
+                    QMessageBox.information(
+                        self,
+                        "Nothing to reset",
+                        "No transaction recorded for this knob.",
+                    )
+                    self._refresh_statuses()
+                    self._populate()
+                    return
                 if action == "apply":
                     _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, message)
                     QMessageBox.critical(self, "Failed", message or "Unknown error")
@@ -1807,53 +1815,6 @@ def main() -> int:
         def _restore_knob(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
             """Legacy wrapper for batch restore."""
             return self._restore_knob_internal(knob_id, requires_root)
-
-        def on_undo(self) -> None:
-            # Try to restore most recent transaction (user or root)
-            txid = self.state.get("last_user_txid") or self.state.get("last_root_txid") or self.state.get("last_txid")
-            if not txid:
-                QMessageBox.information(self, "No undo", "No last transaction recorded.")
-                return
-
-            is_root = bool(self.state.get("last_root_txid") == txid)
-
-            d = ConfirmDialog([f"restore:{txid}"], self)
-            d.exec()
-            if not d.ok:
-                return
-
-            try:
-                if is_root:
-                    _run_worker_restore_pkexec(str(txid))
-                else:
-                    # User restore doesn't need pkexec
-                    argv = [
-                        sys.executable,
-                        "-m",
-                        "audioknob_gui.worker.cli",
-                        "restore",
-                        str(txid),
-                    ]
-                    p = subprocess.run(argv, text=True, capture_output=True)
-                    if p.returncode != 0:
-                        raise RuntimeError(p.stderr.strip() or "worker restore failed")
-            except Exception as e:
-                QMessageBox.critical(self, "Undo failed", str(e))
-                return
-
-            # Clear the restored txid
-            if is_root:
-                self.state["last_root_txid"] = None
-            else:
-                self.state["last_user_txid"] = None
-            self.state["last_txid"] = None
-            save_state(self.state)
-            
-            # Refresh status display
-            self._refresh_statuses()
-            self._populate()
-            
-            QMessageBox.information(self, "Restored", "Undo complete.")
 
         def on_reset_defaults(self) -> None:
             """Reset ALL audioknob-gui changes to system defaults."""

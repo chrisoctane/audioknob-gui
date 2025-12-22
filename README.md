@@ -34,15 +34,6 @@ cd audioknob-gui
 ./packaging/opensuse/build-rpm.sh
 ```
 
-### Refresh & rebuild (pull latest)
-
-```bash
-cd ~/audioknob-gui
-git pull
-./packaging/opensuse/build-rpm.sh
-sudo zypper --no-gpg-checks install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
-```
-
 Expected output includes:
 
 - `Built RPM(s):`
@@ -75,13 +66,22 @@ Or launch it from your desktop environment’s application menu:
 - **Name**: “AudioKnob GUI”
 - **Desktop entry**: `/usr/share/applications/audioknob-gui.desktop`
 
-### 6) Uninstall
+### 6) (Optional) Refresh & rebuild (pull latest)
+
+```bash
+cd ~/audioknob-gui
+git pull
+./packaging/opensuse/build-rpm.sh
+sudo zypper --no-gpg-checks install -y ~/rpmbuild/RPMS/noarch/audioknob-gui-*.rpm
+```
+
+### 7) Uninstall
 
 ```bash
 sudo zypper remove -y audioknob-gui
 ```
 
-### 7) Cleanup old dev artifacts (optional)
+### 8) Cleanup old dev artifacts (optional)
 
 If you previously installed a dev polkit worker/policy under `/usr/local`, remove them:
 
@@ -92,7 +92,7 @@ rm -f ~/.local/share/applications/audioknob-gui.desktop
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
 ```
 
-### 8) Cleanup (optional)
+### 9) Cleanup (optional)
 
 Remove user GUI state (this does **not** remove any system changes you applied; use the app’s “Reset All” for that):
 
