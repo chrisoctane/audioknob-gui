@@ -21,7 +21,7 @@
       },
       "requires_commands": [],
       "requires_groups": [],
-      "requires_reboot": false,
+      "requires_reboot": true,
       "requires_root": true,
       "risk_level": "low",
       "title": "Audio Groups"
