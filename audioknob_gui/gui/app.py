@@ -708,7 +708,7 @@ def main() -> int:
 
             for r, k in enumerate(ordered):
                 if k is None:
-                    sep = QTableWidgetItem("— No reboot required —")
+                    sep = QTableWidgetItem("")
                     sep.setFlags(Qt.ItemIsEnabled)
                     sep.setForeground(QColor("#9e9e9e"))
                     sep.setTextAlignment(Qt.AlignCenter)
