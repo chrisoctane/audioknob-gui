@@ -1,4 +1,6 @@
-## openSUSE Tumbleweed RPM packaging (v0.1)
+## openSUSE Tumbleweed RPM packaging (v0.2)
+
+This packaging flow is **Tumbleweed only** right now.
 
 This directory contains a local RPM spec for building and installing `audioknob-gui`
 on openSUSE Tumbleweed.
@@ -34,5 +36,3 @@ sudo zypper remove -y audioknob-gui
 
 Note: locally built RPMs are typically **unsigned**, and zypper will refuse them unless you pass `--no-gpg-checks`.
 For a signed RPM, build via OBS (future).
-
-

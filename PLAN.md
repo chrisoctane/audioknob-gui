@@ -28,9 +28,10 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.1)
+### Install on openSUSE Tumbleweed (RPM, v0.2)
 
-For v0.1 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.2 we support **RPM packaging on openSUSE Tumbleweed**.
+Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
 
