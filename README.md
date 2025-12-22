@@ -6,7 +6,7 @@ GUI-first realtime audio tuning tool for Linux.
 
 ## Install (openSUSE Tumbleweed, local RPM)
 
-This is the **v0.2.2** install path validated on openSUSE Tumbleweed.
+This is the **v0.3.0** install path validated on openSUSE Tumbleweed.
 Currently supported on **Tumbleweed only**.
 
 ### 1) Install prerequisites (including git)
@@ -38,7 +38,7 @@ cd audioknob-gui
 Expected output includes:
 
 - `Built RPM(s):`
-- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.2.2-0.noarch.rpm`
+- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.3.0-0.noarch.rpm`
 
 ### 4) Install the RPM (unsigned local build)
 
@@ -118,6 +118,7 @@ Nothing here is committed work until it is moved into `PLAN.md` and implemented.
 
 ### Features
 
+- UI refresh pass for layout/spacing polish (after stability)
 - Continuous jitter monitor dialog
   - Add a "Monitor" action on the jitter test row that opens a popup.
   - Runs cyclictest continuously (or long duration) and parses output periodically.

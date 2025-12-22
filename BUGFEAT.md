@@ -4,6 +4,7 @@ This file collects future ideas only. Nothing here is committed work until it is
 
 ## Ideas
 
+- UI refresh pass for layout/spacing polish (after stability)
 - Continuous jitter monitor dialog
   - Add a "Monitor" action on the jitter test row that opens a popup.
   - Runs cyclictest continuously (or long duration) and parses output periodically.
