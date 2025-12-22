@@ -661,11 +661,28 @@ def main() -> int:
         def _populate(self) -> None:
             # Disable sorting during population to avoid issues
             self.table.setSortingEnabled(False)
-            self.table.setRowCount(len(self.registry))
             reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
             group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
 
-            for r, k in enumerate(self.registry):
+            reboot_knobs = [k for k in self.registry if k.requires_reboot]
+            other_knobs = [k for k in self.registry if not k.requires_reboot]
+            ordered: list[object] = []
+            ordered.extend(reboot_knobs)
+            if reboot_knobs and other_knobs:
+                ordered.append(None)  # separator
+            ordered.extend(other_knobs)
+
+            self.table.setRowCount(len(ordered))
+
+            for r, k in enumerate(ordered):
+                if k is None:
+                    sep = QTableWidgetItem("— No reboot required —")
+                    sep.setFlags(Qt.ItemIsEnabled)
+                    sep.setForeground(QColor("#9e9e9e"))
+                    sep.setTextAlignment(Qt.AlignCenter)
+                    self.table.setSpan(r, 0, 1, 7)
+                    self.table.setItem(r, 0, sep)
+                    continue
                 status = self._knob_statuses.get(k.id, "unknown")
                 busy = k.id in self._busy_knobs
                 display_status = "running" if busy else status
