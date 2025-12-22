@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import sys
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1217,6 +1218,20 @@ def main() -> int:
 
             def _shell_single_quote(value: str) -> str:
                 return "'" + value.replace("'", "'\"'\"'") + "'"
+
+            def _is_qjackctl_running() -> bool:
+                if shutil.which("pgrep"):
+                    for name in ("qjackctl", "qjackctl6"):
+                        r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True)
+                        if r.returncode == 0:
+                            return True
+                r = subprocess.run(["ps", "-eo", "comm"], capture_output=True, text=True)
+                if r.returncode != 0:
+                    return False
+                for line in r.stdout.splitlines():
+                    if line.strip().startswith("qjackctl"):
+                        return True
+                return False
             
             # Build detailed info
             status = self._knob_statuses.get(k.id, "unknown")
@@ -1301,6 +1316,11 @@ def main() -> int:
                         extra_html += f"<p><b>Return code:</b> {returncode}</p>"
                 else:
                     extra_html += "<hr/><p><b>Last jitter test:</b> not run yet.</p>"
+            if k.id == "qjackctl_server_prefix_rt" and _is_qjackctl_running():
+                extra_html += (
+                    "<hr/><p><b>Note:</b> QjackCtl reads its config on launch. "
+                    "Quit and reopen QjackCtl to refresh the ServerPrefix in the UI.</p>"
+                )
 
             html = f"""
             <h3>{k.title}</h3>
