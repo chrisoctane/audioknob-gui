@@ -16,6 +16,7 @@
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
 - **Info popup** - Info column with "?" button shows details + config options
+- **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Reset All** - reverts all changes to system defaults

@@ -1214,6 +1214,9 @@ def main() -> int:
             k = next((k for k in self.registry if k.id == knob_id), None)
             if not k:
                 return
+
+            def _shell_single_quote(value: str) -> str:
+                return "'" + value.replace("'", "'\"'\"'") + "'"
             
             # Build detailed info
             status = self._knob_statuses.get(k.id, "unknown")
@@ -1240,6 +1243,33 @@ def main() -> int:
                             impl_info += f"  • {item}<br/>"
                     else:
                         impl_info += f"<b>{key}:</b> {val}<br/>"
+
+            registry_path = _registry_path()
+            reg_q = _shell_single_quote(registry_path)
+            status_py = (
+                "import json,subprocess; "
+                f"data=json.loads(subprocess.check_output([\"python3\",\"-m\",\"audioknob_gui.worker.cli\",\"--registry\",\"{registry_path}\",\"status\"])); "
+                f"print([s for s in data.get(\"statuses\",[]) if s.get(\"knob_id\")==\"{k.id}\"][0])"
+            )
+            status_cmd = f"python3 -c {_shell_single_quote(status_py)}"
+            if k.capabilities.apply:
+                if k.requires_root:
+                    apply_cmd = f"pkexec /usr/libexec/audioknob-gui-worker --registry {reg_q} apply {k.id}"
+                    reset_cmd = f"pkexec /usr/libexec/audioknob-gui-worker --registry {reg_q} restore-knob {k.id}"
+                else:
+                    apply_cmd = f"python3 -m audioknob_gui.worker.cli --registry {reg_q} apply-user {k.id}"
+                    reset_cmd = f"python3 -m audioknob_gui.worker.cli --registry {reg_q} restore-knob {k.id}"
+            else:
+                apply_cmd = "N/A (read-only)"
+                reset_cmd = "N/A (read-only)"
+
+            cli_html = (
+                "<hr/>"
+                "<p><b>CLI sanity checks:</b></p>"
+                f"<pre>{html_lib.escape(status_cmd)}\n"
+                f"{html_lib.escape(apply_cmd)}\n"
+                f"{html_lib.escape(reset_cmd)}</pre>"
+            )
             
             extra_html = ""
             if k.id == "scheduler_jitter_test":
@@ -1288,6 +1318,7 @@ def main() -> int:
             <p><b>Implementation:</b></p>
             <p>{impl_info}</p>
             {extra_html}
+            {cli_html}
             """
             
             dialog = QDialog(self)

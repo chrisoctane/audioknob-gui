@@ -224,6 +224,7 @@ self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 The jitter test also stores the most recent per-thread results in the knob info dialog.
+The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
 
 ### With config dialog (via info popup)
 ```python
