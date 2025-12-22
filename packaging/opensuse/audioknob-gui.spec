@@ -51,9 +51,12 @@ Security model:
   dist/*.whl
 
 # Root worker wrapper + polkit policy + desktop entry
-install -D -m 0755 packaging/audioknob-gui-worker %{buildroot}%{_libexecdir}/audioknob-gui-worker
-install -D -m 0644 polkit/org.audioknob-gui.policy %{buildroot}%{_datadir}/polkit-1/actions/org.audioknob-gui.policy
-install -D -m 0644 packaging/audioknob-gui.desktop %{buildroot}%{_datadir}/applications/audioknob-gui.desktop
+%{__install} -d %{buildroot}%{_libexecdir} \
+  %{buildroot}%{_datadir}/polkit-1/actions \
+  %{buildroot}%{_datadir}/applications
+%{__install} -m 0755 packaging/audioknob-gui-worker %{buildroot}%{_libexecdir}/audioknob-gui-worker
+%{__install} -m 0644 polkit/org.audioknob-gui.policy %{buildroot}%{_datadir}/polkit-1/actions/org.audioknob-gui.policy
+%{__install} -m 0644 packaging/audioknob-gui.desktop %{buildroot}%{_datadir}/applications/audioknob-gui.desktop
 
 %fdupes %{buildroot}%{python3_sitelib}
 
