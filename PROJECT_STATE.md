@@ -10,8 +10,8 @@
 
 ### What Works
 - **23 knobs defined** (ALL 23 IMPLEMENTED)
-- **Per-knob Apply/Reset buttons** - one click to apply or reset
-- **Queued apply workflow** - per-knob Apply queues changes; global Apply/Apply & Reboot executes the queue
+- **Per-knob Apply/Reset buttons** - one click to queue apply or reset
+- **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
@@ -28,12 +28,13 @@
 
 ### GUI Layout
 ```
-Columns: Info | Knob | Status | Category | Risk | Action | Config
-         (0)  (1)    (2)      (3)       (4)    (5)      (6)
+Columns: Info | Knob | Status | Category | Risk | Action | Config | Check
+         (0)  (1)    (2)      (3)       (4)    (5)      (6)     (7)
 
 Notes:
 - Column 0 header is "Info"; each row has a small "?" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
+- "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - QjackCtl defaults to taskset cores 0,1 and adds -R and -P90 when applied.
 - Header row includes a queued changes label and an Apply/Apply & Reboot button that executes queued changes.
 ```

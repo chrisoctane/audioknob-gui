@@ -1235,35 +1235,32 @@ def _find_transaction_for_knob(knob_id: str) -> tuple[str | None, dict | None, s
     return None, None, None
 
 
-def cmd_restore_knob(args: argparse.Namespace) -> int:
-    """Restore a specific knob to its original state."""
-    knob_id = args.knob_id
-    
+def _restore_knob_once(knob_id: str) -> dict:
     txid, manifest, scope = _find_transaction_for_knob(knob_id)
     if not txid or not manifest:
-        print(json.dumps({
+        return {
             "schema": 1,
             "success": False,
+            "knob_id": knob_id,
             "error": f"No transaction found for knob: {knob_id}",
-        }, indent=2))
-        return 1
-    
+        }
+
     # Check if we need root for this operation
     if scope == "root" and os.geteuid() != 0:
-        print(json.dumps({
+        return {
             "schema": 1,
             "success": False,
+            "knob_id": knob_id,
             "error": f"Knob {knob_id} was applied as root; run with pkexec to restore",
-        }, indent=2))
-        return 1
-    
+        }
+
     paths = default_paths()
     tx_root = Path(paths.var_lib_dir if scope == "root" else paths.user_state_dir) / "transactions" / txid
-    
+
     # Create a Transaction object for backup restore
     from audioknob_gui.core.transaction import Transaction
     tx = Transaction(txid=txid, root=tx_root)
-    
+
     # Restore only the backups from this knob's transaction
     restored = []
     errors = []
@@ -1273,14 +1270,14 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
             restored.append(meta["path"])
         else:
             errors.append(message)
-    
+
     # Also restore effects if present
     effects = manifest.get("effects", [])
-    
+
     if scope == "root" and os.geteuid() == 0:
         sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
         systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
-        
+
         try:
             restore_sysfs(sysfs)
             for e in systemd:
@@ -1289,10 +1286,10 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
                 restored.append(f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd)")
         except Exception as ex:
             errors.append(f"Failed to restore effects: {ex}")
-    
+
     # User-scope effects
     from audioknob_gui.worker.ops import user_service_restore, baloo_enable
-    
+
     user_effects_restored = 0
     for e in effects:
         try:
@@ -1304,7 +1301,7 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
                 user_effects_restored += 1
         except Exception as ex:
             errors.append(f"Failed to restore user effect: {ex}")
-    
+
     if user_effects_restored:
         restored.append(f"(user effects: {user_effects_restored})")
 
@@ -1346,8 +1343,8 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
                     )
         except Exception as ex:
             errors.append(f"Bootloader update check failed: {ex}")
-    
-    print(json.dumps({
+
+    return {
         "schema": 1,
         "success": len(errors) == 0,
         "knob_id": knob_id,
@@ -1355,9 +1352,45 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
         "scope": scope,
         "restored": restored,
         "errors": errors,
+    }
+
+
+def cmd_restore_knob(args: argparse.Namespace) -> int:
+    """Restore a specific knob to its original state."""
+    result = _restore_knob_once(args.knob_id)
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("success") else 1
+
+
+def cmd_restore_many(args: argparse.Namespace) -> int:
+    """Restore multiple knobs to their original state."""
+    results = []
+    restored: list[str] = []
+    errors: list[str] = []
+
+    for knob_id in args.knob:
+        result = _restore_knob_once(knob_id)
+        results.append(result)
+        if result.get("success"):
+            restored.append(knob_id)
+            continue
+        if result.get("errors"):
+            for err in result["errors"]:
+                errors.append(f"{knob_id}: {err}")
+        elif result.get("error"):
+            errors.append(f"{knob_id}: {result['error']}")
+        else:
+            errors.append(f"{knob_id}: restore failed")
+
+    success = len(errors) == 0
+    print(json.dumps({
+        "schema": 1,
+        "success": success,
+        "restored": restored,
+        "results": results,
+        "errors": errors,
     }, indent=2))
-    
-    return 0 if not errors else 1
+    return 0 if success else 1
 
 
 def _force_reset_systemd(unit: str, action: str) -> tuple[bool, str]:
@@ -1537,6 +1570,10 @@ def main(argv: list[str] | None = None) -> int:
     srk = sub.add_parser("restore-knob", help="Restore a specific knob to its original state")
     srk.add_argument("knob_id", help="ID of the knob to restore")
     srk.set_defaults(func=cmd_restore_knob)
+
+    srm = sub.add_parser("restore-many", help="Restore multiple knobs to their original state")
+    srm.add_argument("knob", nargs="+", help="IDs of knobs to restore")
+    srm.set_defaults(func=cmd_restore_many)
 
     sfr = sub.add_parser("force-reset-knob", help="Force reset a knob without a transaction")
     sfr.add_argument("knob_id", help="ID of the knob to force reset")

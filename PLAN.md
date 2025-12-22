@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.0)
+### Install on openSUSE Tumbleweed (RPM, v0.3.1)
 
-For v0.3.0 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.3.1 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -180,13 +180,13 @@ In `gui/app.py` → `_populate()`:
 | Not applied | — | "Apply" button (queues) | "?" button |
 | Applied | ✓ Applied | "Reset" button | "?" button |
 | Not implemented | — | "—" disabled | "?" button |
-| Missing groups | 🔒 | "🔒" disabled | "?" button |
-| Missing packages | 📦 | "Install" button | "?" button |
+| Missing groups | Locked | "🔒" disabled | "?" button |
+| Missing packages | Locked | "Install" button | "?" button |
 | Read-only info | — | "View" button | "?" button |
 | Read-only test | — | "Test"/"Scan" button | "?" button |
 | Group join knob | — | "Join/Leave" button (immediate) | "?" button |
 
-**Columns**: Info | Knob | Status | Category | Risk | Action | Config
+**Columns**: Info | Knob | Status | Category | Risk | Action | Config | Check
 
 **Sorting**: Click any column header to sort
 
@@ -199,15 +199,15 @@ In `gui/app.py` → `_populate()`:
 status = self._knob_statuses.get(k.id, "unknown")
 if status == "applied":
     btn = QPushButton("Reset")
-    btn.clicked.connect(lambda _, kid=k.id: self._on_reset_knob(kid, root))
+    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
 else:
     btn = QPushButton("Apply")
-    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid))
+    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
 self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
-Apply now queues the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot.
+Apply and Reset now queue the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot.
 Group join/leave actions remain immediate because they require explicit confirmation.
 If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (supported for `systemd_unit_toggle` and `kernel_cmdline` knobs).
 Reboot-required knobs are disabled until the user enables the "Enable reboot-required changes" toggle.
@@ -228,8 +228,8 @@ self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 The jitter test also stores the most recent per-thread results in the knob info dialog.
-The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification,
-plus a "Run status check" button that prints live diagnostics for the current knob.
+The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
+Use the "Status" button in the Check column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. Read-only test rows show N/A in this column.
 
 ### With config dialog (via info popup)
 ```python

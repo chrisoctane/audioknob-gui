@@ -122,6 +122,59 @@ def _run_worker_apply_pkexec(knob_ids: list[str]) -> dict:
     return json.loads(p.stdout)
 
 
+def _run_worker_restore_many_user(knob_ids: list[str]) -> dict:
+    argv = [
+        sys.executable,
+        "-m",
+        "audioknob_gui.worker.cli",
+        "restore-many",
+        *knob_ids,
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.stdout.strip():
+        try:
+            data = json.loads(p.stdout)
+            if p.returncode != 0:
+                return data
+            return data
+        except Exception:
+            pass
+    if p.returncode != 0:
+        log_path = _worker_log_path(is_root=False)
+        msg = p.stderr.strip() or p.stdout.strip() or "worker restore failed"
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
+    return json.loads(p.stdout)
+
+
+def _run_worker_restore_many_pkexec(knob_ids: list[str]) -> dict:
+    if not _pkexec_available():
+        raise RuntimeError("pkexec not found")
+
+    worker = _pick_root_worker_path()
+    argv = [
+        "pkexec",
+        worker,
+        "restore-many",
+        *knob_ids,
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.stdout.strip():
+        try:
+            data = json.loads(p.stdout)
+            if p.returncode != 0:
+                return data
+            return data
+        except Exception:
+            pass
+    if p.returncode != 0:
+        log_path = _worker_log_path(is_root=True)
+        msg = p.stderr.strip() or p.stdout.strip() or "worker restore failed"
+        if _is_pkexec_cancel(msg):
+            raise RuntimeError(_PKEXEC_CANCELLED)
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
+    return json.loads(p.stdout)
+
+
 def _run_worker_restore_pkexec(txid: str) -> dict:
     if not _pkexec_available():
         raise RuntimeError("pkexec not found")
@@ -237,6 +290,7 @@ def load_state() -> dict:
         "last_root_txid": None,
         "font_size": 11,
         "queued_knobs": [],
+        "queued_actions": {},
         # Per-knob UI state
         "qjackctl_cpu_cores": None,  # list[int] or None
         "pipewire_quantum": None,  # int (32..1024) or None
@@ -265,10 +319,25 @@ def load_state() -> dict:
             data["enable_reboot_knobs"] = False
         if "queued_knobs" not in data:
             data["queued_knobs"] = []
+        if "queued_actions" not in data:
+            if isinstance(data.get("queued_knobs"), list):
+                data["queued_actions"] = {
+                    k: "apply" for k in data["queued_knobs"] if isinstance(k, str)
+                }
+            else:
+                data["queued_actions"] = {}
         if not isinstance(data.get("queued_knobs"), list):
             data["queued_knobs"] = []
         else:
             data["queued_knobs"] = [x for x in data["queued_knobs"] if isinstance(x, str)]
+        if not isinstance(data.get("queued_actions"), dict):
+            data["queued_actions"] = {}
+        else:
+            cleaned = {}
+            for k, v in data["queued_actions"].items():
+                if isinstance(k, str) and v in ("apply", "reset"):
+                    cleaned[k] = v
+            data["queued_actions"] = cleaned
         if data.get("jitter_test_last") is not None and not isinstance(data.get("jitter_test_last"), dict):
             data["jitter_test_last"] = None
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
@@ -297,7 +366,7 @@ def save_state(state: dict) -> None:
 
 def main() -> int:
     try:
-        from PySide6.QtCore import Qt, QThread, Signal
+        from PySide6.QtCore import Qt, QThread, Signal, QEvent
         from PySide6.QtWidgets import (
             QApplication,
             QAbstractItemView,
@@ -370,13 +439,13 @@ def main() -> int:
     class ConfirmDialog(QDialog):
         def __init__(self, planned_ids: list[str], parent: QWidget | None = None) -> None:
             super().__init__(parent)
-            self.setWindowTitle("Confirm apply")
+            self.setWindowTitle("Confirm queued changes")
             self.resize(520, 150)
             self.ok = False
 
             root = QVBoxLayout(self)
-            root.addWidget(QLabel("<b>Apply these changes?</b>"))
-            root.addWidget(QLabel("Knobs: " + ", ".join(planned_ids)))
+            root.addWidget(QLabel("<b>Apply these queued changes?</b>"))
+            root.addWidget(QLabel("Items: " + ", ".join(planned_ids)))
             root.addWidget(QLabel("<i>You'll be prompted for your password if root access is needed.</i>"))
 
             btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
@@ -449,13 +518,13 @@ def main() -> int:
 
             self.state = load_state()
             self.registry = load_registry(_registry_path())
-            self._queued_knobs = self._sanitize_queue(self.state.get("queued_knobs"))
-            if self._queued_knobs != self.state.get("queued_knobs"):
-                self.state["queued_knobs"] = list(self._queued_knobs)
+            self._queued_actions = self._sanitize_queue_actions(self.state.get("queued_actions"))
+            if self._queued_actions != self.state.get("queued_actions"):
+                self.state["queued_actions"] = dict(self._queued_actions)
                 save_state(self.state)
             self._queue_busy = False
             self._queue_needs_reboot = False
-            self._queue_inflight: list[str] = []
+            self._queue_inflight: list[tuple[str, str]] = []
             
             # Apply saved font size
             self._apply_font_size(self.state.get("font_size", 11))
@@ -515,8 +584,8 @@ def main() -> int:
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
-            self.table = QTableWidget(0, 7)
-            self.table.setHorizontalHeaderLabels(["Info", "Knob", "Status", "Category", "Risk", "Action", "Config"])
+            self.table = QTableWidget(0, 8)
+            self.table.setHorizontalHeaderLabels(["Info", "Knob", "Status", "Category", "Risk", "Action", "Config", "Check"])
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(False)
             self.table.setAlternatingRowColors(True)
@@ -525,6 +594,9 @@ def main() -> int:
             self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
             self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
             self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.table.setMouseTracking(True)
             self.table.verticalHeader().setVisible(False)
             header = self.table.horizontalHeader()
             header.setMinimumSectionSize(60)
@@ -534,20 +606,13 @@ def main() -> int:
             # Make every column user-resizable (Interactive). We also set reasonable defaults.
             # NOTE: ResizeToContents does NOT reliably account for cell widgets (buttons/combos),
             # which causes text clipping like "Apply" -> "Annlv".
-            for c in range(7):
+            for c in range(8):
                 header.setSectionResizeMode(c, QHeaderView.Interactive)
             self._sort_column: int | None = None
             self._sort_descending = False
             header.setSortIndicatorShown(True)
-            header.sectionResized.connect(lambda *_: self._apply_window_constraints())
             header.sectionClicked.connect(self._on_header_sort)
-            self.table.setColumnWidth(0, 32)   # Info button
-            self.table.setColumnWidth(1, 420)  # Knob title
-            self.table.setColumnWidth(2, 120)  # Status
-            self.table.setColumnWidth(3, 110)  # Category
-            self.table.setColumnWidth(4, 80)   # Risk
-            self.table.setColumnWidth(5, 96)   # Action (fits Apply/Reset)
-            self.table.setColumnWidth(6, 160)  # Config (fits 48000 Hz)
+            self._apply_default_column_widths()
             root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
@@ -560,6 +625,8 @@ def main() -> int:
             QTimer.singleShot(0, self._apply_window_constraints)
 
             self.btn_reset.clicked.connect(self.on_reset_defaults)
+            self.table.cellEntered.connect(self._on_row_hover)
+            self.table.viewport().installEventFilter(self)
 
         def _refresh_user_groups(self) -> None:
             """Get current user's group memberships."""
@@ -597,42 +664,45 @@ def main() -> int:
             from audioknob_gui.platform.packages import check_command_available
             return [cmd for cmd in k.requires_commands if not check_command_available(cmd)]
 
-        def _sanitize_queue(self, raw: object) -> list[str]:
-            if not isinstance(raw, list):
-                return []
+        def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
+            if not isinstance(raw, dict):
+                return {}
             valid_ids = {k.id for k in self.registry}
-            out: list[str] = []
-            for item in raw:
-                if isinstance(item, str) and item in valid_ids and item not in out:
-                    out.append(item)
+            out: dict[str, str] = {}
+            for knob_id, action in raw.items():
+                if knob_id in valid_ids and action in ("apply", "reset"):
+                    out[knob_id] = action
             return out
 
         def _save_queue(self) -> None:
-            self.state["queued_knobs"] = list(self._queued_knobs)
+            self.state["queued_actions"] = dict(self._queued_actions)
             save_state(self.state)
 
         def _queue_requires_reboot(self) -> bool:
-            queued = set(self._queued_knobs)
+            queued = set(self._queued_actions.keys())
             return any(k.requires_reboot for k in self.registry if k.id in queued)
 
         def _queue_requires_root(self) -> bool:
-            queued = set(self._queued_knobs)
+            queued = set(self._queued_actions.keys())
             return any(k.requires_root for k in self.registry if k.id in queued)
 
         def _prune_queue_from_statuses(self) -> None:
-            if not self._queued_knobs:
+            if not self._queued_actions:
                 return
-            keep: list[str] = []
-            for kid in self._queued_knobs:
+            keep: dict[str, str] = {}
+            for kid, action in self._queued_actions.items():
                 status = self._knob_statuses.get(kid)
-                if status not in ("applied", "pending_reboot"):
-                    keep.append(kid)
-            if keep != self._queued_knobs:
-                self._queued_knobs = keep
+                if action == "apply" and status in ("applied", "pending_reboot"):
+                    continue
+                if action == "reset" and status in ("not_applied", "not_applicable"):
+                    continue
+                keep[kid] = action
+            if keep != self._queued_actions:
+                self._queued_actions = keep
                 self._save_queue()
 
         def _update_queue_ui(self) -> None:
-            count = len(self._queued_knobs)
+            count = len(self._queued_actions)
             if count:
                 self.queue_label.setText(f"Queued: {count}")
                 self.queue_label.setVisible(True)
@@ -652,8 +722,8 @@ def main() -> int:
                 self.btn_apply_queue.setVisible(False)
             self.btn_apply_queue.setEnabled(count > 0 and not self._queue_busy)
 
-        def _apply_queue_button_state(self, btn: QPushButton, knob_id: str) -> None:
-            if knob_id in self._queued_knobs:
+        def _apply_queue_button_state(self, btn: QPushButton, knob_id: str, action: str) -> None:
+            if self._queued_actions.get(knob_id) == action:
                 btn.setStyleSheet(
                     "QPushButton {"
                     " background-color: #5f8f6b;"
@@ -667,7 +737,10 @@ def main() -> int:
                     " background-color: #4e7a5a;"
                     "}"
                 )
-                btn.setToolTip("Queued for apply. Click to remove from queue.")
+                tip = "Queued to apply. Click to remove from queue."
+                if action == "reset":
+                    tip = "Queued to reset. Click to remove from queue."
+                btn.setToolTip(tip)
             else:
                 btn.setStyleSheet("")
 
@@ -760,6 +833,7 @@ def main() -> int:
             # Ensure button labels don't clip at common font sizes and narrow columns.
             btn.setMinimumWidth(80)
             btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            btn.setFocusPolicy(Qt.NoFocus)
             return btn
 
         def _make_reset_button(self, text: str = "Reset") -> QPushButton:
@@ -767,6 +841,7 @@ def main() -> int:
             btn = QPushButton(text)
             btn.setMinimumWidth(80)
             btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            btn.setFocusPolicy(Qt.NoFocus)
             return btn
 
         def _make_action_button(self, text: str) -> QPushButton:
@@ -774,6 +849,7 @@ def main() -> int:
             btn = QPushButton(text)
             btn.setMinimumWidth(80)
             btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            btn.setFocusPolicy(Qt.NoFocus)
             return btn
 
         def _apply_busy_state(self, btn: QPushButton, *, busy: bool) -> None:
@@ -851,7 +927,7 @@ def main() -> int:
 
             for r, k in enumerate(ordered):
                 if k is REBOOT_HEADER:
-                    self.table.setSpan(r, 0, 1, 7)
+                    self.table.setSpan(r, 0, 1, 8)
                     header_widget = QWidget()
                     header_layout = QHBoxLayout(header_widget)
                     header_layout.setContentsMargins(8, 2, 8, 2)
@@ -859,7 +935,7 @@ def main() -> int:
                     header_layout.addWidget(self.reboot_toggle)
                     header_layout.addStretch(1)
                     self.table.setCellWidget(r, 0, header_widget)
-                    for c in range(1, 7):
+                    for c in range(1, 8):
                         self.table.removeCellWidget(r, c)
                         self.table.setItem(r, c, QTableWidgetItem(""))
                     continue
@@ -868,9 +944,9 @@ def main() -> int:
                     sep.setFlags(Qt.ItemIsEnabled)
                     sep.setForeground(QColor("#9e9e9e"))
                     sep.setTextAlignment(Qt.AlignCenter)
-                    self.table.setSpan(r, 0, 1, 7)
+                    self.table.setSpan(r, 0, 1, 8)
                     self.table.setItem(r, 0, sep)
-                    for c in range(1, 7):
+                    for c in range(1, 8):
                         self.table.removeCellWidget(r, c)
                         self.table.setItem(r, c, QTableWidgetItem(""))
                     continue
@@ -910,6 +986,7 @@ def main() -> int:
                 info_btn = QPushButton("i")
                 info_btn.setFixedWidth(28)
                 info_btn.setToolTip("Show details")
+                info_btn.setFocusPolicy(Qt.NoFocus)
                 info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
                 if locked:
                     info_btn.setStyleSheet(locked_style)
@@ -931,7 +1008,7 @@ def main() -> int:
 
                 # Column 2: Status (with color)
                 if locked:
-                    status_item = QTableWidgetItem("[LOCK]")
+                    status_item = QTableWidgetItem("Locked")
                     status_item.setForeground(locked_fg)
                     status_item.setToolTip(lock_reason)
                 elif not_applicable:
@@ -1028,11 +1105,12 @@ def main() -> int:
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
-                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset")
                     else:
                         btn = self._make_apply_button()
-                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid))
-                        self._apply_queue_button_state(btn, k.id)
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply")
                     self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
 
@@ -1071,11 +1149,12 @@ def main() -> int:
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
-                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset")
                     else:
                         btn = self._make_apply_button()
-                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid))
-                        self._apply_queue_button_state(btn, k.id)
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply")
                     self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
 
@@ -1110,11 +1189,12 @@ def main() -> int:
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot", "partial"):
                         btn = self._make_reset_button()
-                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset")
                     else:
                         btn = self._make_apply_button()
-                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid))
-                        self._apply_queue_button_state(btn, k.id)
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply")
                     self._apply_busy_state(btn, busy=busy)
                     if locked:
                         btn.setStyleSheet(locked_style)
@@ -1123,6 +1203,7 @@ def main() -> int:
                     # Config column: CPU core selection
                     cfg_btn = QPushButton("Cores")
                     cfg_btn.setToolTip("Configure CPU cores for taskset")
+                    cfg_btn.setFocusPolicy(Qt.NoFocus)
                     cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
                     if locked:
                         cfg_btn.setEnabled(False)
@@ -1139,11 +1220,12 @@ def main() -> int:
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
-                        btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset")
                     else:
                         btn = self._make_apply_button()
-                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid))
-                        self._apply_queue_button_state(btn, k.id)
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply")
                     self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
 
@@ -1151,6 +1233,19 @@ def main() -> int:
                 # (PipeWire rows set their own widgets above; other rows need clearing)
                 if k.id not in ("pipewire_quantum", "pipewire_sample_rate", "qjackctl_server_prefix_rt"):
                     self.table.removeCellWidget(r, 6)
+
+                # Column 7: Status check
+                if k.impl and k.impl.kind == "read_only":
+                    check_btn = QPushButton("N/A")
+                    check_btn.setEnabled(False)
+                    check_btn.setToolTip("Not applicable for read-only tests")
+                    check_btn.setFocusPolicy(Qt.NoFocus)
+                    check_btn.setStyleSheet(locked_style)
+                else:
+                    check_btn = self._make_action_button("Status")
+                    check_btn.setToolTip("Show live CLI status details")
+                    check_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
+                self.table.setCellWidget(r, 7, check_btn)
             
             # Keep built-in sorting disabled; we handle per-section sorting.
             self.table.setSortingEnabled(False)
@@ -1185,11 +1280,64 @@ def main() -> int:
                             w.setFont(font)
 
                 # Reflow rows so widgets/text don't clip at larger font sizes.
+                self._apply_default_column_widths()
                 self.table.resizeRowsToContents()
                 self.table.viewport().update()
                 self._apply_window_constraints()
             except Exception:
                 pass
+
+        def _apply_default_column_widths(self) -> None:
+            try:
+                from PySide6.QtGui import QFontMetrics
+            except Exception:
+                return
+
+            fm = QFontMetrics(self.table.font())
+
+            def _w(text: str, pad: int = 24) -> int:
+                return fm.horizontalAdvance(text) + pad
+
+            knob_titles = [k.title for k in self.registry] or ["Knob"]
+            knob_width = max([_w("Knob")] + [_w(t) for t in knob_titles])
+
+            status_texts = [
+                "Locked",
+                "✓ Applied",
+                "⟳ Reboot",
+                "◐ Partial",
+                "N/A",
+                "⏳ Updating",
+                "—",
+            ]
+            status_width = max([_w("Status")] + [_w(t) for t in status_texts])
+
+            category_texts = [str(k.category) for k in self.registry] + ["Category"]
+            category_width = max(_w(t) for t in category_texts)
+
+            risk_texts = [str(k.risk_level) for k in self.registry] + ["Risk"]
+            risk_width = max(_w(t) for t in risk_texts)
+
+            action_texts = ["Apply", "Reset", "Install", "View", "Test", "Scan", "Join", "Leave", "Action"]
+            action_width = max(_w(t, pad=32) for t in action_texts)
+            action_width = max(action_width, 80)
+
+            config_texts = ["Config", "Cores", "44100 Hz", "192000 Hz", "512", "1024"]
+            config_width = max(_w(t, pad=36) for t in config_texts)
+            config_width = max(config_width, 120)
+
+            check_texts = ["Check", "Status"]
+            check_width = max(_w(t, pad=40) for t in check_texts)
+            check_width = max(check_width, 96)
+
+            self.table.setColumnWidth(0, 32)  # Info button
+            self.table.setColumnWidth(1, knob_width)
+            self.table.setColumnWidth(2, status_width)
+            self.table.setColumnWidth(3, category_width)
+            self.table.setColumnWidth(4, risk_width)
+            self.table.setColumnWidth(5, action_width)
+            self.table.setColumnWidth(6, config_width)
+            self.table.setColumnWidth(7, check_width)
 
         def _apply_window_constraints(self) -> None:
             """Limit window growth to the content size (bounded by screen)."""
@@ -1262,6 +1410,10 @@ def main() -> int:
                 }
                 QTableWidget::item {
                     padding: 4px;
+                }
+                QTableWidget::item:selected {
+                    background-color: #3a3a3a;
+                    color: #e0e0e0;
                 }
                 QHeaderView::section {
                     background-color: #404040;
@@ -1348,6 +1500,16 @@ def main() -> int:
             order = Qt.DescendingOrder if self._sort_descending else Qt.AscendingOrder
             self.table.horizontalHeader().setSortIndicator(column, order)
             self._populate()
+
+        def _on_row_hover(self, row: int, _column: int) -> None:
+            if row >= 0:
+                self.table.selectRow(row)
+
+        def eventFilter(self, obj, event):
+            if obj is self.table.viewport() and event.type() == QEvent.Leave:
+                self.table.clearSelection()
+                return False
+            return super().eventFilter(obj, event)
 
         def _qjackctl_cpu_cores_from_state(self) -> list[int] | None:
             raw = self.state.get("qjackctl_cpu_cores")
@@ -1726,18 +1888,32 @@ def main() -> int:
             text.setHtml(html)
             layout.addWidget(text)
 
-            status_box = QTextEdit()
-            status_box.setReadOnly(True)
-            status_box.setPlaceholderText("Click 'Run status check' for live status details.")
-            layout.addWidget(status_box)
+            # Add config button for knobs that support it
+            if k.id == "qjackctl_server_prefix_rt":
+                config_btn = QPushButton("Configure CPU Cores...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
+            if k.id == "pipewire_quantum":
+                config_btn = QPushButton("Configure Buffer Size...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
+            if k.id == "pipewire_sample_rate":
+                config_btn = QPushButton("Configure Sample Rate...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
 
-            def _run_status_check() -> None:
-                lines: list[str] = []
-                lines.append(f"knob_id: {k.id}")
-                lines.append(f"title: {k.title}")
-                lines.append(f"status: {self._knob_statuses.get(k.id, 'unknown')}")
-                lines.append("")
+            btns = QDialogButtonBox(QDialogButtonBox.Close)
+            btns.rejected.connect(dialog.reject)
+            layout.addWidget(btns)
 
+            dialog.exec()
+
+        def _show_cli_status(self, knob_id: str) -> None:
+            k = next((k for k in self.registry if k.id == knob_id), None)
+            if not k:
+                return
+
+            def _cli_status() -> str:
                 try:
                     status_data = json.loads(
                         subprocess.check_output(
@@ -1757,36 +1933,41 @@ def main() -> int:
                         None,
                     )
                     if item:
-                        lines.append("cli_status: " + json.dumps(item))
-                    else:
-                        lines.append("cli_status: not found")
+                        return str(item.get("status", "unknown"))
+                    return "not found"
                 except Exception as e:
-                    lines.append(f"cli_status: error: {e}")
+                    return f"error: {e}"
+
+            def _read_file(path: str, *, max_lines: int = 40) -> list[str]:
+                p = Path(path).expanduser()
+                if not p.exists():
+                    return [f"{path}: missing"]
+                try:
+                    content = p.read_text(encoding="utf-8").splitlines()
+                except Exception as e:
+                    return [f"{path}: unreadable: {e}"]
+                if len(content) > max_lines:
+                    content = content[:max_lines] + ["... (truncated)"]
+                return [f"{path}:"] + content
+
+            def _param_present(tokens: list[str], param: str) -> bool:
+                if "=" in param:
+                    return param in tokens
+                for token in tokens:
+                    if token == param or token.startswith(param + "="):
+                        return True
+                return False
+
+            def _collect_live_checks() -> list[str]:
+                lines: list[str] = []
+                lines.append(f"knob_id: {k.id}")
+                lines.append(f"title: {k.title}")
+                lines.append(f"status: {self._knob_statuses.get(k.id, 'unknown')}")
+                lines.append("")
 
                 kind = k.impl.kind if k.impl else ""
                 params = dict(k.impl.params) if k.impl else {}
-                lines.append("")
                 lines.append(f"kind: {kind}")
-
-                def _read_file(path: str, *, max_lines: int = 40) -> list[str]:
-                    p = Path(path).expanduser()
-                    if not p.exists():
-                        return [f"{path}: missing"]
-                    try:
-                        content = p.read_text(encoding="utf-8").splitlines()
-                    except Exception as e:
-                        return [f"{path}: unreadable: {e}"]
-                    if len(content) > max_lines:
-                        content = content[:max_lines] + ["... (truncated)"]
-                    return [f"{path}:"] + content
-
-                def _param_present(tokens: list[str], param: str) -> bool:
-                    if "=" in param:
-                        return param in tokens
-                    for token in tokens:
-                        if token == param or token.startswith(param + "="):
-                            return True
-                    return False
 
                 if kind == "qjackctl_server_prefix":
                     path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
@@ -1830,7 +2011,8 @@ def main() -> int:
                     param = str(params.get("param", ""))
                     if param:
                         try:
-                            running = Path("/proc/cmdline").read_text(encoding="utf-8")
+                            running = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
+                            lines.append(f"/proc/cmdline: {running}")
                             tokens = running.split()
                             lines.append(f"/proc/cmdline has {param}: {_param_present(tokens, param)}")
                         except Exception as e:
@@ -1889,29 +2071,76 @@ def main() -> int:
                     else:
                         lines.append("balooctl not found")
 
-                status_box.setPlainText("\n".join(lines))
+                return lines
 
-            status_btn = QPushButton("Run status check")
-            status_btn.clicked.connect(_run_status_check)
-            layout.addWidget(status_btn)
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"{k.title} Status Check")
+            dialog.resize(640, 460)
+            layout = QVBoxLayout(dialog)
 
-            # Add config button for knobs that support it
-            if k.id == "qjackctl_server_prefix_rt":
-                config_btn = QPushButton("Configure CPU Cores...")
-                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
-                layout.addWidget(config_btn)
-            if k.id == "pipewire_quantum":
-                config_btn = QPushButton("Configure Buffer Size...")
-                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
-                layout.addWidget(config_btn)
-            if k.id == "pipewire_sample_rate":
-                config_btn = QPushButton("Configure Sample Rate...")
-                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
-                layout.addWidget(config_btn)
+            header = QLabel(f"<b>{k.title}</b>")
+            layout.addWidget(header)
 
-            btns = QDialogButtonBox(QDialogButtonBox.Close)
-            btns.rejected.connect(dialog.reject)
-            layout.addWidget(btns)
+            gui_status_label = QLabel(f"GUI status: {self._knob_statuses.get(k.id, 'unknown')}")
+            layout.addWidget(gui_status_label)
+
+            cli_status_label = QLabel("CLI status: (not run yet)")
+            layout.addWidget(cli_status_label)
+
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setPlainText("Click Refresh to run CLI status and preview checks.")
+            layout.addWidget(text)
+
+            btn_row = QHBoxLayout()
+            refresh_btn = QPushButton("Refresh")
+            refresh_btn.setFocusPolicy(Qt.NoFocus)
+            btn_row.addWidget(refresh_btn)
+            btn_row.addStretch(1)
+            close_btn = QPushButton("Close")
+            close_btn.setFocusPolicy(Qt.NoFocus)
+            close_btn.clicked.connect(dialog.reject)
+            btn_row.addWidget(close_btn)
+            layout.addLayout(btn_row)
+
+            def _render(payload: dict) -> None:
+                gui_status_label.setText(f"GUI status: {self._knob_statuses.get(k.id, 'unknown')}")
+                cli_status_label.setText(f"CLI status: {payload.get('cli_status', 'unknown')}")
+
+                checks = payload.get("live_checks") or []
+                text.setPlainText("\n".join(checks))
+
+            def _run_checks() -> None:
+                refresh_btn.setEnabled(False)
+                cli_status_label.setText("CLI status: running...")
+                text.setPlainText("Running CLI checks...")
+
+                def _task():
+                    return True, {
+                        "cli_status": _cli_status(),
+                        "live_checks": _collect_live_checks(),
+                    }, ""
+
+                worker = QueueTaskWorker(_task, parent=dialog)
+
+                def _on_done(success: bool, payload: object, message: str) -> None:
+                    refresh_btn.setEnabled(True)
+                    if not success:
+                        cli_status_label.setText(f"CLI status: error: {message or 'unknown'}")
+                        text.setPlainText(message or "CLI check failed")
+                        return
+                    if isinstance(payload, dict):
+                        _render(payload)
+                    else:
+                        text.setPlainText("CLI check returned no data.")
+
+                worker.finished.connect(_on_done)
+                worker.finished.connect(worker.deleteLater)
+                self._task_threads.append(worker)
+                worker.start()
+
+            refresh_btn.clicked.connect(_run_checks)
+            _run_checks()
 
             dialog.exec()
 
@@ -2332,22 +2561,19 @@ def main() -> int:
 
             self._run_knob_task(knob_id, "apply", _task)
 
-        def _on_queue_knob(self, knob_id: str) -> None:
+        def _on_queue_knob(self, knob_id: str, action: str) -> None:
             if knob_id in self._busy_knobs:
                 return
-            if knob_id in self._queued_knobs:
-                self._queued_knobs.remove(knob_id)
-                self._save_queue()
-                self._update_queue_ui()
-                self._populate()
-                return
-            self._queued_knobs.append(knob_id)
+            if self._queued_actions.get(knob_id) == action:
+                self._queued_actions.pop(knob_id, None)
+            else:
+                self._queued_actions[knob_id] = action
             self._save_queue()
             self._update_queue_ui()
             self._populate()
 
         def _on_apply_queue(self) -> None:
-            if not self._queued_knobs or self._queue_busy:
+            if not self._queued_actions or self._queue_busy:
                 return
             if self._busy_knobs:
                 QMessageBox.information(
@@ -2357,10 +2583,13 @@ def main() -> int:
                 )
                 return
             by_id = {k.id: k for k in self.registry}
-            queued = [kid for kid in self._queued_knobs if kid in by_id]
+            queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
             if not queued:
                 return
-            titles = [by_id[kid].title for kid in queued]
+            titles = []
+            for kid, action in queued:
+                verb = "Apply" if action == "apply" else "Reset"
+                titles.append(f"{verb}: {by_id[kid].title}")
             confirm = ConfirmDialog(titles, parent=self)
             confirm.exec()
             if not confirm.ok:
@@ -2369,26 +2598,57 @@ def main() -> int:
             self._queue_needs_reboot = self._queue_requires_reboot()
             self._queue_busy = True
             self._queue_inflight = list(queued)
-            for kid in queued:
+            for kid, _ in queued:
                 self._busy_knobs.add(kid)
                 self._knob_statuses[kid] = "running"
             self._update_queue_ui()
             self._populate()
 
-            root_ids = [kid for kid in queued if by_id[kid].requires_root]
-            user_ids = [kid for kid in queued if not by_id[kid].requires_root]
+            apply_ids = [kid for kid, action in queued if action == "apply"]
+            reset_ids = [kid for kid, action in queued if action == "reset"]
+            apply_root_ids = [kid for kid in apply_ids if by_id[kid].requires_root]
+            apply_user_ids = [kid for kid in apply_ids if not by_id[kid].requires_root]
+            reset_root_ids = [kid for kid in reset_ids if by_id[kid].requires_root]
+            reset_user_ids = [kid for kid in reset_ids if not by_id[kid].requires_root]
 
             def _task():
-                payload: dict[str, object] = {"user_result": None, "root_result": None}
+                payload: dict[str, object] = {
+                    "apply_user": None,
+                    "apply_root": None,
+                    "reset_user": None,
+                    "reset_root": None,
+                }
                 errors: list[str] = []
-                if user_ids:
+                if apply_user_ids:
                     try:
-                        payload["user_result"] = _run_worker_apply_user(user_ids)
+                        payload["apply_user"] = _run_worker_apply_user(apply_user_ids)
                     except Exception as e:
                         errors.append(str(e))
-                if root_ids:
+                if apply_root_ids:
                     try:
-                        payload["root_result"] = _run_worker_apply_pkexec(root_ids)
+                        payload["apply_root"] = _run_worker_apply_pkexec(apply_root_ids)
+                    except Exception as e:
+                        errors.append(str(e))
+                if reset_user_ids:
+                    try:
+                        result = _run_worker_restore_many_user(reset_user_ids)
+                        payload["reset_user"] = result
+                        if not result.get("success", True):
+                            errs = result.get("errors") or []
+                            if not errs:
+                                errs = [result.get("error") or "restore failed"]
+                            errors.extend(errs)
+                    except Exception as e:
+                        errors.append(str(e))
+                if reset_root_ids:
+                    try:
+                        result = _run_worker_restore_many_pkexec(reset_root_ids)
+                        payload["reset_root"] = result
+                        if not result.get("success", True):
+                            errs = result.get("errors") or []
+                            if not errs:
+                                errs = [result.get("error") or "restore failed"]
+                            errors.extend(errs)
                     except Exception as e:
                         errors.append(str(e))
                 if errors:
@@ -2512,7 +2772,7 @@ def main() -> int:
             self._populate()
 
         def _on_apply_queue_finished(self, success: bool, payload: object, message: str) -> None:
-            inflight = list(self._queue_inflight)
+            inflight = [kid for kid, _ in self._queue_inflight]
             self._queue_inflight = []
             for kid in inflight:
                 self._busy_knobs.discard(kid)
@@ -2520,9 +2780,12 @@ def main() -> int:
             self._task_threads = [w for w in self._task_threads if w.isRunning()]
 
             applied_ids: set[str] = set()
+            restored_ids: set[str] = set()
             if isinstance(payload, dict):
-                user_result = payload.get("user_result") or {}
-                root_result = payload.get("root_result") or {}
+                user_result = payload.get("apply_user") or {}
+                root_result = payload.get("apply_root") or {}
+                reset_user = payload.get("reset_user") or {}
+                reset_root = payload.get("reset_root") or {}
                 if user_result:
                     try:
                         self.state["last_user_txid"] = user_result.get("txid")
@@ -2535,6 +2798,10 @@ def main() -> int:
                         applied_ids.update(root_result.get("applied") or [])
                     except Exception:
                         pass
+                if reset_user:
+                    restored_ids.update(reset_user.get("restored") or [])
+                if reset_root:
+                    restored_ids.update(reset_root.get("restored") or [])
                 if user_result or root_result:
                     try:
                         save_state(self.state)
@@ -2545,6 +2812,7 @@ def main() -> int:
 
             if not success:
                 if message == _PKEXEC_CANCELLED:
+                    self._queue_needs_reboot = False
                     self._refresh_statuses()
                     self._populate()
                     return
@@ -2561,6 +2829,18 @@ def main() -> int:
 
             queue_reboot = self._queue_needs_reboot
             self._queue_needs_reboot = False
+            if applied_ids or restored_ids:
+                updated = False
+                for kid in list(self._queued_actions.keys()):
+                    action = self._queued_actions.get(kid)
+                    if action == "apply" and kid in applied_ids:
+                        self._queued_actions.pop(kid, None)
+                        updated = True
+                    elif action == "reset" and kid in restored_ids:
+                        self._queued_actions.pop(kid, None)
+                        updated = True
+                if updated:
+                    self._save_queue()
             self._refresh_statuses()
             if "rt_limits_audio_group" in applied_ids and not self._rt_limits_active():
                 self._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
@@ -2827,8 +3107,8 @@ def main() -> int:
             self.state["last_txid"] = None
             self.state["last_user_txid"] = None
             self.state["last_root_txid"] = None
-            self._queued_knobs = []
-            self.state["queued_knobs"] = []
+            self._queued_actions = {}
+            self.state["queued_actions"] = {}
             save_state(self.state)
             self._update_queue_ui()
 
