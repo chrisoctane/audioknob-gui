@@ -792,7 +792,7 @@ def main() -> int:
                     lock_reason = f"Install: {', '.join(missing_cmds)}"
                 
                 # Column 0: Info button
-                info_btn = QPushButton("?")
+                info_btn = QPushButton("i")
                 info_btn.setFixedWidth(28)
                 info_btn.setToolTip("Show details")
                 info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
@@ -816,12 +816,8 @@ def main() -> int:
 
                 # Column 2: Status (with color)
                 if locked:
-                    if group_pending_lock or not group_ok or reboot_gate_lock or reboot_dep_lock:
-                        status_item = QTableWidgetItem("🔒")
-                        status_item.setForeground(locked_fg)
-                    else:
-                        status_item = QTableWidgetItem("📦")
-                        status_item.setForeground(locked_fg)
+                    status_item = QTableWidgetItem("Locked")
+                    status_item.setForeground(locked_fg)
                     status_item.setToolTip(lock_reason)
                 elif not_applicable:
                     status_item = QTableWidgetItem("N/A")
