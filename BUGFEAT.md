@@ -13,6 +13,7 @@ This file collects future ideas only. Nothing here is committed work until it is
 
 ## Bugfix Backlog (Next Release)
 
+- Test bug: "this is a test, bug. fix me."
 - Kernel cmdline knobs should allow restoring to Tumbleweed defaults even if they were set before audioknob:
   - threadirqs
   - kernel audit
