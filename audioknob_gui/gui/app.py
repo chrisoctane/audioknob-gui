@@ -816,7 +816,7 @@ def main() -> int:
 
                 # Column 2: Status (with color)
                 if locked:
-                    status_item = QTableWidgetItem("Locked")
+                    status_item = QTableWidgetItem("[LOCK]")
                     status_item.setForeground(locked_fg)
                     status_item.setToolTip(lock_reason)
                 elif not_applicable:
