@@ -734,7 +734,7 @@ def main() -> int:
                 if k is REBOOT_HEADER:
                     header = QTableWidgetItem("Reboot required")
                     header.setFlags(Qt.ItemIsEnabled)
-                    header.setForeground(QColor("#f57c00"))
+                    header.setForeground(QColor("#9e9e9e"))
                     header.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                     self.table.setSpan(r, 0, 1, 7)
                     self.table.setItem(r, 0, header)
@@ -1057,6 +1057,10 @@ def main() -> int:
 
                 table_width = header_w + self.table.verticalHeader().width() + self.table.frameWidth() * 2
                 table_height = header_h + self.table.horizontalHeader().height() + self.table.frameWidth() * 2
+                if self.table.verticalScrollBar().isVisible():
+                    table_width += self.table.verticalScrollBar().sizeHint().width()
+                if self.table.horizontalScrollBar().isVisible():
+                    table_height += self.table.horizontalScrollBar().sizeHint().height()
 
                 extra_w = max(0, self.width() - self.table.width())
                 extra_h = max(0, self.height() - self.table.height())
