@@ -609,11 +609,9 @@ def main() -> int:
 
         def _update_reboot_banner(self) -> None:
             needs_reboot = any(v == "pending_reboot" for v in self._knob_statuses.values())
-            if needs_reboot:
-                self.reboot_banner.setText("Reboot required")
-                self.reboot_banner.setVisible(True)
-            else:
-                self.reboot_banner.setVisible(False)
+            self._needs_reboot = needs_reboot
+            # Banner text is now shown in the separator row, not the top bar.
+            self.reboot_banner.setVisible(False)
 
         def _make_apply_button(self, text: str = "Apply") -> QPushButton:
             """Create an Apply button."""
@@ -708,7 +706,8 @@ def main() -> int:
 
             for r, k in enumerate(ordered):
                 if k is None:
-                    sep = QTableWidgetItem("")
+                    sep_label = "Reboot required" if getattr(self, "_needs_reboot", False) else ""
+                    sep = QTableWidgetItem(sep_label)
                     sep.setFlags(Qt.ItemIsEnabled)
                     sep.setForeground(QColor("#9e9e9e"))
                     sep.setTextAlignment(Qt.AlignCenter)
