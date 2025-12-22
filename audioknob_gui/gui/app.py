@@ -2502,6 +2502,7 @@ def main() -> int:
 
             if not success:
                 if message == _PKEXEC_CANCELLED:
+                    self._queue_needs_reboot = False
                     self._refresh_statuses()
                     self._populate()
                     return
