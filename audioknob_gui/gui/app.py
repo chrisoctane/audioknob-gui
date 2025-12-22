@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import shutil
+import glob
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -566,6 +567,21 @@ def main() -> int:
             rt_ok = rt_soft == resource.RLIM_INFINITY or rt_soft >= 95
             mem_ok = mem_soft == resource.RLIM_INFINITY
             return rt_ok and mem_ok
+
+        def _is_process_running(self, names: list[str]) -> bool:
+            if shutil.which("pgrep"):
+                for name in names:
+                    r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True)
+                    if r.returncode == 0:
+                        return True
+            r = subprocess.run(["ps", "-eo", "comm"], capture_output=True, text=True)
+            if r.returncode != 0:
+                return False
+            for line in r.stdout.splitlines():
+                cmd = line.strip()
+                if cmd in names:
+                    return True
+            return False
 
         def _update_reboot_banner(self) -> None:
             needs_reboot = any(v == "pending_reboot" for v in self._knob_statuses.values())
@@ -1218,20 +1234,6 @@ def main() -> int:
 
             def _shell_single_quote(value: str) -> str:
                 return "'" + value.replace("'", "'\"'\"'") + "'"
-
-            def _is_qjackctl_running() -> bool:
-                if shutil.which("pgrep"):
-                    for name in ("qjackctl", "qjackctl6"):
-                        r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True)
-                        if r.returncode == 0:
-                            return True
-                r = subprocess.run(["ps", "-eo", "comm"], capture_output=True, text=True)
-                if r.returncode != 0:
-                    return False
-                for line in r.stdout.splitlines():
-                    if line.strip().startswith("qjackctl"):
-                        return True
-                return False
             
             # Build detailed info
             status = self._knob_statuses.get(k.id, "unknown")
@@ -1316,7 +1318,7 @@ def main() -> int:
                         extra_html += f"<p><b>Return code:</b> {returncode}</p>"
                 else:
                     extra_html += "<hr/><p><b>Last jitter test:</b> not run yet.</p>"
-            if k.id == "qjackctl_server_prefix_rt" and _is_qjackctl_running():
+            if k.id == "qjackctl_server_prefix_rt" and self._is_process_running(["qjackctl", "qjackctl6"]):
                 extra_html += (
                     "<hr/><p><b>Note:</b> QjackCtl reads its config on launch. "
                     "Quit and reopen QjackCtl to refresh the ServerPrefix in the UI.</p>"
@@ -1350,6 +1352,175 @@ def main() -> int:
             text.setReadOnly(True)
             text.setHtml(html)
             layout.addWidget(text)
+
+            status_box = QTextEdit()
+            status_box.setReadOnly(True)
+            status_box.setPlaceholderText("Click 'Run status check' for live status details.")
+            layout.addWidget(status_box)
+
+            def _run_status_check() -> None:
+                lines: list[str] = []
+                lines.append(f"knob_id: {k.id}")
+                lines.append(f"title: {k.title}")
+                lines.append(f"status: {self._knob_statuses.get(k.id, 'unknown')}")
+                lines.append("")
+
+                try:
+                    status_data = json.loads(
+                        subprocess.check_output(
+                            [
+                                sys.executable,
+                                "-m",
+                                "audioknob_gui.worker.cli",
+                                "--registry",
+                                _registry_path(),
+                                "status",
+                            ],
+                            text=True,
+                        )
+                    )
+                    item = next(
+                        (s for s in status_data.get("statuses", []) if s.get("knob_id") == k.id),
+                        None,
+                    )
+                    if item:
+                        lines.append("cli_status: " + json.dumps(item))
+                    else:
+                        lines.append("cli_status: not found")
+                except Exception as e:
+                    lines.append(f"cli_status: error: {e}")
+
+                kind = k.impl.kind if k.impl else ""
+                params = dict(k.impl.params) if k.impl else {}
+                lines.append("")
+                lines.append(f"kind: {kind}")
+
+                def _read_file(path: str, *, max_lines: int = 40) -> list[str]:
+                    p = Path(path).expanduser()
+                    if not p.exists():
+                        return [f"{path}: missing"]
+                    try:
+                        content = p.read_text(encoding="utf-8").splitlines()
+                    except Exception as e:
+                        return [f"{path}: unreadable: {e}"]
+                    if len(content) > max_lines:
+                        content = content[:max_lines] + ["... (truncated)"]
+                    return [f"{path}:"] + content
+
+                def _param_present(tokens: list[str], param: str) -> bool:
+                    if "=" in param:
+                        return param in tokens
+                    for token in tokens:
+                        if token == param or token.startswith(param + "="):
+                            return True
+                    return False
+
+                if kind == "qjackctl_server_prefix":
+                    path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
+                    lines.append("")
+                    lines.append("qjackctl_config:")
+                    for line in _read_file(path, max_lines=200):
+                        if any(key in line for key in ("DefPreset", "\\Server", "\\ServerPrefix")):
+                            lines.append(line)
+                elif kind == "systemd_unit_toggle":
+                    unit = str(params.get("unit", ""))
+                    if unit:
+                        for label, cmd in (
+                            ("is-enabled", ["systemctl", "is-enabled", unit]),
+                            ("is-active", ["systemctl", "is-active", unit]),
+                        ):
+                            r = subprocess.run(cmd, capture_output=True, text=True)
+                            lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                elif kind == "user_service_mask":
+                    unit = str(params.get("unit", ""))
+                    if unit:
+                        for label, cmd in (
+                            ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
+                            ("user is-active", ["systemctl", "--user", "is-active", unit]),
+                        ):
+                            r = subprocess.run(cmd, capture_output=True, text=True)
+                            lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                elif kind == "sysctl_conf":
+                    path = str(params.get("path", ""))
+                    if path:
+                        lines.extend(_read_file(path))
+                elif kind == "sysfs_glob_kv":
+                    pattern = str(params.get("glob", ""))
+                    if pattern:
+                        for p in sorted(glob.glob(pattern))[:8]:
+                            try:
+                                val = Path(p).read_text(encoding="utf-8").strip()
+                                lines.append(f"{p}: {val}")
+                            except Exception as e:
+                                lines.append(f"{p}: unreadable: {e}")
+                elif kind == "kernel_cmdline":
+                    param = str(params.get("param", ""))
+                    if param:
+                        try:
+                            running = Path("/proc/cmdline").read_text(encoding="utf-8")
+                            tokens = running.split()
+                            lines.append(f"/proc/cmdline has {param}: {_param_present(tokens, param)}")
+                        except Exception as e:
+                            lines.append(f"/proc/cmdline read error: {e}")
+                        try:
+                            from audioknob_gui.worker.ops import detect_distro
+                            import shlex
+                            distro = detect_distro()
+                            boot_path = distro.kernel_cmdline_file
+                            if boot_path:
+                                boot_text = Path(boot_path).read_text(encoding="utf-8")
+                                in_boot = False
+                                if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                                    in_boot = _param_present(boot_text.split(), param)
+                                elif distro.boot_system == "grub2":
+                                    for line in boot_text.splitlines():
+                                        if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                                            _, _, rhs = line.partition("=")
+                                            rhs = rhs.strip().strip('"')
+                                            try:
+                                                tokens = shlex.split(rhs)
+                                            except Exception:
+                                                tokens = rhs.split()
+                                            in_boot = _param_present(tokens, param)
+                                            break
+                                lines.append(f"{boot_path} has {param}: {in_boot}")
+                        except Exception as e:
+                            lines.append(f"boot config read error: {e}")
+                elif kind == "udev_rule":
+                    path = str(params.get("path", ""))
+                    if path:
+                        lines.extend(_read_file(path))
+                elif kind == "pipewire_conf":
+                    path = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
+                    lines.extend(_read_file(path))
+                elif kind == "group_membership":
+                    r = subprocess.run(["id"], capture_output=True, text=True)
+                    lines.append(f"id: {r.stdout.strip()}")
+                elif kind == "pam_limits_audio_group":
+                    path = str(params.get("path", ""))
+                    if path:
+                        lines.extend(_read_file(path))
+                    try:
+                        import resource
+                        rt_soft, rt_hard = resource.getrlimit(resource.RLIMIT_RTPRIO)
+                        mem_soft, mem_hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+                        lines.append(f"rtprio: {rt_soft}/{rt_hard}")
+                        lines.append(f"memlock: {mem_soft}/{mem_hard}")
+                    except Exception as e:
+                        lines.append(f"limits read error: {e}")
+                elif kind == "baloo_disable":
+                    cmd = "balooctl6" if shutil.which("balooctl6") else "balooctl"
+                    if shutil.which(cmd):
+                        r = subprocess.run([cmd, "status"], capture_output=True, text=True)
+                        lines.append(r.stdout.strip() or r.stderr.strip())
+                    else:
+                        lines.append("balooctl not found")
+
+                status_box.setPlainText("\n".join(lines))
+
+            status_btn = QPushButton("Run status check")
+            status_btn.clicked.connect(_run_status_check)
+            layout.addWidget(status_btn)
 
             # Add config button for knobs that support it
             if k.id == "qjackctl_server_prefix_rt":
@@ -1824,6 +1995,13 @@ def main() -> int:
                         save_state(self.state)
                 except Exception:
                     pass
+                if knob_id == "qjackctl_server_prefix_rt" and self._is_process_running(["qjackctl", "qjackctl6"]):
+                    QMessageBox.information(
+                        self,
+                        "QjackCtl Restart Needed",
+                        "QjackCtl reads its config on launch.\n\n"
+                        "Quit and reopen QjackCtl to refresh the ServerPrefix in the UI.",
+                    )
 
             if not success:
                 if message == _PKEXEC_CANCELLED:
@@ -1844,6 +2022,16 @@ def main() -> int:
                     QMessageBox.warning(self, "Reset Failed", message or "Unknown error")
 
             self._refresh_statuses()
+            if success and action == "apply" and knob_id == "rt_limits_audio_group":
+                if not self._rt_limits_active():
+                    self._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
+                    self._update_reboot_banner()
+                    QMessageBox.information(
+                        self,
+                        "Reboot Required",
+                        "RT Limits were applied, but your session does not have them yet.\n\n"
+                        "Log out/in or reboot to activate.",
+                    )
             self._populate()
 
         def _confirm_force_reset(self, knob_id: str) -> bool:

@@ -17,6 +17,7 @@
 - **RT config scanner** - 18 checks with score 0-100%
 - **Info popup** - Info column with "?" button shows details + config options
 - **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
+- **Info popup status check** - Run a live per-knob diagnostic snapshot
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Reset All** - reverts all changes to system defaults
@@ -55,6 +56,7 @@ Notes:
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
 - Knobs that lack a transaction can be force-reset via an explicit confirmation prompt.
+- QjackCtl RT now warns to restart QjackCtl when it is running; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
