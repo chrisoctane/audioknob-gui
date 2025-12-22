@@ -1044,13 +1044,35 @@ def main() -> int:
                 pass
 
         def _apply_window_constraints(self) -> None:
-            """Limit window growth to the content size."""
-            hint = self.sizeHint()
-            if not hint.isValid():
+            """Limit window growth to the content size (bounded by screen)."""
+            try:
+                from PySide6.QtCore import QTimer
+                from PySide6.QtGui import QGuiApplication
+
+                header_w = self.table.horizontalHeader().length()
+                header_h = self.table.verticalHeader().length()
+                if header_w <= 0 or header_h <= 0:
+                    QTimer.singleShot(0, self._apply_window_constraints)
+                    return
+
+                table_width = header_w + self.table.verticalHeader().width() + self.table.frameWidth() * 2
+                table_height = header_h + self.table.horizontalHeader().height() + self.table.frameWidth() * 2
+
+                extra_w = max(0, self.width() - self.table.width())
+                extra_h = max(0, self.height() - self.table.height())
+
+                desired_w = table_width + extra_w
+                desired_h = table_height + extra_h
+
+                screen = QGuiApplication.primaryScreen()
+                avail = screen.availableGeometry() if screen else None
+                if avail:
+                    desired_w = min(desired_w, avail.width())
+                    desired_h = min(desired_h, avail.height())
+
+                self.setMaximumSize(desired_w, desired_h)
+            except Exception:
                 return
-            max_w = max(self.minimumWidth(), hint.width())
-            max_h = max(self.minimumHeight(), hint.height())
-            self.setMaximumSize(max_w, max_h)
 
         def _apply_stylesheet(self) -> None:
             """Apply clean dark theme."""
