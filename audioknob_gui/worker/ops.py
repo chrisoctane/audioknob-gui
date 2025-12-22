@@ -1112,6 +1112,7 @@ def check_knob_status(knob: Any) -> str:
         # Check if user is in the required audio groups
         import grp
         import os
+        import pwd
         
         groups_to_check = params.get("groups", ["audio", "realtime"])
         if isinstance(groups_to_check, str):
@@ -1119,7 +1120,9 @@ def check_knob_status(knob: Any) -> str:
         
         try:
             user_gids = set(os.getgroups())
+            user_name = pwd.getpwuid(os.getuid()).pw_name
             in_count = 0
+            configured_count = 0
             exist_count = 0
             
             for group_name in groups_to_check:
@@ -1128,6 +1131,9 @@ def check_knob_status(knob: Any) -> str:
                     exist_count += 1
                     if gr.gr_gid in user_gids:
                         in_count += 1
+                    # Check configured membership even if session doesn't have it yet.
+                    if user_name in gr.gr_mem or gr.gr_gid == os.getgid():
+                        configured_count += 1
                 except KeyError:
                     # Group doesn't exist on this system - skip it
                     pass
@@ -1138,7 +1144,9 @@ def check_knob_status(knob: Any) -> str:
             
             if in_count == exist_count:
                 return "applied"
-            elif in_count > 0:
+            if configured_count == exist_count:
+                return "pending_reboot"
+            if in_count > 0 or configured_count > 0:
                 return "partial"
             return "not_applied"
         except Exception:
