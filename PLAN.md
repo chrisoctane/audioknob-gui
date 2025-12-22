@@ -177,7 +177,7 @@ In `gui/app.py` → `_populate()`:
 
 | Knob type | Status | Column 5 (Action) | Column 0 (Details) |
 |-----------|--------|-------------------|-----------------|
-| Not applied | — | "Apply" button | "?" button |
+| Not applied | — | "Apply" button (queues) | "?" button |
 | Applied | ✓ Applied | "Reset" button | "?" button |
 | Not implemented | — | "—" disabled | "?" button |
 | Missing groups | 🔒 | "🔒" disabled | "?" button |
@@ -202,11 +202,12 @@ if status == "applied":
     btn.clicked.connect(lambda _, kid=k.id: self._on_reset_knob(kid, root))
 else:
     btn = QPushButton("Apply")
-    btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
+    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid))
 self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
+Apply now queues the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot.
 If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (supported for `systemd_unit_toggle` and `kernel_cmdline` knobs).
 Reboot-required knobs are disabled until the user enables the "Enable reboot-required changes" toggle.
 Knobs requiring audio groups stay locked while group membership is pending reboot.
@@ -371,7 +372,7 @@ diff config/registry.schema.json audioknob_gui/data/registry.schema.json || echo
 1. **Everything undoable** - Transactions with backups
 2. **Distro-aware** - Don't assume one way works everywhere
 3. **User knows best** - Show status, let them choose
-4. **One click actions** - No dropdowns, no batch mode, no preview step
+4. **One click actions** - No dropdowns, queue + apply is explicit and user-driven
 5. **Lock until ready** - Missing groups? 🔒. Missing packages? 📦 Install.
 6. **Docs match code** - `PROJECT_STATE.md` and `PLAN.md` are first-class deliverables
 
@@ -382,7 +383,7 @@ diff config/registry.schema.json audioknob_gui/data/registry.schema.json || echo
 We are explicitly NOT doing these unless the docs are updated first:
 
 - A background daemon or always-on service
-- Automatic “apply everything” / batch apply workflows (the UX is per-knob, one-click)
+- Automatic “apply everything” / batch apply workflows without an explicit queue + apply action
 - Auto-modifying system settings without an explicit user click + visible status change
 - Complex multi-step wizards or hidden state machines
 - Network/cloud features
