@@ -442,7 +442,9 @@ def main() -> int:
 
             # Header
             top = QHBoxLayout()
-            top.addWidget(QLabel("Font:"))
+            self.header_layout = top
+            self.font_label = QLabel("Font:")
+            top.addWidget(self.font_label)
             self.font_spinner = QSpinBox()
             self.font_spinner.setRange(8, 24)
             self.font_spinner.setValue(self.state.get("font_size", 11))
@@ -1057,24 +1059,34 @@ def main() -> int:
 
                 table_width = header_w + self.table.verticalHeader().width() + self.table.frameWidth() * 2
                 table_height = header_h + self.table.horizontalHeader().height() + self.table.frameWidth() * 2
-                if self.table.verticalScrollBar().isVisible():
-                    table_width += self.table.verticalScrollBar().sizeHint().width()
-                if self.table.horizontalScrollBar().isVisible():
-                    table_height += self.table.horizontalScrollBar().sizeHint().height()
 
-                extra_w = max(0, self.width() - self.table.width())
-                extra_h = max(0, self.height() - self.table.height())
+                layout = self.centralWidget().layout() if self.centralWidget() else None
+                margins = layout.contentsMargins() if layout else None
+                extra_w = (margins.left() + margins.right()) if margins else 16
+                extra_h = (margins.top() + margins.bottom()) if margins else 16
+                spacing = layout.spacing() if layout else 8
 
-                desired_w = table_width + extra_w
-                desired_h = table_height + extra_h
+                header_hint_w = self.header_layout.sizeHint().width() if hasattr(self, "header_layout") else 0
+                header_hint_h = self.header_layout.sizeHint().height() if hasattr(self, "header_layout") else 0
+
+                full_w = max(table_width, header_hint_w) + extra_w
+                full_h = header_hint_h + spacing + table_height + extra_h
 
                 screen = QGuiApplication.primaryScreen()
                 avail = screen.availableGeometry() if screen else None
-                if avail:
-                    desired_w = min(desired_w, avail.width())
-                    desired_h = min(desired_h, avail.height())
+                max_w = min(full_w, avail.width()) if avail else full_w
+                max_h = min(full_h, avail.height()) if avail else full_h
 
-                self.setMaximumSize(desired_w, desired_h)
+                if max_h < full_h:
+                    max_w += self.table.verticalScrollBar().sizeHint().width()
+                    if avail:
+                        max_w = min(max_w, avail.width())
+                if max_w < full_w:
+                    max_h += self.table.horizontalScrollBar().sizeHint().height()
+                    if avail:
+                        max_h = min(max_h, avail.height())
+
+                self.setMaximumSize(max_w, max_h)
             except Exception:
                 return
 
