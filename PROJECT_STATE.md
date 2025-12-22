@@ -108,6 +108,7 @@ This is the enforcement layer. Any agent making changes MUST satisfy this contra
 
 - **Behavioral change?** Update the relevant sections in this file (and add a “Bugs Fixed (Prevent Regression)” entry if applicable).
 - **User workflow changed?** Update `PLAN.md`.
+- **Backlog change?** Update `BUGFEAT.md` and keep the `README.md` backlog section in sync.
 - **Touched registry/schema?**
   - Update canonical: `config/registry.json`, `config/registry.schema.json`
   - Sync packaged: `audioknob_gui/data/registry.json`, `audioknob_gui/data/registry.schema.json`
