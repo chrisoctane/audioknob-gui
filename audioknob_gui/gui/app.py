@@ -780,7 +780,7 @@ def main() -> int:
                 if group_pending_lock:
                     lock_reason = "Reboot required after group changes"
                 elif reboot_dep_lock:
-                    lock_reason = "Enable reboot-required changes"
+                    lock_reason = f"Requires groups: {', '.join(k.requires_groups)} (enable reboot-required changes)"
                 elif not group_ok:
                     lock_reason = f"Join groups: {', '.join(k.requires_groups)}"
                 elif reboot_gate_lock:
