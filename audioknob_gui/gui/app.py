@@ -719,22 +719,33 @@ def main() -> int:
                 col = int(self._sort_column)
                 reboot_knobs = sorted(reboot_knobs, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
                 other_knobs = sorted(other_knobs, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
-            ordered.extend(reboot_knobs)
+            REBOOT_HEADER = object()
+            SECTION_SEPARATOR = object()
+            if reboot_knobs:
+                ordered.append(REBOOT_HEADER)
+                ordered.extend(reboot_knobs)
             if reboot_knobs and other_knobs:
-                ordered.append(None)  # separator
+                ordered.append(SECTION_SEPARATOR)
             ordered.extend(other_knobs)
 
             self.table.setRowCount(len(ordered))
 
             for r, k in enumerate(ordered):
-                if k is None:
-                    sep_label = "Reboot required" if getattr(self, "_needs_reboot", False) else ""
-                    sep = QTableWidgetItem(sep_label)
+                if k is REBOOT_HEADER:
+                    header = QTableWidgetItem("Reboot required")
+                    header.setFlags(Qt.ItemIsEnabled)
+                    header.setForeground(QColor("#f57c00"))
+                    header.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                    self.table.setSpan(r, 0, 1, 7)
+                    self.table.setItem(r, 0, header)
+                    for c in range(1, 7):
+                        self.table.removeCellWidget(r, c)
+                        self.table.setItem(r, c, QTableWidgetItem(""))
+                    continue
+                if k is SECTION_SEPARATOR:
+                    sep = QTableWidgetItem("")
                     sep.setFlags(Qt.ItemIsEnabled)
-                    if sep_label:
-                        sep.setForeground(QColor("#f57c00"))
-                    else:
-                        sep.setForeground(QColor("#9e9e9e"))
+                    sep.setForeground(QColor("#9e9e9e"))
                     sep.setTextAlignment(Qt.AlignCenter)
                     self.table.setSpan(r, 0, 1, 7)
                     self.table.setItem(r, 0, sep)
@@ -755,12 +766,15 @@ def main() -> int:
                 commands_ok = self._knob_commands_ok(k)
                 missing_cmds = self._knob_missing_commands(k)
                 reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
-                locked = not group_ok or not commands_ok or reboot_gate_lock
+                reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
+                locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock
                 
                 # Determine lock reason
                 lock_reason = ""
                 if group_pending_lock:
                     lock_reason = "Reboot required after group changes"
+                elif reboot_dep_lock:
+                    lock_reason = "Enable reboot-required changes"
                 elif not group_ok:
                     lock_reason = f"Join groups: {', '.join(k.requires_groups)}"
                 elif reboot_gate_lock:
@@ -785,7 +799,7 @@ def main() -> int:
 
                 # Column 2: Status (with color)
                 if locked:
-                    if group_pending_lock or not group_ok or reboot_gate_lock:
+                    if group_pending_lock or not group_ok or reboot_gate_lock or reboot_dep_lock:
                         status_item = QTableWidgetItem("🔒")
                         status_item.setForeground(QColor("#ff9800"))
                     else:
@@ -826,6 +840,11 @@ def main() -> int:
                     self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
                 elif group_pending_lock:
+                    btn = QPushButton("🔒")
+                    btn.setEnabled(False)
+                    btn.setToolTip(lock_reason)
+                    self.table.setCellWidget(r, 5, btn)
+                elif reboot_dep_lock:
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
@@ -947,7 +966,7 @@ def main() -> int:
                 elif k.id == "qjackctl_server_prefix_rt":
                     # Normal apply/reset button in Action column
                     status = self._knob_statuses.get(k.id, "unknown")
-                    if status in ("applied", "pending_reboot"):
+                    if status in ("applied", "pending_reboot", "partial"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id, root=k.requires_root: self._on_reset_knob(kid, root))
                     else:
@@ -991,6 +1010,7 @@ def main() -> int:
                 self.table.resizeRowsToContents()
             except Exception:
                 pass
+            self._apply_window_constraints()
 
         def _apply_font_size(self, size: int) -> None:
             """Apply font size to the application."""
@@ -1019,8 +1039,18 @@ def main() -> int:
                 # Reflow rows so widgets/text don't clip at larger font sizes.
                 self.table.resizeRowsToContents()
                 self.table.viewport().update()
+                self._apply_window_constraints()
             except Exception:
                 pass
+
+        def _apply_window_constraints(self) -> None:
+            """Limit window growth to the content size."""
+            hint = self.sizeHint()
+            if not hint.isValid():
+                return
+            max_w = max(self.minimumWidth(), hint.width())
+            max_h = max(self.minimumHeight(), hint.height())
+            self.setMaximumSize(max_w, max_h)
 
         def _apply_stylesheet(self) -> None:
             """Apply clean dark theme."""
