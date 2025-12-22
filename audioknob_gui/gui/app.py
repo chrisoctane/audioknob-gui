@@ -654,7 +654,22 @@ def main() -> int:
 
         def _apply_queue_button_state(self, btn: QPushButton, knob_id: str) -> None:
             if knob_id in self._queued_knobs:
+                btn.setStyleSheet(
+                    "QPushButton {"
+                    " background-color: #5f8f6b;"
+                    " color: #e0e0e0;"
+                    " border: 1px solid #6b9a76;"
+                    "}"
+                    "QPushButton:hover {"
+                    " background-color: #699a76;"
+                    "}"
+                    "QPushButton:pressed {"
+                    " background-color: #4e7a5a;"
+                    "}"
+                )
                 btn.setToolTip("Queued for apply. Click to remove from queue.")
+            else:
+                btn.setStyleSheet("")
 
         def _refresh_statuses(self) -> None:
             """Fetch current status of all knobs."""
@@ -745,24 +760,6 @@ def main() -> int:
             # Ensure button labels don't clip at common font sizes and narrow columns.
             btn.setMinimumWidth(80)
             btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-            btn.setStyleSheet(
-                "QPushButton {"
-                " background-color: #5f8f6b;"
-                " color: #e0e0e0;"
-                " border: 1px solid #6b9a76;"
-                "}"
-                "QPushButton:hover {"
-                " background-color: #699a76;"
-                "}"
-                "QPushButton:pressed {"
-                " background-color: #4e7a5a;"
-                "}"
-                "QPushButton:disabled {"
-                " background-color: #3a3a3a;"
-                " color: #666666;"
-                " border: 1px solid #555555;"
-                "}"
-            )
             return btn
 
         def _make_reset_button(self, text: str = "Reset") -> QPushButton:
@@ -770,24 +767,6 @@ def main() -> int:
             btn = QPushButton(text)
             btn.setMinimumWidth(80)
             btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-            btn.setStyleSheet(
-                "QPushButton {"
-                " background-color: #5f7d97;"
-                " color: #e0e0e0;"
-                " border: 1px solid #6b8aa3;"
-                "}"
-                "QPushButton:hover {"
-                " background-color: #6a88a3;"
-                "}"
-                "QPushButton:pressed {"
-                " background-color: #4f6b80;"
-                "}"
-                "QPushButton:disabled {"
-                " background-color: #3a3a3a;"
-                " color: #666666;"
-                " border: 1px solid #555555;"
-                "}"
-            )
             return btn
 
         def _make_action_button(self, text: str) -> QPushButton:
