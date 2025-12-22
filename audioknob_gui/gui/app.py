@@ -709,7 +709,10 @@ def main() -> int:
                     sep_label = "Reboot required" if getattr(self, "_needs_reboot", False) else ""
                     sep = QTableWidgetItem(sep_label)
                     sep.setFlags(Qt.ItemIsEnabled)
-                    sep.setForeground(QColor("#9e9e9e"))
+                    if sep_label:
+                        sep.setForeground(QColor("#f57c00"))
+                    else:
+                        sep.setForeground(QColor("#9e9e9e"))
                     sep.setTextAlignment(Qt.AlignCenter)
                     self.table.setSpan(r, 0, 1, 7)
                     self.table.setItem(r, 0, sep)
