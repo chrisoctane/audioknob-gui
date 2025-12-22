@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shlex
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -1236,6 +1237,132 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
     return 0 if not errors else 1
 
 
+def _force_reset_systemd(unit: str, action: str) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import systemd_disable_now, systemd_enable_now
+
+    if action in ("disable_now", "disable"):
+        systemd_enable_now(unit, start=True)
+        return True, f"Enabled {unit}"
+    if action in ("enable_now", "enable"):
+        systemd_disable_now(unit)
+        return True, f"Disabled {unit}"
+    return False, f"Unsupported systemd action: {action}"
+
+
+def _force_reset_kernel_cmdline(param: str) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import detect_distro
+
+    distro = detect_distro()
+    if distro.boot_system == "unknown" or not distro.kernel_cmdline_file:
+        return False, "No kernel cmdline file detected"
+
+    path = Path(distro.kernel_cmdline_file)
+    try:
+        before = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    def _remove_param(tokens: list[str]) -> list[str]:
+        if not param:
+            return tokens
+        if "=" in param:
+            return [t for t in tokens if t != param]
+        return [t for t in tokens if t != param and not t.startswith(param + "=")]
+
+    after = before
+    if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+        tokens = before.strip().split()
+        new_tokens = _remove_param(tokens)
+        after = " ".join(new_tokens).strip() + ("\n" if before.endswith("\n") or new_tokens else "")
+    elif distro.boot_system == "grub2":
+        lines = before.splitlines()
+        out_lines: list[str] = []
+        updated = False
+        for line in lines:
+            if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                _, _, rhs = line.partition("=")
+                rhs = rhs.strip()
+                if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                    inner = rhs[1:-1]
+                else:
+                    inner = rhs
+                try:
+                    tokens = shlex.split(inner)
+                except Exception:
+                    tokens = inner.split()
+                new_tokens = _remove_param(tokens)
+                new_rhs = " ".join(new_tokens)
+                out_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{new_rhs}"')
+                updated = True
+            else:
+                out_lines.append(line)
+        if not updated:
+            return False, "GRUB_CMDLINE_LINUX_DEFAULT not found"
+        after = "\n".join(out_lines)
+        if after and not after.endswith("\n"):
+            after += "\n"
+    else:
+        return False, f"Unsupported boot system: {distro.boot_system}"
+
+    try:
+        path.write_text(after, encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to write {path}: {e}"
+
+    if distro.kernel_cmdline_update_cmd:
+        try:
+            subprocess.run(distro.kernel_cmdline_update_cmd, check=False, capture_output=True, text=True)
+        except Exception:
+            pass
+
+    return True, f"Removed {param} from {path}"
+
+
+def cmd_force_reset_knob(args: argparse.Namespace) -> int:
+    knob_id = args.knob_id
+    reg = load_registry(args.registry)
+    by_id = {k.id: k for k in reg}
+    k = by_id.get(knob_id)
+    if k is None:
+        print(json.dumps({"schema": 1, "success": False, "error": f"Unknown knob id: {knob_id}"}, indent=2))
+        return 1
+
+    if k.requires_root and os.geteuid() != 0:
+        print(json.dumps({
+            "schema": 1,
+            "success": False,
+            "error": f"Knob {knob_id} requires root; run with pkexec",
+        }, indent=2))
+        return 1
+
+    if not k.impl:
+        print(json.dumps({"schema": 1, "success": False, "error": "Knob not implemented"}, indent=2))
+        return 1
+
+    kind = k.impl.kind
+    params = k.impl.params
+    success = False
+    message = ""
+
+    if kind == "systemd_unit_toggle":
+        unit = str(params.get("unit", ""))
+        action = str(params.get("action", ""))
+        success, message = _force_reset_systemd(unit, action)
+    elif kind == "kernel_cmdline":
+        param = str(params.get("param", ""))
+        success, message = _force_reset_kernel_cmdline(param)
+    else:
+        message = f"Force reset not supported for kind: {kind}"
+
+    print(json.dumps({
+        "schema": 1,
+        "success": success,
+        "knob_id": knob_id,
+        "message": message,
+    }, indent=2))
+    return 0 if success else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     logger = _setup_worker_logging()
     p = argparse.ArgumentParser(prog="audioknob-worker")
@@ -1287,6 +1414,10 @@ def main(argv: list[str] | None = None) -> int:
     srk = sub.add_parser("restore-knob", help="Restore a specific knob to its original state")
     srk.add_argument("knob_id", help="ID of the knob to restore")
     srk.set_defaults(func=cmd_restore_knob)
+
+    sfr = sub.add_parser("force-reset-knob", help="Force reset a knob without a transaction")
+    sfr.add_argument("knob_id", help="ID of the knob to force reset")
+    sfr.set_defaults(func=cmd_force_reset_knob)
 
     args = p.parse_args(argv)
     try:

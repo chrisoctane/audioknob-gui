@@ -66,7 +66,7 @@ Or launch it from your desktop environment’s application menu:
 - **Name**: “AudioKnob GUI”
 - **Desktop entry**: `/usr/share/applications/audioknob-gui.desktop`
 
-### 6) (Optional) Refresh & rebuild (pull latest)
+### 6) Optional: Refresh & rebuild (pull latest)
 
 ```bash
 cd ~/audioknob-gui

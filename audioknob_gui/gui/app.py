@@ -141,6 +141,46 @@ def _run_worker_restore_pkexec(txid: str) -> dict:
     return json.loads(p.stdout)
 
 
+def _run_worker_force_reset_pkexec(knob_id: str) -> dict:
+    if not _pkexec_available():
+        raise RuntimeError("pkexec not found")
+
+    worker = _pick_root_worker_path()
+    argv = [
+        "pkexec",
+        worker,
+        "--registry",
+        _registry_path(),
+        "force-reset-knob",
+        knob_id,
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        log_path = _worker_log_path(is_root=True)
+        msg = p.stderr.strip() or p.stdout.strip() or "worker force reset failed"
+        if _is_pkexec_cancel(msg):
+            raise RuntimeError(_PKEXEC_CANCELLED)
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
+    return json.loads(p.stdout)
+
+
+def _run_worker_force_reset_user(knob_id: str) -> dict:
+    argv = [
+        sys.executable,
+        "-m",
+        "audioknob_gui.worker.cli",
+        "--registry",
+        _registry_path(),
+        "force-reset-knob",
+        knob_id,
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        msg = p.stderr.strip() or p.stdout.strip() or "worker force reset failed"
+        raise RuntimeError(msg)
+    return json.loads(p.stdout)
+
+
 def _state_path() -> Path:
     xdg_state = os.environ.get("XDG_STATE_HOME")
     if xdg_state:
@@ -1740,13 +1780,11 @@ def main() -> int:
                     self._populate()
                     return
                 if action == "reset" and _is_no_transaction_error(message):
-                    QMessageBox.information(
-                        self,
-                        "Nothing to reset",
-                        "No transaction recorded for this knob.",
-                    )
-                    self._refresh_statuses()
-                    self._populate()
+                    if self._confirm_force_reset(knob_id):
+                        self._run_force_reset(knob_id)
+                    else:
+                        self._refresh_statuses()
+                        self._populate()
                     return
                 if action == "apply":
                     _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, message)
@@ -1756,6 +1794,32 @@ def main() -> int:
 
             self._refresh_statuses()
             self._populate()
+
+        def _confirm_force_reset(self, knob_id: str) -> bool:
+            k = next((k for k in self.registry if k.id == knob_id), None)
+            if not k:
+                return False
+            msg = (
+                "No transaction was recorded for this knob.\n\n"
+                "Force reset will attempt to revert the setting to system defaults "
+                "even if it was not applied by this app.\n\n"
+                "Continue?"
+            )
+            return QMessageBox.question(self, "Force reset", msg) == QMessageBox.Yes
+
+        def _run_force_reset(self, knob_id: str) -> None:
+            k = next((k for k in self.registry if k.id == knob_id), None)
+            if not k:
+                return
+
+            def _task():
+                if k.requires_root:
+                    result = _run_worker_force_reset_pkexec(knob_id)
+                else:
+                    result = _run_worker_force_reset_user(knob_id)
+                return True, {"result": result}, result.get("message", "")
+
+            self._run_knob_task(knob_id, "force_reset", _task)
 
         def _restore_knob_internal(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
             """Restore a single knob to its original state."""

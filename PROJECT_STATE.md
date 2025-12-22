@@ -10,7 +10,7 @@
 
 ### What Works
 - **23 knobs defined** (ALL 23 IMPLEMENTED)
-- **Per-knob Apply/Reset buttons** - one click to apply or undo
+- **Per-knob Apply/Reset buttons** - one click to apply or reset
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
@@ -53,6 +53,7 @@ Notes:
 - Reset errors now surface detailed messages instead of a generic "Unknown error".
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
+- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

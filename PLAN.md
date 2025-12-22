@@ -206,6 +206,7 @@ self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 ```
 
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
+If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (supported for `systemd_unit_toggle` and `kernel_cmdline` knobs).
 
 ### Read-only info
 ```python
