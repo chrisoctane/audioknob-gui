@@ -817,6 +817,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
     
     # Track which files we've already reset (avoid duplicate resets)
     reset_paths: set[str] = set()
+    needs_bootloader_update = False
     
     # Process all transactions (newest first - they're already sorted)
     for tx_info in all_txs:
@@ -866,6 +867,8 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         
         # Handle effects (sysfs, systemd, user services, etc.)
         effects = tx_info.get("effects", [])
+        if any(e.get("kind") == "kernel_cmdline" for e in effects):
+            needs_bootloader_update = True
         
         if scope == "root" and effects and os.geteuid() == 0:
             sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
@@ -931,6 +934,49 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             if needs_root_reset:
                 break
     
+    # If kernel cmdline was reset, update the bootloader so changes stick after reboot.
+    if scope_filter in ("root", "all") and os.geteuid() == 0:
+        try:
+            from audioknob_gui.worker.ops import detect_distro
+            distro = detect_distro()
+            if distro.kernel_cmdline_file and distro.kernel_cmdline_file in reset_paths:
+                needs_bootloader_update = True
+            if needs_bootloader_update:
+                if distro.kernel_cmdline_update_cmd:
+                    result = subprocess.run(
+                        distro.kernel_cmdline_update_cmd,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode != 0:
+                        cmd_str = " ".join(distro.kernel_cmdline_update_cmd)
+                        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                        errors.append(
+                            "Bootloader update failed after reset.\n"
+                            f"Command: {cmd_str}\n"
+                            f"Error: {detail}\n"
+                            "Run the command manually and reboot."
+                        )
+                    else:
+                        results.append({
+                            "path": "(bootloader update)",
+                            "strategy": "kernel_cmdline",
+                            "success": True,
+                            "message": f"Ran: {' '.join(distro.kernel_cmdline_update_cmd)}",
+                        })
+                elif distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                    errors.append(
+                        "Kernel cmdline reset but no bootloader update command is configured.\n"
+                        "Run sdbootutil update-all-entries and reboot."
+                    )
+                elif distro.boot_system == "grub2":
+                    errors.append(
+                        "Kernel cmdline reset but no bootloader update command is configured.\n"
+                        "Run grub2-mkconfig -o /boot/grub2/grub.cfg (or your distro's update-grub) and reboot."
+                    )
+        except Exception as ex:
+            errors.append(f"Bootloader update check failed: {ex}")
+
     print(json.dumps({
         "schema": 1,
         "message": f"Reset {len(reset_paths)} files to system defaults",
@@ -1261,6 +1307,45 @@ def cmd_restore_knob(args: argparse.Namespace) -> int:
     
     if user_effects_restored:
         restored.append(f"(user effects: {user_effects_restored})")
+
+    # If kernel cmdline was restored, update the bootloader so changes stick after reboot.
+    if scope == "root" and os.geteuid() == 0:
+        try:
+            from audioknob_gui.worker.ops import detect_distro
+            distro = detect_distro()
+            needs_bootloader_update = any(e.get("kind") == "kernel_cmdline" for e in effects)
+            if distro.kernel_cmdline_file and distro.kernel_cmdline_file in restored:
+                needs_bootloader_update = True
+            if needs_bootloader_update:
+                if distro.kernel_cmdline_update_cmd:
+                    result = subprocess.run(
+                        distro.kernel_cmdline_update_cmd,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if result.returncode != 0:
+                        cmd_str = " ".join(distro.kernel_cmdline_update_cmd)
+                        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                        errors.append(
+                            "Bootloader update failed after reset.\n"
+                            f"Command: {cmd_str}\n"
+                            f"Error: {detail}\n"
+                            "Run the command manually and reboot."
+                        )
+                    else:
+                        restored.append(f"(bootloader update: {' '.join(distro.kernel_cmdline_update_cmd)})")
+                elif distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                    errors.append(
+                        "Kernel cmdline reset but no bootloader update command is configured.\n"
+                        "Run sdbootutil update-all-entries and reboot."
+                    )
+                elif distro.boot_system == "grub2":
+                    errors.append(
+                        "Kernel cmdline reset but no bootloader update command is configured.\n"
+                        "Run grub2-mkconfig -o /boot/grub2/grub.cfg (or your distro's update-grub) and reboot."
+                    )
+        except Exception as ex:
+            errors.append(f"Bootloader update check failed: {ex}")
     
     print(json.dumps({
         "schema": 1,
