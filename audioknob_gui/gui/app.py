@@ -463,6 +463,12 @@ def main() -> int:
             self.reboot_toggle.toggled.connect(self._on_reboot_toggle)
             top.addWidget(self.reboot_toggle)
 
+            self.reboot_button = QPushButton("Reboot")
+            self.reboot_button.setToolTip("Restart the system to apply pending changes")
+            self.reboot_button.clicked.connect(self._on_reboot_now)
+            self.reboot_button.setVisible(False)
+            top.addWidget(self.reboot_button)
+
             self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
             top.addWidget(self.btn_reset)
@@ -575,6 +581,9 @@ def main() -> int:
             status = self._knob_statuses.get("rt_limits_audio_group")
             if status == "applied" and not self._rt_limits_active():
                 self._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
+            status = self._knob_statuses.get("audio_group_membership")
+            if status == "applied" and not self._audio_groups_active():
+                self._knob_statuses["audio_group_membership"] = "pending_reboot"
 
         def _rt_limits_active(self) -> bool:
             try:
@@ -591,6 +600,17 @@ def main() -> int:
             rt_ok = rt_soft == resource.RLIM_INFINITY or rt_soft >= 95
             mem_ok = mem_soft == resource.RLIM_INFINITY
             return rt_ok and mem_ok
+
+        def _audio_groups_active(self) -> bool:
+            try:
+                from audioknob_gui.platform.detect import get_missing_groups
+            except Exception:
+                return True
+
+            try:
+                return len(get_missing_groups()) == 0
+            except Exception:
+                return True
 
         def _is_process_running(self, names: list[str]) -> bool:
             if shutil.which("pgrep"):
@@ -612,6 +632,8 @@ def main() -> int:
             self._needs_reboot = needs_reboot
             # Banner text is now shown in the separator row, not the top bar.
             self.reboot_banner.setVisible(False)
+            self.reboot_button.setVisible(needs_reboot)
+            self.reboot_button.setEnabled(needs_reboot)
 
         def _make_apply_button(self, text: str = "Apply") -> QPushButton:
             """Create an Apply button."""
@@ -1076,6 +1098,21 @@ def main() -> int:
             self.state["enable_reboot_knobs"] = bool(enabled)
             save_state(self.state)
             self._populate()
+
+        def _on_reboot_now(self) -> None:
+            if not getattr(self, "_needs_reboot", False):
+                return
+            msg = (
+                "Restart now to apply pending changes?\n\n"
+                "Unsaved work in other apps may be lost."
+            )
+            if QMessageBox.question(self, "Reboot", msg) != QMessageBox.Yes:
+                return
+            try:
+                _run_pkexec_command(["systemctl", "reboot"])
+            except RuntimeError as e:
+                if str(e) != _PKEXEC_CANCELLED:
+                    QMessageBox.warning(self, "Reboot Failed", str(e))
 
         def _on_header_sort(self, column: int) -> None:
             if self._sort_column == column:
