@@ -260,6 +260,8 @@ def load_state() -> dict:
             data["pipewire_sample_rate"] = None
         if "jitter_test_last" not in data:
             data["jitter_test_last"] = None
+        if "enable_reboot_knobs" not in data:
+            data["enable_reboot_knobs"] = False
         if data.get("jitter_test_last") is not None and not isinstance(data.get("jitter_test_last"), dict):
             data["jitter_test_last"] = None
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
@@ -454,6 +456,12 @@ def main() -> int:
             self.reboot_banner.setStyleSheet("color: #f57c00; font-weight: bold;")
             self.reboot_banner.setVisible(False)
             top.addWidget(self.reboot_banner)
+
+            self.reboot_toggle = QCheckBox("Enable reboot-required changes")
+            self.reboot_toggle.setChecked(bool(self.state.get("enable_reboot_knobs", False)))
+            self.reboot_toggle.setToolTip("Unlock knobs that require a reboot/log-out to take effect")
+            self.reboot_toggle.toggled.connect(self._on_reboot_toggle)
+            top.addWidget(self.reboot_toggle)
 
             self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
@@ -654,18 +662,33 @@ def main() -> int:
             # Disable sorting during population to avoid issues
             self.table.setSortingEnabled(False)
             self.table.setRowCount(len(self.registry))
-            
+            reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
+            group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
+
             for r, k in enumerate(self.registry):
+                status = self._knob_statuses.get(k.id, "unknown")
+                busy = k.id in self._busy_knobs
+                display_status = "running" if busy else status
+                not_applicable = (status == "not_applicable")
+
                 # Check requirements
                 group_ok = self._knob_group_ok(k)
+                group_pending_lock = bool(k.requires_groups) and group_pending
+                if group_pending_lock:
+                    group_ok = False
                 commands_ok = self._knob_commands_ok(k)
                 missing_cmds = self._knob_missing_commands(k)
-                locked = not group_ok or not commands_ok
+                reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
+                locked = not group_ok or not commands_ok or reboot_gate_lock
                 
                 # Determine lock reason
                 lock_reason = ""
-                if not group_ok:
+                if group_pending_lock:
+                    lock_reason = "Reboot required after group changes"
+                elif not group_ok:
                     lock_reason = f"Join groups: {', '.join(k.requires_groups)}"
+                elif reboot_gate_lock:
+                    lock_reason = "Enable reboot-required changes"
                 elif not commands_ok:
                     lock_reason = f"Install: {', '.join(missing_cmds)}"
                 
@@ -685,13 +708,8 @@ def main() -> int:
                 self.table.setItem(r, 1, title_item)
 
                 # Column 2: Status (with color)
-                status = self._knob_statuses.get(k.id, "unknown")
-                busy = k.id in self._busy_knobs
-                display_status = "running" if busy else status
-                not_applicable = (status == "not_applicable")
-
                 if locked:
-                    if not group_ok:
+                    if group_pending_lock or not group_ok or reboot_gate_lock:
                         status_item = QTableWidgetItem("🔒")
                         status_item.setForeground(QColor("#ff9800"))
                     else:
@@ -731,8 +749,18 @@ def main() -> int:
                         btn.clicked.connect(self._on_join_groups)
                     self._apply_busy_state(btn, busy=busy)
                     self.table.setCellWidget(r, 5, btn)
+                elif group_pending_lock:
+                    btn = QPushButton("🔒")
+                    btn.setEnabled(False)
+                    btn.setToolTip(lock_reason)
+                    self.table.setCellWidget(r, 5, btn)
                 elif not group_ok:
                     # Locked: user needs to join groups first
+                    btn = QPushButton("🔒")
+                    btn.setEnabled(False)
+                    btn.setToolTip(lock_reason)
+                    self.table.setCellWidget(r, 5, btn)
+                elif reboot_gate_lock:
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
@@ -900,6 +928,7 @@ def main() -> int:
                 self.table.setFont(font)
                 self.table.horizontalHeader().setFont(font)
                 self.font_spinner.setFont(font)
+                self.reboot_toggle.setFont(font)
                 self.btn_reset.setFont(font)
 
                 for r in range(self.table.rowCount()):
@@ -987,6 +1016,12 @@ def main() -> int:
             self._apply_font_size(size)
             self.state["font_size"] = size
             save_state(self.state)
+
+        def _on_reboot_toggle(self, enabled: bool) -> None:
+            """Handle reboot-required knob toggle."""
+            self.state["enable_reboot_knobs"] = bool(enabled)
+            save_state(self.state)
+            self._populate()
 
         def _qjackctl_cpu_cores_from_state(self) -> list[int] | None:
             raw = self.state.get("qjackctl_cpu_cores")

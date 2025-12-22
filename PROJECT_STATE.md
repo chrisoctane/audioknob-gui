@@ -59,6 +59,7 @@ Notes:
 - QjackCtl RT now warns to restart QjackCtl when it is running; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
 - Kernel cmdline apply can prompt to run the bootloader update command via pkexec.
+- Reboot-required knobs are gated behind a header toggle; group-required knobs stay locked while group changes are pending reboot.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
