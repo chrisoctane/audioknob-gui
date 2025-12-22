@@ -184,7 +184,7 @@ In `gui/app.py` → `_populate()`:
 | Missing packages | 📦 | "Install" button | "?" button |
 | Read-only info | — | "View" button | "?" button |
 | Read-only test | — | "Test"/"Scan" button | "?" button |
-| Group join knob | — | "Join/Leave" button | "?" button |
+| Group join knob | — | "Join/Leave" button (immediate) | "?" button |
 
 **Columns**: Info | Knob | Status | Category | Risk | Action | Config
 
@@ -208,6 +208,7 @@ self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
 
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
 Apply now queues the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot.
+Group join/leave actions remain immediate because they require explicit confirmation.
 If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (supported for `systemd_unit_toggle` and `kernel_cmdline` knobs).
 Reboot-required knobs are disabled until the user enables the "Enable reboot-required changes" toggle.
 Knobs requiring audio groups stay locked while group membership is pending reboot.
