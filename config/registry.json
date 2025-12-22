@@ -33,7 +33,7 @@
         "restore": true
       },
       "category": "permissions",
-      "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio.",
+      "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio. Log out/in or reboot required to take effect.",
       "id": "rt_limits_audio_group",
       "impl": {
         "kind": "pam_limits_audio_group",
@@ -51,7 +51,7 @@
         "audio",
         "realtime"
       ],
-      "requires_reboot": false,
+      "requires_reboot": true,
       "requires_root": true,
       "risk_level": "low",
       "title": "RT Limits"
