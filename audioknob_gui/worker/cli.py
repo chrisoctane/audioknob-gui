@@ -389,6 +389,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     effects: list[dict] = []
     backups: list[dict] = []
     applied: list[str] = []
+    warnings: list[str] = []
 
     for kid in args.knob:
         logger.info("apply knob=%s", kid)
@@ -616,6 +617,25 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     "update_cmd": distro.kernel_cmdline_update_cmd,
                     "result": {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
                 })
+                if result.returncode != 0:
+                    cmd_str = " ".join(distro.kernel_cmdline_update_cmd)
+                    detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                    warnings.append(
+                        "Bootloader update failed for kernel cmdline.\n"
+                        f"Command: {cmd_str}\n"
+                        f"Error: {detail}\n"
+                        "Run the command manually and reboot."
+                    )
+            elif distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                warnings.append(
+                    "Kernel cmdline updated but no bootloader update command is configured.\n"
+                    "Run sdbootutil update-all-entries and reboot."
+                )
+            elif distro.boot_system == "grub2":
+                warnings.append(
+                    "Kernel cmdline updated but no bootloader update command is configured.\n"
+                    "Run grub2-mkconfig -o /boot/grub2/grub.cfg (or your distro's update-grub) and reboot."
+                )
 
         elif kind == "read_only":
             pass
@@ -634,7 +654,10 @@ def cmd_apply(args: argparse.Namespace) -> int:
     write_manifest(tx, manifest)
 
     logger.info("apply done txid=%s applied=%s", tx.txid, ",".join(applied))
-    print(json.dumps({"schema": 1, "txid": tx.txid, "applied": applied}, indent=2))
+    result = {"schema": 1, "txid": tx.txid, "applied": applied}
+    if warnings:
+        result["warnings"] = warnings
+    print(json.dumps(result, indent=2))
     return 0
 
 

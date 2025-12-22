@@ -57,6 +57,7 @@ Notes:
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
 - Knobs that lack a transaction can be force-reset via an explicit confirmation prompt.
 - QjackCtl RT now warns to restart QjackCtl when it is running; RT Limits shows a reboot/log-out prompt when session limits are inactive.
+- Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

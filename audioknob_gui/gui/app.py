@@ -2002,6 +2002,14 @@ def main() -> int:
                         "QjackCtl reads its config on launch.\n\n"
                         "Quit and reopen QjackCtl to refresh the ServerPrefix in the UI.",
                     )
+                if isinstance(payload, dict):
+                    warnings = payload.get("result", {}).get("warnings") or []
+                    if warnings:
+                        QMessageBox.warning(
+                            self,
+                            "Apply Warning",
+                            "\n\n".join(str(w) for w in warnings),
+                        )
 
             if not success:
                 if message == _PKEXEC_CANCELLED:
