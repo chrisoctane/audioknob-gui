@@ -1072,19 +1072,23 @@ def main() -> int:
                 full_w = max(table_width, header_hint_w) + extra_w
                 full_h = header_hint_h + spacing + table_height + extra_h
 
+                vscroll_w = self.table.verticalScrollBar().sizeHint().width()
+                hscroll_h = self.table.horizontalScrollBar().sizeHint().height()
+                if self.table.verticalScrollBar().isVisible():
+                    full_w += vscroll_w
+                if self.table.horizontalScrollBar().isVisible():
+                    full_h += hscroll_h
+
                 screen = QGuiApplication.primaryScreen()
                 avail = screen.availableGeometry() if screen else None
-                max_w = min(full_w, avail.width()) if avail else full_w
-                max_h = min(full_h, avail.height()) if avail else full_h
-
-                if max_h < full_h:
-                    max_w += self.table.verticalScrollBar().sizeHint().width()
-                    if avail:
-                        max_w = min(max_w, avail.width())
-                if max_w < full_w:
-                    max_h += self.table.horizontalScrollBar().sizeHint().height()
-                    if avail:
-                        max_h = min(max_h, avail.height())
+                max_w = full_w
+                max_h = full_h
+                # Avoid shrinking the window below its current size.
+                max_w = max(max_w, self.width())
+                max_h = max(max_h, self.height())
+                if avail:
+                    max_w = min(max_w, avail.width())
+                    max_h = min(max_h, avail.height())
 
                 self.setMaximumSize(max_w, max_h)
             except Exception:
