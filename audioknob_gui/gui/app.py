@@ -422,6 +422,7 @@ def main() -> int:
     class MainWindow(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
+            from PySide6.QtCore import QTimer
             self.setWindowTitle("audioknob-gui")
             self.resize(980, 640)
 
@@ -463,7 +464,6 @@ def main() -> int:
             self.reboot_toggle.setChecked(bool(self.state.get("enable_reboot_knobs", False)))
             self.reboot_toggle.setToolTip("Unlock knobs that require a reboot/log-out to take effect")
             self.reboot_toggle.toggled.connect(self._on_reboot_toggle)
-            top.addWidget(self.reboot_toggle)
 
             self.reboot_button = QPushButton("Reboot")
             self.reboot_button.setToolTip("Restart the system to apply pending changes")
@@ -500,6 +500,7 @@ def main() -> int:
             self._sort_column: int | None = None
             self._sort_descending = False
             header.setSortIndicatorShown(True)
+            header.sectionResized.connect(lambda *_: self._apply_window_constraints())
             header.sectionClicked.connect(self._on_header_sort)
             self.table.setColumnWidth(0, 32)   # Info button
             self.table.setColumnWidth(1, 420)  # Knob title
@@ -517,6 +518,7 @@ def main() -> int:
             self._refresh_user_groups()
             self._refresh_statuses()
             self._populate()
+            QTimer.singleShot(0, self._apply_window_constraints)
 
             self.btn_reset.clicked.connect(self.on_reset_defaults)
 
@@ -734,12 +736,14 @@ def main() -> int:
 
             for r, k in enumerate(ordered):
                 if k is REBOOT_HEADER:
-                    header = QTableWidgetItem("Reboot required")
-                    header.setFlags(Qt.ItemIsEnabled)
-                    header.setForeground(QColor("#9e9e9e"))
-                    header.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                     self.table.setSpan(r, 0, 1, 7)
-                    self.table.setItem(r, 0, header)
+                    header_widget = QWidget()
+                    header_layout = QHBoxLayout(header_widget)
+                    header_layout.setContentsMargins(8, 2, 8, 2)
+                    header_layout.setSpacing(8)
+                    header_layout.addWidget(self.reboot_toggle)
+                    header_layout.addStretch(1)
+                    self.table.setCellWidget(r, 0, header_widget)
                     for c in range(1, 7):
                         self.table.removeCellWidget(r, c)
                         self.table.setItem(r, c, QTableWidgetItem(""))
@@ -1012,7 +1016,6 @@ def main() -> int:
                 self.table.resizeRowsToContents()
             except Exception:
                 pass
-            self._apply_window_constraints()
 
         def _apply_font_size(self, size: int) -> None:
             """Apply font size to the application."""
@@ -1069,14 +1072,21 @@ def main() -> int:
                 header_hint_w = self.header_layout.sizeHint().width() if hasattr(self, "header_layout") else 0
                 header_hint_h = self.header_layout.sizeHint().height() if hasattr(self, "header_layout") else 0
 
-                full_w = max(table_width, header_hint_w) + extra_w
-                full_h = header_hint_h + spacing + table_height + extra_h
+                pad = 20
+                full_w = max(table_width, header_hint_w) + extra_w + (pad * 2)
+                full_h = header_hint_h + spacing + table_height + extra_h + (pad * 2)
 
                 vscroll_w = self.table.verticalScrollBar().sizeHint().width()
                 hscroll_h = self.table.horizontalScrollBar().sizeHint().height()
-                if self.table.verticalScrollBar().isVisible():
+                need_vscroll = self.table.verticalScrollBar().isVisible()
+                need_hscroll = self.table.horizontalScrollBar().isVisible()
+                if not need_vscroll:
+                    need_vscroll = table_height > self.table.viewport().height()
+                if not need_hscroll:
+                    need_hscroll = table_width > self.table.viewport().width()
+                if need_vscroll:
                     full_w += vscroll_w
-                if self.table.horizontalScrollBar().isVisible():
+                if need_hscroll:
                     full_h += hscroll_h
 
                 screen = QGuiApplication.primaryScreen()
