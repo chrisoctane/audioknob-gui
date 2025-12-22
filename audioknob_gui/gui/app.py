@@ -763,6 +763,9 @@ def main() -> int:
                 busy = k.id in self._busy_knobs
                 display_status = "running" if busy else status
                 not_applicable = (status == "not_applicable")
+                locked_bg = QColor("#2f2f2f")
+                locked_fg = QColor("#7a7a7a")
+                locked_style = "background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a;"
 
                 # Check requirements
                 group_ok = self._knob_group_ok(k)
@@ -793,13 +796,21 @@ def main() -> int:
                 info_btn.setFixedWidth(28)
                 info_btn.setToolTip("Show details")
                 info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
+                if locked:
+                    info_btn.setStyleSheet(locked_style)
+                info_bg = QTableWidgetItem("")
+                info_bg.setFlags(Qt.ItemIsEnabled)
+                if locked:
+                    info_bg.setBackground(locked_bg)
+                self.table.setItem(r, 0, info_bg)
                 self.table.setCellWidget(r, 0, info_btn)
 
                 # Column 1: Knob title (gray if locked)
                 title_item = QTableWidgetItem(k.title)
                 title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
                 if locked:
-                    title_item.setForeground(QColor("#9e9e9e"))
+                    title_item.setForeground(locked_fg)
+                    title_item.setBackground(locked_bg)
                     title_item.setToolTip(lock_reason)
                 self.table.setItem(r, 1, title_item)
 
@@ -807,10 +818,10 @@ def main() -> int:
                 if locked:
                     if group_pending_lock or not group_ok or reboot_gate_lock or reboot_dep_lock:
                         status_item = QTableWidgetItem("🔒")
-                        status_item.setForeground(QColor("#ff9800"))
+                        status_item.setForeground(locked_fg)
                     else:
                         status_item = QTableWidgetItem("📦")
-                        status_item.setForeground(QColor("#1976d2"))
+                        status_item.setForeground(locked_fg)
                     status_item.setToolTip(lock_reason)
                 elif not_applicable:
                     status_item = QTableWidgetItem("N/A")
@@ -820,18 +831,22 @@ def main() -> int:
                     status_text, status_color = self._status_display(display_status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
+                if locked:
+                    status_item.setBackground(locked_bg)
                 self.table.setItem(r, 2, status_item)
 
                 # Column 3: Category
                 cat_item = QTableWidgetItem(str(k.category))
                 if locked:
-                    cat_item.setForeground(QColor("#9e9e9e"))
+                    cat_item.setForeground(locked_fg)
+                    cat_item.setBackground(locked_bg)
                 self.table.setItem(r, 3, cat_item)
 
                 # Column 4: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
                 if locked:
-                    risk_item.setForeground(QColor("#9e9e9e"))
+                    risk_item.setForeground(locked_fg)
+                    risk_item.setBackground(locked_bg)
                 self.table.setItem(r, 4, risk_item)
 
                 # Column 5: Action button (context-sensitive)
@@ -844,38 +859,46 @@ def main() -> int:
                     else:
                         btn.clicked.connect(self._on_join_groups)
                     self._apply_busy_state(btn, busy=busy)
+                    if locked:
+                        btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
                 elif group_pending_lock:
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
+                    btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
                 elif reboot_dep_lock:
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
+                    btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
                 elif not group_ok:
                     # Locked: user needs to join groups first
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
+                    btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
                 elif reboot_gate_lock:
                     btn = QPushButton("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
+                    btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
                 elif not commands_ok:
                     # Locked: needs package install
                     btn = self._make_action_button("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
                     btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
+                    btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
                 elif not_applicable:
                     btn = QPushButton("N/A")
                     btn.setEnabled(False)
                     btn.setToolTip("Not available on this system")
+                    btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
                 elif k.id == "stack_detect":
                     btn = self._make_action_button("View")
@@ -979,12 +1002,17 @@ def main() -> int:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_apply_knob(kid))
                     self._apply_busy_state(btn, busy=busy)
+                    if locked:
+                        btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 5, btn)
 
                     # Config column: CPU core selection
                     cfg_btn = QPushButton("Cores")
                     cfg_btn.setToolTip("Configure CPU cores for taskset")
                     cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                    if locked:
+                        cfg_btn.setEnabled(False)
+                        cfg_btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 6, cfg_btn)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
