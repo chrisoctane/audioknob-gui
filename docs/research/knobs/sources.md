@@ -1,0 +1,58 @@
+# Sources
+
+## Primary sources reviewed
+
+- https://wiki.linuxaudio.org/wiki/system_configuration
+  - CPU governor performance, SMT disable, /dev/cpu_dma_latency udev rule, noatime, rtirq config, PCI latency timer.
+- https://wiki.archlinux.org/title/Professional_audio
+  - Optimization checklist: performance governor, threadirqs, noatime, RTC/HPET max_user_freq, swappiness, inotify watches, PCI latency timer.
+- https://wiki.archlinux.org/title/fstab
+  - atime/relatime/noatime tradeoffs and app compatibility notes.
+- https://opensource.com/article/20/6/linux-noatime
+  - Explains atime/relatime defaults and when noatime can still help.
+- https://wiki.tnonline.net/w/Btrfs/Mount_Options
+  - noatime reduces metadata writes; especially useful with many snapshots.
+- https://codeberg.org/autostatic/rtcirqus
+  - udev-driven IRQ RT priority for audio devices; config options and install steps.
+- https://linuxmusicians.com/viewtopic.php?t=26784
+  - Content provided by user paste (thread on rtcirqus vs rtirq).
+  - Notes: rtcirqus focuses on audio IRQs (USB + onboard), rtirq is broader but
+    not udev-aware; threadirqs + PREEMPT_DYNAMIC + preempt=full interplay.
+- https://pipewire.pages.freedesktop.org/pipewire/page_man_pipewire_conf_5.html
+  - PipeWire config properties: default clock rates/quantums, allowed rates,
+    data loop RT priority and CPU affinity, mlock settings, node/device rules.
+- https://doc.opensuse.org/documentation/leap/tuning/html/book-tuning/cha-tuning-io.html
+  - openSUSE I/O scheduler selection and tunables (mq-deadline, bfq, kyber, none).
+- https://doc.opensuse.org/documentation/leap/tuning/html/book-tuning/cha-tuning-power.html
+  - openSUSE power management: C-states/P-states, cpupower idle-set examples.
+- https://manpages.opensuse.org/Tumbleweed/cpupower/cpupower.1.en.html
+  - cpupower toolset overview and subcommands (idle-set, frequency-set, etc.).
+- https://tuned-project.org/
+  - TuneD overview, profiles, and rollback model.
+- https://manpages.opensuse.org/Tumbleweed/tuned/tuned-adm.8.en.html
+  - tuned-adm profile switching and profile list/recommendations.
+- https://gitlab.freedesktop.org/pipewire/pipewire/-/wikis/Performance-tuning
+  - Content provided by user paste (page blocked by Anubis when fetched).
+  - Notes: preempt=full on PREEMPT_DYNAMIC kernels, module-rt/RTKit portal, limits.d
+    pipewire group, RTKit daemon args, ALSA period-size property, Firefox speech
+    dispatcher mitigation, pw-top/pw-profiler.
+
+## Blocked or limited sources
+
+- https://gitlab.freedesktop.org/pipewire/pipewire/-/wikis/Performance-tuning
+  - Blocked by Anubis anti-bot protection (requires JS/Pow); content was provided
+    by user paste above.
+- https://linuxmusicians.com/viewtopic.php?t=26784
+  - JS-only loading; text fetch unavailable.
+- https://gitlab.freedesktop.org/upower/power-profiles-daemon/-/blob/main/README.md
+  - Blocked by Anubis anti-bot protection (requires JS/Pow).
+- https://forum.cockos.com/forumdisplay.php?f=52
+- https://discourse.ardour.org/
+- https://discussion.fedoraproject.org
+- https://discourse.ubuntu.com/
+  - Landing pages only; no concrete tuning guidance captured.
+
+## Out of scope for knob ideas
+
+- https://lwn.net/Articles/652156/
+  - RCU fundamentals; not directly relevant to audio tuning knobs.
