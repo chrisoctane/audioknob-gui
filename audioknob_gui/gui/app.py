@@ -391,6 +391,7 @@ def main() -> int:
             QWidget,
         )
         from PySide6.QtGui import QColor
+        from shiboken6 import isValid
     except Exception as e:  # pragma: no cover
         print(
             "PySide6 is required to run audioknob-gui.\n"
@@ -569,9 +570,19 @@ def main() -> int:
 
             self.btn_apply_queue = QPushButton("Apply")
             self.btn_apply_queue.setToolTip("Apply queued changes")
-            self.btn_apply_queue.clicked.connect(self._on_apply_queue)
+            self.btn_apply_queue.clicked.connect(
+                lambda _checked=False: self._on_apply_queue(reboot_after=False)
+            )
             self.btn_apply_queue.setVisible(False)
             top.addWidget(self.btn_apply_queue)
+
+            self.btn_apply_queue_reboot = QPushButton("Apply & Reboot")
+            self.btn_apply_queue_reboot.setToolTip("Apply queued changes and reboot after")
+            self.btn_apply_queue_reboot.clicked.connect(
+                lambda _checked=False: self._on_apply_queue(reboot_after=True)
+            )
+            self.btn_apply_queue_reboot.setVisible(False)
+            top.addWidget(self.btn_apply_queue_reboot)
 
             self.reboot_button = QPushButton("Reboot")
             self.reboot_button.setToolTip("Restart the system to apply pending changes")
@@ -706,21 +717,24 @@ def main() -> int:
             if count:
                 self.queue_label.setText(f"Queued: {count}")
                 self.queue_label.setVisible(True)
-                if self._queue_requires_reboot():
-                    label = "Apply & Reboot"
-                    tip = "Apply queued changes and reboot afterward"
-                else:
-                    label = "Apply"
-                    tip = "Apply queued changes"
+                tip = "Apply queued changes"
+                tip_reboot = "Apply queued changes and reboot after"
                 if self._queue_requires_root():
                     tip += " (password prompt may appear)"
-                self.btn_apply_queue.setText(label)
+                    tip_reboot += " (password prompt may appear)"
+                if self._queue_requires_reboot():
+                    tip += " (reboot required to take effect)"
                 self.btn_apply_queue.setToolTip(tip)
+                self.btn_apply_queue_reboot.setToolTip(tip_reboot)
                 self.btn_apply_queue.setVisible(True)
+                self.btn_apply_queue_reboot.setVisible(True)
             else:
                 self.queue_label.setVisible(False)
                 self.btn_apply_queue.setVisible(False)
-            self.btn_apply_queue.setEnabled(count > 0 and not self._queue_busy)
+                self.btn_apply_queue_reboot.setVisible(False)
+            enabled = count > 0 and not self._queue_busy
+            self.btn_apply_queue.setEnabled(enabled)
+            self.btn_apply_queue_reboot.setEnabled(enabled)
 
         def _apply_queue_button_state(self, btn: QPushButton, knob_id: str, action: str) -> None:
             if self._queued_actions.get(knob_id) == action:
@@ -1187,7 +1201,7 @@ def main() -> int:
                 elif k.id == "qjackctl_server_prefix_rt":
                     # Normal apply/reset button in Action column
                     status = self._knob_statuses.get(k.id, "unknown")
-                    if status in ("applied", "pending_reboot", "partial"):
+                    if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
                         self._apply_queue_button_state(btn, k.id, "reset")
@@ -2572,7 +2586,7 @@ def main() -> int:
             self._update_queue_ui()
             self._populate()
 
-        def _on_apply_queue(self) -> None:
+        def _on_apply_queue(self, reboot_after: bool) -> None:
             if not self._queued_actions or self._queue_busy:
                 return
             if self._busy_knobs:
@@ -2595,7 +2609,7 @@ def main() -> int:
             if not confirm.ok:
                 return
 
-            self._queue_needs_reboot = self._queue_requires_reboot()
+            self._queue_needs_reboot = reboot_after
             self._queue_busy = True
             self._queue_inflight = list(queued)
             for kid, _ in queued:
@@ -2684,6 +2698,12 @@ def main() -> int:
             self._task_threads.append(worker)
             worker.start()
 
+        def _prune_task_threads(self) -> None:
+            self._task_threads = [
+                w for w in self._task_threads
+                if isValid(w) and w.isRunning()
+            ]
+
         def _handle_apply_followups(self, result: dict) -> None:
             warnings = result.get("warnings") or []
             if warnings:
@@ -2716,7 +2736,7 @@ def main() -> int:
 
         def _on_knob_task_finished(self, knob_id: str, action: str, success: bool, payload: object, message: str) -> None:
             self._busy_knobs.discard(knob_id)
-            self._task_threads = [w for w in self._task_threads if w.isRunning()]
+            self._prune_task_threads()
 
             if success and action == "apply":
                 try:
@@ -2777,7 +2797,7 @@ def main() -> int:
             for kid in inflight:
                 self._busy_knobs.discard(kid)
             self._queue_busy = False
-            self._task_threads = [w for w in self._task_threads if w.isRunning()]
+            self._prune_task_threads()
 
             applied_ids: set[str] = set()
             restored_ids: set[str] = set()

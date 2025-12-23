@@ -237,7 +237,7 @@ def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
         cfg = read_config(path)
         before_cmd = cfg.server_cmd or ""
         before_prefix = cfg.server_prefix or ""
-        preset = cfg.def_preset or "default"
+        preset = cfg.def_preset or ""
     except Exception:
         before_cmd = ""
         before_prefix = ""
@@ -272,6 +272,14 @@ def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
             after_lines.append("[Settings]")
         after_lines.append(f"{server_key}{after_cmd}")
     if not prefix_found and preset:
+        if "[Settings]" not in after_lines:
+            after_lines.append("[Settings]")
+        after_lines.append(f"{prefix_key}{after_prefix}")
+    if not found and not preset:
+        if "[Settings]" not in after_lines:
+            after_lines.append("[Settings]")
+        after_lines.append(f"{server_key}{after_cmd}")
+    if not prefix_found and not preset:
         if "[Settings]" not in after_lines:
             after_lines.append("[Settings]")
         after_lines.append(f"{prefix_key}{after_prefix}")

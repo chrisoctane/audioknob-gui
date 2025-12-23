@@ -48,6 +48,18 @@ def _get_server_prefix_for_preset(cp: configparser.ConfigParser, preset: str) ->
     return cp.get("Settings", key, fallback=None)
 
 
+def _get_server_unscoped(cp: configparser.ConfigParser) -> str | None:
+    if "Settings" not in cp:
+        return None
+    return cp.get("Settings", "Server", fallback=None)
+
+
+def _get_server_prefix_unscoped(cp: configparser.ConfigParser) -> str | None:
+    if "Settings" not in cp:
+        return None
+    return cp.get("Settings", "ServerPrefix", fallback=None)
+
+
 def read_config(path: str | Path) -> QjackCtlConfig:
     cp = _read_config(path)
     def_preset = _get_active_preset(cp) or ""
@@ -56,6 +68,12 @@ def read_config(path: str | Path) -> QjackCtlConfig:
     if def_preset:
         server_cmd = _get_server_for_preset(cp, def_preset)
         server_prefix = _get_server_prefix_for_preset(cp, def_preset)
+    else:
+        server_cmd = _get_server_unscoped(cp)
+        server_prefix = _get_server_prefix_unscoped(cp)
+    if not server_cmd and not server_prefix:
+        server_cmd = _get_server_unscoped(cp)
+        server_prefix = _get_server_prefix_unscoped(cp)
     return QjackCtlConfig(def_preset=def_preset, server_cmd=server_cmd, server_prefix=server_prefix)
 
 
@@ -153,21 +171,25 @@ def ensure_server_prefix(prefix: str | None, *, cpu_cores: str | None) -> str:
 
 def write_config_with_server_update(
     path: str | Path,
-    preset: str,
+    preset: str | None,
     new_server_cmd: str,
     server_prefix: str | None = None,
 ) -> None:
     """Update the Server value for a preset, preserving the rest of the config."""
     cp = _read_config(path)
-    if "Presets" not in cp:
-        cp.add_section("Presets")
-    cp.set("Presets", "DefPreset", preset)
     if "Settings" not in cp:
         cp.add_section("Settings")
-    key = f"{preset}\\Server"
+    if preset:
+        if "Presets" not in cp:
+            cp.add_section("Presets")
+        cp.set("Presets", "DefPreset", preset)
+        key = f"{preset}\\Server"
+        pkey = f"{preset}\\ServerPrefix"
+    else:
+        key = "Server"
+        pkey = "ServerPrefix"
     cp.set("Settings", key, new_server_cmd)
     if server_prefix is not None:
-        pkey = f"{preset}\\ServerPrefix"
         cp.set("Settings", pkey, server_prefix)
 
     p = Path(path)
@@ -186,13 +208,13 @@ def ensure_server_flags(
     """Read config, ensure Server command has required flags, return (before, after)."""
     cp = _read_config(path)
     def_preset = _get_active_preset(cp)
-    defaulted = False
-    if not def_preset:
-        def_preset = "default"
-        defaulted = True
-
-    server_cmd = _get_server_for_preset(cp, def_preset) if def_preset else None
-    server_prefix = _get_server_prefix_for_preset(cp, def_preset) if def_preset else None
+    use_preset = bool(def_preset)
+    if use_preset:
+        server_cmd = _get_server_for_preset(cp, def_preset)
+        server_prefix = _get_server_prefix_for_preset(cp, def_preset)
+    else:
+        server_cmd = _get_server_unscoped(cp)
+        server_prefix = _get_server_prefix_unscoped(cp)
     if not server_cmd:
         before = ""
         after = ensure_server_has_flags(
@@ -212,7 +234,7 @@ def ensure_server_flags(
 
     prefix_after = ensure_server_prefix(server_prefix, cpu_cores=cpu_cores)
 
-    if before != after or defaulted or prefix_after != (server_prefix or ""):
-        write_config_with_server_update(path, def_preset, after, server_prefix=prefix_after)
+    if before != after or prefix_after != (server_prefix or ""):
+        write_config_with_server_update(path, def_preset if use_preset else None, after, server_prefix=prefix_after)
 
     return (before, after)
