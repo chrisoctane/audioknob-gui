@@ -390,7 +390,7 @@ def main() -> int:
             QVBoxLayout,
             QWidget,
         )
-        from PySide6.QtGui import QColor
+        from PySide6.QtGui import QColor, QCursor
         from shiboken6 import isValid
     except Exception as e:  # pragma: no cover
         print(
@@ -623,6 +623,8 @@ def main() -> int:
             self._sort_descending = False
             header.setSortIndicatorShown(True)
             header.sectionClicked.connect(self._on_header_sort)
+            header.sectionResized.connect(self._on_section_resized)
+            self._min_column_widths: dict[int, int] = {}
             self._apply_default_column_widths()
             root.addWidget(self.table)
 
@@ -872,6 +874,15 @@ def main() -> int:
                 btn.setText("Working...")
                 btn.setEnabled(False)
 
+        def _install_hover_tracking(self, widget: QWidget, row: int) -> None:
+            widget.setProperty("hover_row", row)
+            widget.setMouseTracking(True)
+            widget.installEventFilter(self)
+
+        def _set_action_cell(self, row: int, widget: QWidget) -> None:
+            self._install_hover_tracking(widget, row)
+            self.table.setCellWidget(row, 2, widget)
+
         def _status_display(self, status: str) -> tuple[str, str]:
             """Return (display_text, color) for a status."""
             # Handle test results: "result:12 µs" → "12 µs"
@@ -939,6 +950,7 @@ def main() -> int:
             ordered.extend(other_knobs)
 
             self.table.setRowCount(len(ordered))
+            self._row_dim = [False] * len(ordered)
 
             for r, k in enumerate(ordered):
                 if k is REBOOT_HEADER:
@@ -971,7 +983,11 @@ def main() -> int:
                 not_applicable = (status == "not_applicable")
                 locked_bg = QColor("#2f2f2f")
                 locked_fg = QColor("#7a7a7a")
-                locked_style = "background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a;"
+                locked_style = (
+                    "QPushButton { background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a; }"
+                    "QPushButton:hover { background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a; }"
+                    "QPushButton:pressed { background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a; }"
+                )
 
                 # Check requirements
                 group_ok = self._knob_group_ok(k)
@@ -983,6 +999,9 @@ def main() -> int:
                 reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
                 reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
                 locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock
+                row_dim = locked or not_applicable
+                self._row_dim[r] = row_dim
+                row_dim = locked or not_applicable
                 
                 # Determine lock reason
                 lock_reason = ""
@@ -1003,11 +1022,12 @@ def main() -> int:
                 info_btn.setToolTip("Show details")
                 info_btn.setFocusPolicy(Qt.NoFocus)
                 info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
-                if locked:
+                self._install_hover_tracking(info_btn, r)
+                if row_dim:
                     info_btn.setStyleSheet(locked_style)
                 info_bg = QTableWidgetItem("")
-                info_bg.setFlags(Qt.ItemIsEnabled)
-                if locked:
+                info_bg.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                if row_dim:
                     info_bg.setBackground(locked_bg)
                 self.table.setItem(r, 0, info_bg)
                 self.table.setCellWidget(r, 0, info_btn)
@@ -1015,10 +1035,13 @@ def main() -> int:
                 # Column 1: Knob title (gray if locked)
                 title_item = QTableWidgetItem(k.title)
                 title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
-                if locked:
+                if row_dim:
                     title_item.setForeground(locked_fg)
                     title_item.setBackground(locked_bg)
+                if locked:
                     title_item.setToolTip(lock_reason)
+                elif not_applicable:
+                    title_item.setToolTip("Not available on this system")
                 self.table.setItem(r, 1, title_item)
 
                 # Column 4: Status (with color)
@@ -1028,26 +1051,26 @@ def main() -> int:
                     status_item.setToolTip(lock_reason)
                 elif not_applicable:
                     status_item = QTableWidgetItem("N/A")
-                    status_item.setForeground(QColor("#9e9e9e"))
+                    status_item.setForeground(locked_fg)
                     status_item.setToolTip("Not available on this system")
                 else:
                     status_text, status_color = self._status_display(display_status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
-                if locked:
+                if row_dim:
                     status_item.setBackground(locked_bg)
                 self.table.setItem(r, 4, status_item)
 
                 # Column 6: Category
                 cat_item = QTableWidgetItem(str(k.category))
-                if locked:
+                if row_dim:
                     cat_item.setForeground(locked_fg)
                     cat_item.setBackground(locked_bg)
                 self.table.setItem(r, 6, cat_item)
 
                 # Column 7: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
-                if locked:
+                if row_dim:
                     risk_item.setForeground(locked_fg)
                     risk_item.setBackground(locked_bg)
                 self.table.setItem(r, 7, risk_item)
@@ -1064,57 +1087,57 @@ def main() -> int:
                     self._apply_busy_state(btn, busy=busy)
                     if locked:
                         btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif group_pending_lock:
-                    btn = QPushButton("🔒")
+                    btn = self._make_action_button("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
                     btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif reboot_dep_lock:
-                    btn = QPushButton("🔒")
+                    btn = self._make_action_button("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
                     btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif not group_ok:
                     # Locked: user needs to join groups first
-                    btn = QPushButton("🔒")
+                    btn = self._make_action_button("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
                     btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif reboot_gate_lock:
-                    btn = QPushButton("🔒")
+                    btn = self._make_action_button("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
                     btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif not commands_ok:
                     # Locked: needs package install
                     btn = self._make_action_button("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
                     btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
                     btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif not_applicable:
-                    btn = QPushButton("N/A")
+                    btn = self._make_action_button("N/A")
                     btn.setEnabled(False)
                     btn.setToolTip("Not available on this system")
                     btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif k.id == "stack_detect":
                     btn = self._make_action_button("View")
                     btn.clicked.connect(self.on_view_stack)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif k.id == "scheduler_jitter_test":
                     btn = self._make_action_button("Test")
                     btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif k.id == "blocker_check":
                     btn = self._make_action_button("Scan")
                     btn.clicked.connect(self.on_check_blockers)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 elif k.id == "pipewire_quantum" and not locked:
                     # Action column: Apply/Reset button
                     status = self._knob_statuses.get(k.id, "unknown")
@@ -1127,7 +1150,7 @@ def main() -> int:
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
                         self._apply_queue_button_state(btn, k.id, "apply")
                     self._apply_busy_state(btn, busy=busy)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
 
                     # Config column: quantum selector
                     q_combo = QComboBox()
@@ -1159,6 +1182,7 @@ def main() -> int:
                         self._populate()
 
                     q_combo.currentIndexChanged.connect(_on_change)
+                    self._install_hover_tracking(q_combo, r)
                     self.table.setCellWidget(r, 3, q_combo)
 
                 elif k.id == "pipewire_sample_rate" and not locked:
@@ -1173,7 +1197,7 @@ def main() -> int:
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
                         self._apply_queue_button_state(btn, k.id, "apply")
                     self._apply_busy_state(btn, busy=busy)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
 
                     # Config column: sample rate selector
                     r_combo = QComboBox()
@@ -1202,6 +1226,7 @@ def main() -> int:
                         self._populate()
 
                     r_combo.currentIndexChanged.connect(_on_rate_change)
+                    self._install_hover_tracking(r_combo, r)
                     self.table.setCellWidget(r, 3, r_combo)
                 elif k.id == "qjackctl_server_prefix_rt":
                     # Normal apply/reset button in Action column
@@ -1217,23 +1242,24 @@ def main() -> int:
                     self._apply_busy_state(btn, busy=busy)
                     if locked:
                         btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
 
                     # Config column: CPU core selection
                     cfg_btn = self._make_action_button("Cores")
                     cfg_btn.setToolTip("Configure CPU cores for taskset")
                     cfg_btn.setFocusPolicy(Qt.NoFocus)
                     cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                    self._install_hover_tracking(cfg_btn, r)
                     if locked:
                         cfg_btn.setEnabled(False)
                         cfg_btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 3, cfg_btn)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
-                    btn = QPushButton("—")
+                    btn = self._make_action_button("—")
                     btn.setEnabled(False)
                     btn.setToolTip("Not implemented yet")
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
                 else:
                     # Normal knob: show Apply or Reset based on current status
                     status = self._knob_statuses.get(k.id, "unknown")
@@ -1246,16 +1272,25 @@ def main() -> int:
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
                         self._apply_queue_button_state(btn, k.id, "apply")
                     self._apply_busy_state(btn, busy=busy)
-                    self.table.setCellWidget(r, 2, btn)
+                    self._set_action_cell(r, btn)
 
                 # Column 3: Config - clear if no widget was set for this row
                 # (PipeWire rows set their own widgets above; other rows need clearing)
                 if k.id not in ("pipewire_quantum", "pipewire_sample_rate", "qjackctl_server_prefix_rt"):
                     self.table.removeCellWidget(r, 3)
+                if row_dim and self.table.item(r, 3) is None:
+                    dim_item = QTableWidgetItem("")
+                    dim_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    dim_item.setBackground(locked_bg)
+                    self.table.setItem(r, 3, dim_item)
+                elif not row_dim:
+                    item = self.table.item(r, 3)
+                    if item is not None and item.text() == "":
+                        self.table.takeItem(r, 3)
 
                 # Column 5: Status check
                 if k.impl and k.impl.kind == "read_only":
-                    check_btn = QPushButton("N/A")
+                    check_btn = self._make_action_button("N/A")
                     check_btn.setEnabled(False)
                     check_btn.setToolTip("Not applicable for read-only tests")
                     check_btn.setFocusPolicy(Qt.NoFocus)
@@ -1264,6 +1299,7 @@ def main() -> int:
                     check_btn = self._make_action_button("Status")
                     check_btn.setToolTip("Show live CLI status details")
                     check_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
+                self._install_hover_tracking(check_btn, r)
                 self.table.setCellWidget(r, 5, check_btn)
             
             # Keep built-in sorting disabled; we handle per-section sorting.
@@ -1288,7 +1324,6 @@ def main() -> int:
                 self.font_spinner.setFont(font)
                 self.reboot_toggle.setFont(font)
                 self.btn_reset.setFont(font)
-
                 for r in range(self.table.rowCount()):
                     for c in range(self.table.columnCount()):
                         it = self.table.item(r, c)
@@ -1338,16 +1373,23 @@ def main() -> int:
             risk_width = max(_w(t) for t in risk_texts)
 
             action_texts = ["Apply", "Reset", "Install", "View", "Test", "Scan", "Join", "Leave", "Action"]
-            action_width = max(_w(t, pad=32) for t in action_texts)
+            action_width = max(_w(t, pad=40) for t in action_texts)
             action_width = max(action_width, 80)
 
             config_texts = ["Config", "Cores", "44100 Hz", "192000 Hz", "512", "1024"]
-            config_width = max(_w(t, pad=36) for t in config_texts)
-            config_width = max(config_width, 120)
+            config_width = max(_w(t, pad=44) for t in config_texts)
+            config_width = max(config_width, 128)
 
             check_texts = ["Check", "Status"]
             check_width = max(_w(t, pad=40) for t in check_texts)
             check_width = max(check_width, 96)
+
+            self._min_column_widths = {
+                0: 32,
+                2: action_width,
+                3: config_width,
+                5: check_width,
+            }
 
             self.table.setColumnWidth(0, 32)  # Info button
             self.table.setColumnWidth(1, knob_width)
@@ -1357,6 +1399,7 @@ def main() -> int:
             self.table.setColumnWidth(5, check_width)
             self.table.setColumnWidth(6, category_width)
             self.table.setColumnWidth(7, risk_width)
+            self._enforce_min_column_widths()
 
         def _apply_window_constraints(self) -> None:
             """Limit window growth to the content size (bounded by screen)."""
@@ -1414,6 +1457,17 @@ def main() -> int:
             except Exception:
                 return
 
+        def _enforce_min_column_widths(self) -> None:
+            header = self.table.horizontalHeader()
+            for col, min_w in self._min_column_widths.items():
+                if header.sectionSize(col) < min_w:
+                    header.resizeSection(col, min_w)
+
+        def _on_section_resized(self, logical: int, _old: int, new: int) -> None:
+            min_w = self._min_column_widths.get(int(logical))
+            if min_w and new < min_w:
+                self.table.horizontalHeader().resizeSection(logical, min_w)
+
         def _apply_stylesheet(self) -> None:
             """Apply clean dark theme."""
             self.setStyleSheet("""
@@ -1455,8 +1509,9 @@ def main() -> int:
                     background-color: #333333;
                 }
                 QPushButton:disabled {
-                    background-color: #3a3a3a;
-                    color: #666666;
+                    background-color: #2f2f2f;
+                    color: #7a7a7a;
+                    border: 1px solid #3a3a3a;
                 }
                 QComboBox, QSpinBox {
                     background-color: #404040;
@@ -1464,6 +1519,11 @@ def main() -> int:
                     border: 1px solid #555555;
                     padding: 4px;
                     border-radius: 3px;
+                }
+                QComboBox:disabled, QSpinBox:disabled {
+                    background-color: #2f2f2f;
+                    color: #7a7a7a;
+                    border: 1px solid #3a3a3a;
                 }
                 QComboBox QAbstractItemView {
                     background-color: #404040;
@@ -1493,7 +1553,19 @@ def main() -> int:
             """Handle reboot-required knob toggle."""
             self.state["enable_reboot_knobs"] = bool(enabled)
             save_state(self.state)
+            v_scroll = None
+            try:
+                v_scroll = self.table.verticalScrollBar().value()
+                self.table.clearSelection()
+                self._clear_dim_hover()
+            except Exception:
+                v_scroll = None
             self._populate()
+            if v_scroll is not None:
+                try:
+                    self.table.verticalScrollBar().setValue(v_scroll)
+                except Exception:
+                    pass
 
         def _on_reboot_now(self) -> None:
             if not getattr(self, "_needs_reboot", False):
@@ -1522,13 +1594,65 @@ def main() -> int:
 
         def _on_row_hover(self, row: int, _column: int) -> None:
             if row >= 0:
+                self._set_dim_hover_row(row)
                 self.table.selectRow(row)
 
         def eventFilter(self, obj, event):
             if obj is self.table.viewport() and event.type() == QEvent.Leave:
-                self.table.clearSelection()
+                pos = self.table.mapFromGlobal(QCursor.pos())
+                if not self.table.rect().contains(pos):
+                    self.table.clearSelection()
+                    self._clear_dim_hover()
+                return False
+            hover_row = obj.property("hover_row")
+            if isinstance(hover_row, int):
+                if event.type() in (QEvent.Enter, QEvent.MouseMove):
+                    self._set_dim_hover_row(hover_row)
+                    self.table.selectRow(hover_row)
+                elif event.type() == QEvent.Leave:
+                    pos = self.table.mapFromGlobal(QCursor.pos())
+                    if not self.table.rect().contains(pos):
+                        self.table.clearSelection()
+                        self._clear_dim_hover()
                 return False
             return super().eventFilter(obj, event)
+
+        def _set_dim_hover_row(self, row: int) -> None:
+            prev = getattr(self, "_hover_row", None)
+            if prev == row:
+                return
+            if prev is not None:
+                self._restore_dim_row(prev)
+            self._hover_row = row
+            self._clear_dim_row(row)
+
+        def _clear_dim_hover(self) -> None:
+            prev = getattr(self, "_hover_row", None)
+            if prev is None:
+                return
+            self._restore_dim_row(prev)
+            self._hover_row = None
+
+        def _clear_dim_row(self, row: int) -> None:
+            if getattr(self, "_row_dim", None) is None:
+                return
+            if row >= len(self._row_dim) or not self._row_dim[row]:
+                return
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item is not None:
+                    item.setBackground(QColor())
+
+        def _restore_dim_row(self, row: int) -> None:
+            if getattr(self, "_row_dim", None) is None:
+                return
+            if row >= len(self._row_dim) or not self._row_dim[row]:
+                return
+            dim_bg = QColor("#2f2f2f")
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item is not None:
+                    item.setBackground(dim_bg)
 
         def _qjackctl_cpu_cores_from_state(self) -> list[int] | None:
             raw = self.state.get("qjackctl_cpu_cores")

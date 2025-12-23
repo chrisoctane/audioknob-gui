@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.4)
+### Install on openSUSE Tumbleweed (RPM, v0.3.5)
 
-For v0.3.4 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.3.5 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -177,18 +177,20 @@ In `gui/app.py` → `_populate()`:
 
 | Knob type | Status | Column 2 (Action) | Column 0 (Details) |
 |-----------|--------|-------------------|-----------------|
-| Not applied | — | "Apply" button (queues) | "?" button |
-| Applied | ✓ Applied | "Reset" button | "?" button |
-| Not implemented | — | "—" disabled | "?" button |
-| Missing groups | Locked | "🔒" disabled | "?" button |
-| Missing packages | Locked | "Install" button | "?" button |
-| Read-only info | — | "View" button | "?" button |
-| Read-only test | — | "Test"/"Scan" button | "?" button |
-| Group join knob | — | "Join/Leave" button (immediate) | "?" button |
+| Not applied | — | "Apply" button (queues) | "i" button |
+| Applied | ✓ Applied | "Reset" button | "i" button |
+| Not implemented | — | "—" disabled | "i" button |
+| Missing groups | Locked | "🔒" disabled | "i" button |
+| Missing packages | Locked | "Install" button | "i" button |
+| Read-only info | — | "View" button | "i" button |
+| Read-only test | — | "Test"/"Scan" button | "i" button |
+| Group join knob | — | "Join/Leave" button (immediate) | "i" button |
 
 **Columns**: Info | Knob | Action | Config | Status | Check | Category | Risk
 
 **Sorting**: Click any column header to sort
+
+**Header row**: Font size control on the left, queue status + Apply/Apply & Reboot + Reset All on the right
 
 ---
 

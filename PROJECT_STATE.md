@@ -16,7 +16,7 @@
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
-- **Info popup** - Info column with "?" button shows details + config options
+- **Info popup** - Info column with "i" button shows details + config options
 - **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
 - **Info popup status check** - Run a live per-knob diagnostic snapshot
 - **Transaction system** - backups + smart restore
@@ -32,16 +32,16 @@ Columns: Info | Knob | Action | Config | Status | Check | Category | Risk
          (0)  (1)    (2)      (3)      (4)     (5)    (6)       (7)
 
 Notes:
-- Column 0 header is "Info"; each row has a small "?" button that opens the knob details popup.
+- Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - QjackCtl defaults to taskset cores 0,1 and adds -R and -P90 when applied.
-- Header row includes a queued changes label and an Apply/Apply & Reboot button that executes queued changes.
+- Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
 ```
 
 ### Bugs Fixed (Prevent Regression)
 - Prevented accidental editing of table cells (table is now non-editable).
-- Clarified the Info column header/tooltip to match the per-row "?" button.
+- Clarified the Info column header/tooltip to match the per-row "i" button.
 - Audio Groups join now resolves `usermod` via known paths to avoid missing command errors in GUI sessions.
 - Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
 - Kernel cmdline knobs now show “Reboot required” when removed from boot config but still active.
@@ -63,6 +63,8 @@ Notes:
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
 - Kernel cmdline apply can prompt to run the bootloader update command via pkexec.
 - Reboot-required knobs are gated behind a header toggle; group-required knobs stay locked while group changes are pending reboot.
+- Reboot-required toggle preserves scroll position instead of jumping the table.
+- Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
@@ -510,7 +512,7 @@ else:
 |-------|------|---------|
 | `id` | string | Unique identifier, used in code and transactions |
 | `title` | string | Human-readable name shown in GUI |
-| `description` | string | Shown in details popup ("?" button) |
+| `description` | string | Shown in details popup ("i" button) |
 | `category` | enum | Grouping: permissions, cpu, irq, vm, kernel, stack, services, power, testing, device |
 | `risk_level` | enum | low/medium/high - shown in Risk column |
 | `requires_root` | bool | If true, apply uses pkexec |
@@ -847,7 +849,7 @@ If crash occurs:
 **Approach:**
 1. Add single knob: `audio_config`
 2. Kind: `audio_config` (new)
-3. Details popup ("?" button) shows "Configure..." button
+3. Details popup ("i" button) shows "Configure..." button
 4. Config button opens `AudioConfigDialog`
 5. Dialog shows:
    - Interface dropdown (populated from `aplay -l`)
@@ -859,7 +861,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 8 columns (Info, Knob, Action, Config, Status, Check, Category, Risk). Config options may be exposed either as in-row controls (Config column) or via the details popup ("?").
+**Note:** Current UI has 8 columns (Info, Knob, Action, Config, Status, Check, Category, Risk). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
 
 **Detection needed:**
 ```python
