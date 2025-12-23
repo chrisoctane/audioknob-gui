@@ -175,7 +175,7 @@ Both files must be committed together. See "Registry Sync Policy" below.
 
 In `gui/app.py` → `_populate()`:
 
-| Knob type | Status | Column 5 (Action) | Column 0 (Details) |
+| Knob type | Status | Column 2 (Action) | Column 0 (Details) |
 |-----------|--------|-------------------|-----------------|
 | Not applied | — | "Apply" button (queues) | "?" button |
 | Applied | ✓ Applied | "Reset" button | "?" button |
@@ -186,7 +186,7 @@ In `gui/app.py` → `_populate()`:
 | Read-only test | — | "Test"/"Scan" button | "?" button |
 | Group join knob | — | "Join/Leave" button (immediate) | "?" button |
 
-**Columns**: Info | Knob | Status | Category | Risk | Action | Config | Check
+**Columns**: Info | Knob | Action | Config | Status | Check | Category | Risk
 
 **Sorting**: Click any column header to sort
 
@@ -203,7 +203,7 @@ if status == "applied":
 else:
     btn = QPushButton("Apply")
     btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
+self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 ```
 
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
@@ -217,14 +217,14 @@ Knobs requiring audio groups stay locked while group membership is pending reboo
 ```python
 btn = QPushButton("View")
 btn.clicked.connect(self.on_view_stack)
-self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
+self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 ```
 
 ### Read-only test (updates status)
 ```python
 btn = QPushButton("Test")
 btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
-self.table.setCellWidget(r, 5, btn)  # Column 5 = Action
+self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 ```
 
 The jitter test also stores the most recent per-thread results in the knob info dialog.

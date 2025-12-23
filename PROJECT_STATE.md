@@ -28,8 +28,8 @@
 
 ### GUI Layout
 ```
-Columns: Info | Knob | Status | Category | Risk | Action | Config | Check
-         (0)  (1)    (2)      (3)       (4)    (5)      (6)     (7)
+Columns: Info | Knob | Action | Config | Status | Check | Category | Risk
+         (0)  (1)    (2)      (3)      (4)     (5)    (6)       (7)
 
 Notes:
 - Column 0 header is "Info"; each row has a small "?" button that opens the knob details popup.
@@ -46,7 +46,7 @@ Notes:
 - Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
 - Kernel cmdline knobs now show “Reboot required” when removed from boot config but still active.
 - User-service masking only targets existing units; Baloo status detection recognizes disabled/not running and surfaces failures.
-- QjackCtl config applies even if DefPreset is missing (creates default preset).
+- QjackCtl config applies even if DefPreset is missing (uses unscoped Server/ServerPrefix without creating presets).
 - QjackCtl ServerPrefix now shows taskset pinning in the GUI (prefix is written separately from jackd flags).
 - RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
@@ -859,7 +859,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 7 columns (? details, Knob, Status, Category, Risk, Action, Config). Config options may be exposed either as in-row controls (Config column) or via the details popup ("?").
+**Note:** Current UI has 8 columns (Info, Knob, Action, Config, Status, Check, Category, Risk). Config options may be exposed either as in-row controls (Config column) or via the details popup ("?").
 
 **Detection needed:**
 ```python
