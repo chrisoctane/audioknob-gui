@@ -27,10 +27,19 @@
   - openSUSE power management: C-states/P-states, cpupower idle-set examples.
 - https://manpages.opensuse.org/Tumbleweed/cpupower/cpupower.1.en.html
   - cpupower toolset overview and subcommands (idle-set, frequency-set, etc.).
+- https://manpages.opensuse.org/Tumbleweed/cpupower/cpupower-idle-set.1.en.html
+  - cpupower idle-set options for enabling/disabling CPU C-states by latency.
 - https://tuned-project.org/
   - TuneD overview, profiles, and rollback model.
 - https://manpages.opensuse.org/Tumbleweed/tuned/tuned-adm.8.en.html
   - tuned-adm profile switching and profile list/recommendations.
+- https://docs.kernel.org/admin-guide/kernel-parameters.html
+  - Kernel cmdline parameters for preempt mode, nohz_full, rcu_nocbs,
+    isolcpus, irqaffinity, idle=, intel_idle.max_cstate, processor.max_cstate.
+- https://docs.kernel.org/scheduler/sched-rt-group.html
+  - RT throttling controls: sched_rt_runtime_us and sched_rt_period_us behavior.
+- https://docs.kernel.org/power/pm_qos_interface.html
+  - PM QoS interface; /dev/cpu_dma_latency and cpu_wakeup_latency semantics.
 - https://gitlab.freedesktop.org/pipewire/pipewire/-/wikis/Performance-tuning
   - Content provided by user paste (page blocked by Anubis when fetched).
   - Notes: preempt=full on PREEMPT_DYNAMIC kernels, module-rt/RTKit portal, limits.d

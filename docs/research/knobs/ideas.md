@@ -60,6 +60,40 @@ This list focuses on new knobs or meaningful improvements backed by the sources 
     - https://gitlab.freedesktop.org/pipewire/pipewire/-/wikis/Performance-tuning
     - https://linuxmusicians.com/viewtopic.php?t=26784 (notes PREEMPT_DYNAMIC requirement)
 
+- CPU isolation + tickless cores (`kernel_cpu_isolation`)
+  - What: add `nohz_full=<cpu list>` and `rcu_nocbs=<cpu list>` to make selected
+    CPUs tickless and offload RCU callbacks; pin audio threads to those CPUs.
+  - Why: kernel parameters doc describes tickless CPUs and RCU offload to reduce
+    scheduler noise on specific cores.
+  - Risk: easy to misconfigure; requires clear housekeeping cores and CPU pinning.
+  - Source: https://docs.kernel.org/admin-guide/kernel-parameters.html
+
+- IRQ default affinity (`irq_affinity_default`)
+  - What: add `irqaffinity=<cpu list>` to route interrupts to housekeeping CPUs.
+  - Why: kernel parameters doc allows setting a default IRQ affinity mask.
+  - Risk: wrong masks can starve interrupts or hurt device throughput.
+  - Source: https://docs.kernel.org/admin-guide/kernel-parameters.html
+
+- RT throttling limits (`rt_throttling`)
+  - What: tune `/proc/sys/kernel/sched_rt_runtime_us` (and optionally
+    `sched_rt_period_us`) to raise or disable RT throttling (runtime `-1`).
+  - Why: kernel scheduler docs explain the RT runtime budget and throttling.
+  - Risk: disabling throttling can lock up the system with runaway RT tasks.
+  - Source: https://docs.kernel.org/scheduler/sched-rt-group.html
+
+- Boot-time C-state limit (`kernel_max_cstate`)
+  - What: add `intel_idle.max_cstate=<n>` or `processor.max_cstate=<n>` to the
+    kernel cmdline to cap idle depth at boot.
+  - Why: kernel parameters doc describes limiting C-states to reduce wake latency.
+  - Risk: higher power usage and thermals; vendor-specific behavior.
+  - Source: https://docs.kernel.org/admin-guide/kernel-parameters.html
+
+- Idle loop override (`kernel_idle_mode`)
+  - What: add `idle=poll` or `idle=nomwait` to avoid deep idle behavior.
+  - Why: kernel parameters doc describes idle loop modes.
+  - Risk: extreme power/thermal impact; last-resort troubleshooting only.
+  - Source: https://docs.kernel.org/admin-guide/kernel-parameters.html
+
 - SMT disable (`smt_disable`)
   - What: write `off` to `/sys/devices/system/cpu/smt/control` (revert with `on`).
   - Why: Linux Audio wiki notes SMT can cause DSP spikes at higher loads.
@@ -78,7 +112,9 @@ This list focuses on new knobs or meaningful improvements backed by the sources 
     latency (optionally per-CPU).
   - Why: openSUSE tuning guide notes deep C-states increase wake latency.
   - Risk: higher power usage and thermals.
-  - Source: https://doc.opensuse.org/documentation/leap/tuning/html/book-tuning/cha-tuning-power.html
+  - Sources:
+    - https://doc.opensuse.org/documentation/leap/tuning/html/book-tuning/cha-tuning-power.html
+    - https://manpages.opensuse.org/Tumbleweed/cpupower/cpupower-idle-set.1.en.html
 
 - I/O scheduler selection (`io_scheduler_device`)
   - What: set per-device I/O scheduler to `mq-deadline`, `bfq`, `kyber`, or `none`
@@ -156,7 +192,9 @@ This list focuses on new knobs or meaningful improvements backed by the sources 
 - CPU DMA latency udev (`cpu_dma_latency_udev`)
   - Improvement: optional helper service that keeps `/dev/cpu_dma_latency` open with
     `0`, instead of only enabling permissions.
-  - Source: https://wiki.linuxaudio.org/wiki/system_configuration
+  - Sources:
+    - https://wiki.linuxaudio.org/wiki/system_configuration
+    - https://docs.kernel.org/power/pm_qos_interface.html
 
 - rtirq enable (`rtirq_enable`)
   - Improvement: surface RTIRQ priority lists in the UI (similar to QjackCtl cores).
