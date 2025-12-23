@@ -2,7 +2,7 @@
 
 GUI-first realtime audio tuning tool for Linux.
 
-![audioknob-gui screenshot](docs/screenshot-v0.3.4.png)
+![audioknob-gui screenshot](docs/Screenshot_0.3.5.1.jpg)
 
 ## Install (openSUSE Tumbleweed, local RPM)
 
