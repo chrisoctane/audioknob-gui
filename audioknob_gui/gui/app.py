@@ -8,6 +8,7 @@ import subprocess
 import sys
 import shutil
 import glob
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -835,6 +836,72 @@ def main() -> int:
                 if cmd in names:
                     return True
             return False
+
+        def _qjackctl_has_preset(self, path: Path) -> bool:
+            from audioknob_gui.core.qjackctl import read_config
+
+            if not path.exists():
+                return False
+            try:
+                cfg = read_config(path)
+            except Exception:
+                return False
+            return bool(cfg.def_preset)
+
+        def _prime_qjackctl_preset(self) -> None:
+            logger = _get_gui_logger()
+            path = Path("~/.config/rncbc.org/QjackCtl.conf").expanduser()
+            if self._qjackctl_has_preset(path):
+                return
+
+            exe = shutil.which("qjackctl") or shutil.which("qjackctl6")
+            if exe:
+                env = os.environ.copy()
+                if "QT_QPA_PLATFORM" not in env:
+                    env["QT_QPA_PLATFORM"] = "minimal"
+                cmd = [exe, "-s"]
+                try:
+                    p = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        env=env,
+                    )
+                except Exception as e:
+                    logger.info("qjackctl launch failed error=%s", e)
+                else:
+                    try:
+                        deadline = time.monotonic() + 5.0
+                        while time.monotonic() < deadline:
+                            if self._qjackctl_has_preset(path):
+                                return
+                            time.sleep(0.2)
+                    finally:
+                        try:
+                            p.terminate()
+                        except Exception:
+                            pass
+                        try:
+                            p.wait(timeout=2)
+                        except Exception:
+                            try:
+                                p.kill()
+                            except Exception:
+                                pass
+
+                if self._qjackctl_has_preset(path):
+                    return
+
+            try:
+                from audioknob_gui.core.qjackctl import read_config, write_config_with_server_update
+
+                cfg = read_config(path)
+                server_cmd = cfg.server_cmd or "jackd"
+                server_prefix = cfg.server_prefix or ""
+                write_config_with_server_update(path, "default", server_cmd, server_prefix=server_prefix)
+                logger.info("created default qjackctl preset")
+            except Exception as e:
+                logger.info("failed to create default qjackctl preset error=%s", e)
 
         def _update_reboot_banner(self) -> None:
             needs_reboot = any(v == "pending_reboot" for v in self._knob_statuses.values())
@@ -2594,6 +2661,8 @@ def main() -> int:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                 
                 if p.returncode == 0:
+                    if any(cmd_name in ("qjackctl", "qjackctl6") for cmd_name in commands):
+                        self._prime_qjackctl_preset()
                     QMessageBox.information(
                         self,
                         "Success",
@@ -2658,6 +2727,8 @@ def main() -> int:
                             # Retry install after adding repos.
                             p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                             if p.returncode == 0:
+                                if any(cmd_name in ("qjackctl", "qjackctl6") for cmd_name in commands):
+                                    self._prime_qjackctl_preset()
                                 QMessageBox.information(
                                     self,
                                     "Success",
