@@ -15,10 +15,10 @@ This file collects future ideas only. Nothing here is committed work until it is
 ## Bugfix Backlog (Next Release)
 
 - ~~Test bug: "this is a test, bug. fix me."~~ (fixed)
-- Kernel cmdline knobs should allow restoring to Tumbleweed defaults even if they were set before audioknob:
-  - threadirqs
-  - kernel audit
-  - cpu mitigations
-- RT limits still not surfacing a reboot/log-out requirement; investigate why banner/prompt can be missed.
-- QjackCtl cores popup should read the actual config and pre-select cores (default 0,1 after apply).
-- Status check UI should not reserve space before use; consider popup or moving controls into main table.
+- ~~Kernel cmdline knobs should allow restoring to Tumbleweed defaults even if they were set before audioknob~~ (fixed):
+  - ~~threadirqs~~
+  - ~~kernel audit~~
+  - ~~cpu mitigations~~
+- ~~RT limits still not surfacing a reboot/log-out requirement; investigate why banner/prompt can be missed.~~ (fixed)
+- ~~QjackCtl cores popup should read the actual config and pre-select cores (default 0,1 after apply).~~ (fixed)
+- ~~Status check UI should not reserve space before use; consider popup or moving controls into main table.~~ (fixed)
