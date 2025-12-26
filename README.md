@@ -130,18 +130,18 @@ rm -rf ~/rpmbuild/BUILD ~/rpmbuild/BUILDROOT ~/rpmbuild/SOURCES ~/rpmbuild/OTHER
 sudo dnf install -y \
   git-core \
   python3 python3-devel python3-pip python3-setuptools python3-wheel \
-  python3-pyside6 \
   desktop-file-utils \
   polkit
 ```
 
-If `python3-pyside6` is not found, run `dnf search pyside6` and install the matching package.
+Optional (if available in your repo): `sudo dnf install -y python3-pyside6`
 
 #### 2) Clone the repo
 
 ```bash
 git clone https://github.com/chrisoctane/audioknob-gui.git
 cd audioknob-gui
+git checkout feature/distro-startup-scan
 ```
 
 #### 3) Build (venv) + install Python deps
@@ -186,12 +186,19 @@ sudo apt update
 sudo apt install -y \
   git \
   python3 python3-venv python3-pip python3-setuptools python3-wheel python3-dev \
-  python3-pyside6 \
-  desktop-file-utils \
-  policykit-1
+  desktop-file-utils
 ```
 
-If `python3-pyside6` is not found, enable Universe and retry:
+PySide6 is installed via `pip` in the venv below. If `pip install -e .` fails on
+your Python version, use Python 3.12 for the venv.
+
+If `pkexec` is missing, install polkit:
+
+```bash
+sudo apt install -y polkitd pkexec
+```
+
+If `polkitd` or `pkexec` are not found, enable Universe and retry:
 
 ```bash
 sudo add-apt-repository universe
@@ -203,12 +210,23 @@ sudo apt update
 ```bash
 git clone https://github.com/chrisoctane/audioknob-gui.git
 cd audioknob-gui
+git checkout feature/distro-startup-scan
 ```
 
 #### 3) Build (venv) + install Python deps
 
 ```bash
 python3 -m venv .venv
+. .venv/bin/activate
+pip install -U pip setuptools wheel
+pip install -e .
+```
+
+If PySide6 fails to install with Python 3.13, use Python 3.12 for the venv:
+
+```bash
+sudo apt install -y python3.12 python3.12-venv python3.12-dev
+python3.12 -m venv .venv
 . .venv/bin/activate
 pip install -U pip setuptools wheel
 pip install -e .
