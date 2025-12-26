@@ -37,6 +37,7 @@ Notes:
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - QjackCtl defaults to taskset cores 0,1 and adds -R and -P90 when applied.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
+- Main window title includes app version and git short SHA when available.
 ```
 
 ### Bugs Fixed (Prevent Regression)
