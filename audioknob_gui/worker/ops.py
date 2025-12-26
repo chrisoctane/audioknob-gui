@@ -1091,6 +1091,7 @@ def check_knob_status(knob: Any) -> str:
         if not matches:
             return "not_applicable"
         applied_count = 0
+        saw_selector = False
         for p in matches:
             try:
                 content = Path(p).read_text(encoding="utf-8").strip()
@@ -1103,6 +1104,7 @@ def check_knob_status(knob: Any) -> str:
                     match = re.search(r'\[([^\]]+)\]', content)
                     if match:
                         current = match.group(1)
+                        saw_selector = True
                 else:
                     # Plain value (no selector format)
                     current = content
@@ -1117,6 +1119,9 @@ def check_knob_status(knob: Any) -> str:
             base = "partial"
         else:
             base = "not_applied"
+
+        if base == "applied" and knob.id == "thp_mode_madvise" and saw_selector:
+            return "sys_default"
 
         # Special case: persistent CPU governor should also be persisted in cpupower config + service.
         if knob.id == "cpu_governor_performance_persistent":

@@ -768,16 +768,24 @@ def main() -> int:
                 return "kde"
             # Fallback: infer from common session processes.
             try:
+                ps_cmd = shutil.which("ps")
+                if not ps_cmd:
+                    for candidate in ("/bin/ps", "/usr/bin/ps"):
+                        if Path(candidate).exists():
+                            ps_cmd = candidate
+                            break
+                if not ps_cmd:
+                    return "unknown"
                 p = subprocess.run(
-                    ["ps", "-e", "-o", "comm="],
+                    [ps_cmd, "-e", "-o", "comm="],
                     capture_output=True,
                     text=True,
                     timeout=2,
                 )
                 names = set(p.stdout.split())
-                if {"gnome-shell", "gnome-session-binary"} & names:
+                if "gnome-shell" in names or any(n.startswith("gnome-session") for n in names):
                     return "gnome"
-                if {"plasmashell", "ksmserver", "ksplashqml"} & names:
+                if {"plasmashell", "ksmserver", "ksplashqml"} & names or any(n.startswith("plasma") for n in names):
                     return "kde"
             except Exception:
                 pass
@@ -969,7 +977,7 @@ def main() -> int:
                 status = self._knob_statuses.get(kid)
                 if action == "apply" and status in ("applied", "pending_reboot"):
                     continue
-                if action == "reset" and status in ("not_applied", "not_applicable"):
+                if action == "reset" and status in ("not_applied", "not_applicable", "sys_default"):
                     continue
                 keep[kid] = action
             if keep != self._queued_actions:
@@ -1239,6 +1247,7 @@ def main() -> int:
             
             mapping = {
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
+                "sys_default": ("✓ Sys Default", "#1976d2"), # Blue
                 "not_applied": ("—", "#757575"),          # Gray dash
                 "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
@@ -1269,9 +1278,10 @@ def main() -> int:
                     "applied": 0,
                     "pending_reboot": 1,
                     "partial": 2,
-                    "not_applied": 3,
-                    "not_applicable": 4,
-                    "unknown": 5,
+                    "sys_default": 3,
+                    "not_applied": 4,
+                    "not_applicable": 5,
+                    "unknown": 6,
                 }
                 risk_order = {"low": 0, "medium": 1, "high": 2}
 
@@ -1718,6 +1728,7 @@ def main() -> int:
             status_texts = [
                 "Locked",
                 "✓ Applied",
+                "✓ Sys Default",
                 "⟳ Reboot",
                 "◐ Partial",
                 "N/A",
