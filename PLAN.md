@@ -246,6 +246,7 @@ The jitter test also stores the most recent per-thread results in the knob info 
 The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
 Use the "Status" button in the Check column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. Read-only test rows show N/A in this column.
 The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) to make mixed logs easy to read.
+The GUI log also records high-level action start/finish entries (apply queue, reset all) so successes are visible in-app.
 
 ### With config dialog (via info popup)
 ```python

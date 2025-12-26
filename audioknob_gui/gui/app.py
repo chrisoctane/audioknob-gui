@@ -554,6 +554,7 @@ def main() -> int:
 
             self.state = load_state()
             self.registry = load_registry(_registry_path())
+            _get_gui_logger().info("gui started")
             self._ensure_system_profile()
             self._queued_actions = self._sanitize_queue_actions(self.state.get("queued_actions"))
             if self._queued_actions != self.state.get("queued_actions"):
@@ -3318,6 +3319,12 @@ def main() -> int:
             if not confirm.ok:
                 return
 
+            _get_gui_logger().info(
+                "apply queue start reboot_after=%s actions=%s",
+                reboot_after,
+                ",".join(f"{kid}:{action}" for kid, action in queued),
+            )
+
             self._queue_needs_reboot = reboot_after
             self._queue_busy = True
             self._queue_inflight = list(queued)
@@ -3473,6 +3480,7 @@ def main() -> int:
                     self._queue_needs_reboot = False
                     self._refresh_statuses()
                     self._populate()
+                    _get_gui_logger().info("apply queue cancelled")
                     return
                 if action == "reset" and _is_no_transaction_error(message):
                     if self._confirm_force_reset(knob_id):
@@ -3579,6 +3587,12 @@ def main() -> int:
                             + "\n\nForce reset is not supported for these knobs."
                         )
                         QMessageBox.warning(self, "Force reset unavailable", msg)
+            else:
+                _get_gui_logger().info(
+                    "apply queue done applied=%s restored=%s",
+                    ",".join(sorted(applied_ids)) or "-",
+                    ",".join(sorted(restored_ids)) or "-",
+                )
 
             if "qjackctl_server_prefix_rt" in applied_ids and self._is_process_running(["qjackctl", "qjackctl6"]):
                 QMessageBox.information(
@@ -3822,6 +3836,7 @@ def main() -> int:
         def on_reset_defaults(self) -> None:
             """Reset ALL audioknob-gui changes to system defaults."""
             # First, show what will be reset
+            _get_gui_logger().info("reset defaults requested")
             try:
                 argv = [
                     sys.executable,
@@ -4017,12 +4032,14 @@ def main() -> int:
 
                 # Show results
                 if errors:
+                    _get_gui_logger().error("reset defaults failed error=%s", "; ".join(errors))
                     QMessageBox.warning(
                         self,
                         "Reset completed with errors",
                         "\n".join(results_text) + "\n\nErrors:\n" + "\n".join(errors[:5])
                     )
                 else:
+                    _get_gui_logger().info("reset defaults done")
                     QMessageBox.information(
                         self,
                         "Reset complete",
