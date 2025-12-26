@@ -80,6 +80,7 @@ Notes:
 - Worker logs include JSON audit entries (prefixed `audit`) with txid, file
   changes, effects, and command output/errors.
 - GUI-only actions (group changes, package installs) also emit audit entries
+- Log viewer stamps each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) for clarity.
   into the user-scope worker log for a unified audit trail.
 - The GUI header includes **Logs** (view + copy) and **Clear Logs** (clears GUI
   and user worker logs).

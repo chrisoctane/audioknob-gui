@@ -757,38 +757,39 @@ def main() -> int:
             user_worker_log = Path(_worker_log_path(is_root=False))
             root_worker_log = Path(_worker_log_path(is_root=True))
 
-            entries: list[tuple[str, Path]] = [
-                ("GUI log", gui_log),
-                ("Worker log (user)", user_worker_log),
-                ("Worker log (root)", root_worker_log),
+            entries: list[tuple[str, str, Path]] = [
+                ("GUI log", "GUI", gui_log),
+                ("Worker log (user)", "WORKER-USER", user_worker_log),
+                ("Worker log (root)", "WORKER-ROOT", root_worker_log),
             ]
 
             lines: list[str] = []
-            for label, path in entries:
+            for label, tag, path in entries:
                 lines.append(f"=== {label} ===")
                 lines.append(f"Path: {path}")
 
                 if not path.exists():
-                    lines.append("[not found]")
+                    lines.append(f"[{tag}] [not found]")
                     lines.append("")
                     continue
 
                 if label.endswith("(root)") and not os.access(path, os.R_OK):
-                    lines.append("[not readable: requires root]")
+                    lines.append(f"[{tag}] [not readable: requires root]")
                     lines.append("")
                     continue
 
                 try:
                     content = path.read_text(encoding="utf-8")
                 except Exception as exc:
-                    lines.append(f"[error reading log: {exc}]")
+                    lines.append(f"[{tag}] [error reading log: {exc}]")
                     lines.append("")
                     continue
 
                 if content.strip():
-                    lines.append(content.rstrip("\n"))
+                    for line in content.rstrip("\n").splitlines():
+                        lines.append(f"[{tag}] {line}")
                 else:
-                    lines.append("[empty]")
+                    lines.append(f"[{tag}] [empty]")
                 lines.append("")
 
             return "\n".join(lines).rstrip() + "\n"

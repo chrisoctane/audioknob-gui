@@ -245,6 +245,7 @@ self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 The jitter test also stores the most recent per-thread results in the knob info dialog.
 The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
 Use the "Status" button in the Check column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. Read-only test rows show N/A in this column.
+The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) to make mixed logs easy to read.
 
 ### With config dialog (via info popup)
 ```python
