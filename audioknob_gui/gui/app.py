@@ -631,11 +631,6 @@ def main() -> int:
             self.btn_logs.clicked.connect(self._on_show_logs)
             top.addWidget(self.btn_logs)
 
-            self.btn_clear_logs = QPushButton("Clear Logs")
-            self.btn_clear_logs.setToolTip("Clear GUI and user worker logs")
-            self.btn_clear_logs.clicked.connect(self._on_clear_logs)
-            top.addWidget(self.btn_clear_logs)
-
             self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
             top.addWidget(self.btn_reset)
@@ -678,6 +673,7 @@ def main() -> int:
             self._busy_knobs: set[str] = set()
             self._task_threads: list[QThread] = []
             self._install_busy = False
+            self._status_busy = False
             self._user_groups: set[str] = set()
             self._refresh_user_groups()
             self._refresh_statuses()
@@ -813,6 +809,9 @@ def main() -> int:
             copy_btn = QPushButton("Copy to Clipboard")
             copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(text.toPlainText()))
             btn_row.addWidget(copy_btn)
+            clear_btn = QPushButton("Clear Logs")
+            clear_btn.clicked.connect(lambda: self._on_clear_logs(text))
+            btn_row.addWidget(clear_btn)
             btn_row.addStretch(1)
             close_btn = QPushButton("Close")
             close_btn.clicked.connect(dialog.reject)
@@ -821,11 +820,11 @@ def main() -> int:
 
             dialog.exec()
 
-        def _on_clear_logs(self) -> None:
+        def _on_clear_logs(self, text: QTextEdit | None = None) -> None:
             reply = QMessageBox.question(
                 self,
                 "Clear Logs",
-                "Clear GUI and user worker logs?\n\nRoot worker log requires pkexec.",
+                "Clear GUI, user worker, and root worker logs?\n\nRoot worker log requires pkexec.",
                 QMessageBox.Ok | QMessageBox.Cancel,
             )
             if reply != QMessageBox.Ok:
@@ -846,9 +845,12 @@ def main() -> int:
                 except Exception as exc:
                     errors.append(f"{path}: {exc}")
 
-            root_note = ""
-            if root_worker_log.exists() and not os.access(root_worker_log, os.W_OK):
-                root_note = f"Root worker log not cleared: {root_worker_log}"
+            if root_worker_log.exists():
+                try:
+                    _run_pkexec_command(["/bin/sh", "-c", f": > {root_worker_log}"])
+                    cleared.append(str(root_worker_log))
+                except Exception as exc:
+                    errors.append(f"{root_worker_log}: {exc}")
 
             _log_gui_audit(
                 "clear-logs",
@@ -859,12 +861,14 @@ def main() -> int:
                 },
             )
 
-            if errors or root_note:
-                details = "\n".join(errors + ([root_note] if root_note else []))
+            if errors:
+                details = "\n".join(errors)
                 QMessageBox.warning(self, "Logs Cleared (with warnings)", details)
-                return
+            else:
+                QMessageBox.information(self, "Logs Cleared", "Logs cleared successfully.")
 
-            QMessageBox.information(self, "Logs Cleared", "Logs cleared successfully.")
+            if text is not None:
+                text.setPlainText(self._collect_log_text())
 
         def _ensure_system_profile(self) -> None:
             profile = self.state.get("system_profile")
@@ -967,29 +971,49 @@ def main() -> int:
                 btn.setStyleSheet("")
 
         def _refresh_statuses(self) -> None:
-            """Fetch current status of all knobs."""
-            try:
-                # Clear old values so we don't keep stale states if status probe fails.
-                self._knob_statuses = {}
-                argv = [
-                    sys.executable,
-                    "-m",
-                    "audioknob_gui.worker.cli",
-                    "--registry",
-                    _registry_path(),
-                    "status",
-                ]
-                p = subprocess.run(argv, text=True, capture_output=True)
-                if p.returncode == 0:
-                    data = json.loads(p.stdout)
-                    for item in data.get("statuses", []):
-                        self._knob_statuses[item["knob_id"]] = item["status"]
-            except Exception:
-                pass  # Status check failed, leave statuses empty
-            self._apply_session_dependent_statuses()
-            self._update_reboot_banner()
-            self._prune_queue_from_statuses()
-            self._update_queue_ui()
+            """Fetch current status of all knobs (async)."""
+            if self._status_busy:
+                return
+            self._status_busy = True
+
+            def _task() -> tuple[bool, object, str]:
+                try:
+                    statuses: dict[str, str] = {}
+                    argv = [
+                        sys.executable,
+                        "-m",
+                        "audioknob_gui.worker.cli",
+                        "--registry",
+                        _registry_path(),
+                        "status",
+                    ]
+                    p = subprocess.run(argv, text=True, capture_output=True, timeout=15)
+                    if p.returncode == 0:
+                        data = json.loads(p.stdout)
+                        for item in data.get("statuses", []):
+                            statuses[item["knob_id"]] = item["status"]
+                    return True, statuses, ""
+                except Exception as exc:
+                    return False, {}, str(exc)
+
+            worker = QueueTaskWorker(_task, parent=self)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                self._status_busy = False
+                if success and isinstance(payload, dict):
+                    self._knob_statuses = payload
+                else:
+                    self._knob_statuses = {}
+                self._apply_session_dependent_statuses()
+                self._update_reboot_banner()
+                self._prune_queue_from_statuses()
+                self._update_queue_ui()
+                self._populate()
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
 
         def _apply_session_dependent_statuses(self) -> None:
             status = self._knob_statuses.get("rt_limits_audio_group")
