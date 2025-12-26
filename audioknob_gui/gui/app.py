@@ -717,6 +717,21 @@ def main() -> int:
                 return "gnome"
             if "kde" in raw or "plasma" in raw:
                 return "kde"
+            # Fallback: infer from common session processes.
+            try:
+                p = subprocess.run(
+                    ["ps", "-e", "-o", "comm="],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                names = set(p.stdout.split())
+                if {"gnome-shell", "gnome-session-binary"} & names:
+                    return "gnome"
+                if {"plasmashell", "ksmserver", "ksplashqml"} & names:
+                    return "kde"
+            except Exception:
+                pass
             return "unknown"
 
         def _knob_group_ok(self, k) -> bool:
