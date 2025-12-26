@@ -3614,6 +3614,12 @@ def main() -> int:
                 missing_ids = list(dict.fromkeys(missing_user + missing_root))
                 other_errors = other_user + other_root
 
+                if missing_ids:
+                    _get_gui_logger().warning(
+                        "apply queue missing transactions=%s",
+                        ",".join(missing_ids),
+                    )
+
                 show_error = True
                 if missing_ids and not other_errors:
                     show_error = False
@@ -3625,13 +3631,28 @@ def main() -> int:
                 if missing_ids:
                     supported = [kid for kid in missing_ids if self._force_reset_supported(kid)]
                     unsupported = [kid for kid in missing_ids if kid not in supported]
+                    if supported:
+                        _get_gui_logger().info(
+                            "apply queue force reset prompt supported=%s",
+                            ",".join(supported),
+                        )
                     if supported and self._confirm_force_reset_many(supported):
+                        _get_gui_logger().info(
+                            "apply queue force reset accepted supported=%s",
+                            ",".join(supported),
+                        )
                         for kid in supported:
                             self._queued_actions.pop(kid, None)
                         self._save_queue()
                         self._update_queue_ui()
                         self._run_force_reset_many(supported)
+                    elif supported:
+                        _get_gui_logger().info("apply queue force reset cancelled")
                     if unsupported:
+                        _get_gui_logger().warning(
+                            "apply queue force reset unsupported=%s",
+                            ",".join(unsupported),
+                        )
                         msg = (
                             "No transaction was recorded for:\n"
                             + "\n".join(unsupported)
@@ -3784,6 +3805,7 @@ def main() -> int:
                 self._busy_knobs.add(kid)
                 self._knob_statuses[kid] = "running"
             self._populate()
+            _get_gui_logger().info("force reset start knobs=%s", ",".join(knob_ids))
 
             def _task():
                 results = []
@@ -3813,6 +3835,10 @@ def main() -> int:
                     self._busy_knobs.discard(kid)
                 self._refresh_statuses()
                 self._populate()
+                if success:
+                    _get_gui_logger().info("force reset done knobs=%s", ",".join(knob_ids))
+                else:
+                    _get_gui_logger().error("force reset failed error=%s", message)
                 if not success:
                     QMessageBox.warning(
                         self,

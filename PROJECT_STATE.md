@@ -83,6 +83,7 @@ Notes:
 - GUI-only actions (group changes, package installs) also emit audit entries
 - Log viewer stamps each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) for clarity.
 - GUI log includes action start/finish markers for queued apply/reset and Reset All.
+- GUI log includes force-reset prompt/decision and force-reset run results.
   into the user-scope worker log for a unified audit trail.
 - The GUI header includes **Logs** (view + copy) and **Clear Logs** (clears GUI
   and user worker logs).
