@@ -45,6 +45,11 @@
   - Notes: preempt=full on PREEMPT_DYNAMIC kernels, module-rt/RTKit portal, limits.d
     pipewire group, RTKit daemon args, ALSA period-size property, Firefox speech
     dispatcher mitigation, pw-top/pw-profiler.
+- https://help.ubuntu.com/community/UbuntuStudio/UbuntuStudioControls
+  - Ubuntu Studio Controls features: CPU governor, audio group membership, JACK controls,
+    ALSA MIDI/PulseAudio bridging, USB hotplugging into JACK, multi-device JACK, JACK periods.
+- https://help.ubuntu.com/community/UbuntuStudio/RealTimeKernel
+  - Explains low-latency kernel benefits and cautions against full RT kernels.
 
 ## Blocked or limited sources
 

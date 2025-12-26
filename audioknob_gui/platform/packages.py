@@ -89,8 +89,9 @@ def get_package_owner(path: str | Path) -> PackageInfo:
 def _query_rpm(path: str, manager: PackageManager) -> PackageInfo:
     """Query RPM database for file ownership."""
     try:
+        cmd = which_command("rpm") or "rpm"
         result = subprocess.run(
-            ["rpm", "-qf", path],
+            [cmd, "-qf", path],
             capture_output=True,
             text=True,
             timeout=10,
@@ -119,8 +120,9 @@ def _query_rpm(path: str, manager: PackageManager) -> PackageInfo:
 def _query_dpkg(path: str, manager: PackageManager) -> PackageInfo:
     """Query dpkg database for file ownership."""
     try:
+        cmd = which_command("dpkg") or "dpkg"
         result = subprocess.run(
-            ["dpkg", "-S", path],
+            [cmd, "-S", path],
             capture_output=True,
             text=True,
             timeout=10,
@@ -152,8 +154,9 @@ def _query_dpkg(path: str, manager: PackageManager) -> PackageInfo:
 def _query_pacman(path: str, manager: PackageManager) -> PackageInfo:
     """Query pacman database for file ownership."""
     try:
+        cmd = which_command("pacman") or "pacman"
         result = subprocess.run(
-            ["pacman", "-Qo", path],
+            [cmd, "-Qo", path],
             capture_output=True,
             text=True,
             timeout=10,
@@ -205,8 +208,9 @@ def _restore_rpm(info: PackageInfo) -> tuple[bool, str]:
     """Restore file using rpm --restore."""
     try:
         # rpm --restore restores files to their package defaults
+        cmd = which_command("rpm") or "rpm"
         result = subprocess.run(
-            ["rpm", "--restore", info.package],
+            [cmd, "--restore", info.package],
             capture_output=True,
             text=True,
             timeout=60,
@@ -224,9 +228,12 @@ def _restore_rpm(info: PackageInfo) -> tuple[bool, str]:
 def _restore_dpkg(info: PackageInfo) -> tuple[bool, str]:
     """Restore file by reinstalling package (dpkg)."""
     try:
-        # For dpkg, we need to reinstall the package
+        cmds = resolve_package_commands()
+        reinstall_cmd = cmds.get("reinstall") or []
+        if not reinstall_cmd:
+            return False, "apt-get/apt command not found"
         result = subprocess.run(
-            ["apt-get", "install", "--reinstall", "-y", info.package],
+            [*reinstall_cmd, info.package],
             capture_output=True,
             text=True,
             timeout=120,
@@ -234,18 +241,22 @@ def _restore_dpkg(info: PackageInfo) -> tuple[bool, str]:
         if result.returncode == 0:
             return True, f"Reinstalled package {info.package} to restore {info.path}"
         else:
-            return False, f"apt-get reinstall failed: {result.stderr}"
+            return False, f"Package reinstall failed: {result.stderr}"
     except subprocess.TimeoutExpired:
-        return False, "apt-get reinstall timed out"
+        return False, "Package reinstall timed out"
     except FileNotFoundError:
-        return False, "apt-get command not found"
+        return False, "Package reinstall command not found"
 
 
 def _restore_pacman(info: PackageInfo) -> tuple[bool, str]:
     """Restore file by reinstalling package (pacman)."""
     try:
+        cmds = resolve_package_commands()
+        reinstall_cmd = cmds.get("reinstall") or []
+        if not reinstall_cmd:
+            return False, "pacman command not found"
         result = subprocess.run(
-            ["pacman", "-S", "--noconfirm", info.package],
+            [*reinstall_cmd, info.package],
             capture_output=True,
             text=True,
             timeout=120,
@@ -253,11 +264,11 @@ def _restore_pacman(info: PackageInfo) -> tuple[bool, str]:
         if result.returncode == 0:
             return True, f"Reinstalled package {info.package} to restore {info.path}"
         else:
-            return False, f"pacman -S failed: {result.stderr}"
+            return False, f"Package reinstall failed: {result.stderr}"
     except subprocess.TimeoutExpired:
-        return False, "pacman -S timed out"
+        return False, "Package reinstall timed out"
     except FileNotFoundError:
-        return False, "pacman command not found"
+        return False, "Package reinstall command not found"
 
 
 @dataclass(frozen=True)
@@ -329,6 +340,54 @@ def which_command(command: str) -> str | None:
     return None
 
 
+def resolve_package_commands() -> dict[str, list[str]]:
+    """Resolve package manager commands for install/remove/reinstall/query."""
+    manager = detect_package_manager()
+    cmds: dict[str, list[str]] = {
+        "install": [],
+        "remove": [],
+        "reinstall": [],
+        "query_owner": [],
+    }
+
+    if manager == PackageManager.RPM:
+        zypper = which_command("zypper")
+        dnf = which_command("dnf")
+        rpm = which_command("rpm")
+        if zypper:
+            cmds["install"] = [zypper, "--non-interactive", "install"]
+            cmds["remove"] = [zypper, "--non-interactive", "remove"]
+            cmds["reinstall"] = [zypper, "--non-interactive", "install", "-f"]
+        elif dnf:
+            cmds["install"] = [dnf, "install", "-y"]
+            cmds["remove"] = [dnf, "remove", "-y"]
+            cmds["reinstall"] = [dnf, "reinstall", "-y"]
+        if rpm:
+            cmds["query_owner"] = [rpm, "-qf"]
+            if not cmds["reinstall"]:
+                cmds["reinstall"] = [rpm, "--restore"]
+
+    elif manager == PackageManager.DPKG:
+        apt = which_command("apt-get") or which_command("apt")
+        dpkg = which_command("dpkg")
+        if apt:
+            cmds["install"] = [apt, "install", "-y"]
+            cmds["remove"] = [apt, "remove", "-y"]
+            cmds["reinstall"] = [apt, "install", "--reinstall", "-y"]
+        if dpkg:
+            cmds["query_owner"] = [dpkg, "-S"]
+
+    elif manager == PackageManager.PACMAN:
+        pacman = which_command("pacman")
+        if pacman:
+            cmds["install"] = [pacman, "-S", "--noconfirm"]
+            cmds["remove"] = [pacman, "-R", "--noconfirm"]
+            cmds["reinstall"] = [pacman, "-S", "--noconfirm"]
+            cmds["query_owner"] = [pacman, "-Qo"]
+
+    return cmds
+
+
 def check_command_available(command: str) -> bool:
     """Check if a command is available in PATH."""
     return which_command(command) is not None
@@ -359,8 +418,6 @@ def install_packages(commands: list[str]) -> tuple[bool, str]:
     
     Returns (success, message).
     """
-    manager = detect_package_manager()
-    
     # Map commands to package names
     packages = []
     for cmd in commands:
@@ -376,38 +433,15 @@ def install_packages(commands: list[str]) -> tuple[bool, str]:
     packages = list(set(packages))  # Dedupe
     
     try:
-        if manager == PackageManager.RPM:
-            # Try zypper first (openSUSE), fall back to dnf (Fedora)
-            if shutil.which("zypper"):
-                result = subprocess.run(
-                    ["zypper", "--non-interactive", "install", *packages],
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-            else:
-                result = subprocess.run(
-                    ["dnf", "install", "-y", *packages],
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-        elif manager == PackageManager.DPKG:
-            result = subprocess.run(
-                ["apt-get", "install", "-y", *packages],
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-        elif manager == PackageManager.PACMAN:
-            result = subprocess.run(
-                ["pacman", "-S", "--noconfirm", *packages],
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-        else:
+        cmd = resolve_package_commands().get("install") or []
+        if not cmd:
             return False, "Unknown package manager"
+        result = subprocess.run(
+            [*cmd, *packages],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         
         if result.returncode == 0:
             return True, f"Installed: {', '.join(packages)}"

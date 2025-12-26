@@ -11,6 +11,7 @@ import glob
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 def _registry_path() -> str:
@@ -282,6 +283,34 @@ def _get_gui_logger() -> logging.Logger:
     return logger
 
 
+_AUDIT_LOGGER: logging.Logger | None = None
+
+
+def _get_audit_logger() -> logging.Logger:
+    global _AUDIT_LOGGER
+    if _AUDIT_LOGGER is not None:
+        return _AUDIT_LOGGER
+
+    log_path = Path(_worker_log_path(is_root=False))
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logger = logging.getLogger("audioknob.audit")
+    if not logger.handlers:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+    _AUDIT_LOGGER = logger
+    return logger
+
+
+def _log_gui_audit(action: str, payload: dict[str, Any]) -> None:
+    from audioknob_gui.core.audit import log_audit_event
+
+    log_audit_event(_get_audit_logger(), action, payload)
+
+
 def load_state() -> dict:
     p = _state_path()
     default = {
@@ -297,6 +326,7 @@ def load_state() -> dict:
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
         "jitter_test_last": None,  # dict payload from last run or None
+        "system_profile": None,  # dict from startup scan or None
     }
     if not p.exists():
         return default
@@ -316,6 +346,8 @@ def load_state() -> dict:
             data["pipewire_sample_rate"] = None
         if "jitter_test_last" not in data:
             data["jitter_test_last"] = None
+        if "system_profile" not in data:
+            data["system_profile"] = None
         if "enable_reboot_knobs" not in data:
             data["enable_reboot_knobs"] = False
         if "queued_knobs" not in data:
@@ -341,6 +373,8 @@ def load_state() -> dict:
             data["queued_actions"] = cleaned
         if data.get("jitter_test_last") is not None and not isinstance(data.get("jitter_test_last"), dict):
             data["jitter_test_last"] = None
+        if data.get("system_profile") is not None and not isinstance(data.get("system_profile"), dict):
+            data["system_profile"] = None
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
         try:
             q = data.get("pipewire_quantum")
@@ -520,6 +554,7 @@ def main() -> int:
 
             self.state = load_state()
             self.registry = load_registry(_registry_path())
+            self._ensure_system_profile()
             self._queued_actions = self._sanitize_queue_actions(self.state.get("queued_actions"))
             if self._queued_actions != self.state.get("queued_actions"):
                 self.state["queued_actions"] = dict(self._queued_actions)
@@ -590,6 +625,16 @@ def main() -> int:
             self.reboot_button.clicked.connect(self._on_reboot_now)
             self.reboot_button.setVisible(False)
             top.addWidget(self.reboot_button)
+
+            self.btn_logs = QPushButton("Logs")
+            self.btn_logs.setToolTip("Open logs for copy/paste")
+            self.btn_logs.clicked.connect(self._on_show_logs)
+            top.addWidget(self.btn_logs)
+
+            self.btn_clear_logs = QPushButton("Clear Logs")
+            self.btn_clear_logs.setToolTip("Clear GUI and user worker logs")
+            self.btn_clear_logs.clicked.connect(self._on_clear_logs)
+            top.addWidget(self.btn_clear_logs)
 
             self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
@@ -677,6 +722,132 @@ def main() -> int:
                 return []
             from audioknob_gui.platform.packages import check_command_available
             return [cmd for cmd in k.requires_commands if not check_command_available(cmd)]
+
+        def _collect_log_text(self) -> str:
+            gui_log = _state_path().parent / "logs" / "gui.log"
+            user_worker_log = Path(_worker_log_path(is_root=False))
+            root_worker_log = Path(_worker_log_path(is_root=True))
+
+            entries: list[tuple[str, Path]] = [
+                ("GUI log", gui_log),
+                ("Worker log (user)", user_worker_log),
+                ("Worker log (root)", root_worker_log),
+            ]
+
+            lines: list[str] = []
+            for label, path in entries:
+                lines.append(f"=== {label} ===")
+                lines.append(f"Path: {path}")
+
+                if not path.exists():
+                    lines.append("[not found]")
+                    lines.append("")
+                    continue
+
+                if label.endswith("(root)") and not os.access(path, os.R_OK):
+                    lines.append("[not readable: requires root]")
+                    lines.append("")
+                    continue
+
+                try:
+                    content = path.read_text(encoding="utf-8")
+                except Exception as exc:
+                    lines.append(f"[error reading log: {exc}]")
+                    lines.append("")
+                    continue
+
+                if content.strip():
+                    lines.append(content.rstrip("\n"))
+                else:
+                    lines.append("[empty]")
+                lines.append("")
+
+            return "\n".join(lines).rstrip() + "\n"
+
+        def _on_show_logs(self) -> None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Logs")
+            dialog.resize(720, 520)
+
+            layout = QVBoxLayout(dialog)
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setLineWrapMode(QTextEdit.NoWrap)
+            text.setPlainText(self._collect_log_text())
+            layout.addWidget(text)
+
+            btn_row = QHBoxLayout()
+            copy_btn = QPushButton("Copy to Clipboard")
+            copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(text.toPlainText()))
+            btn_row.addWidget(copy_btn)
+            btn_row.addStretch(1)
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.reject)
+            btn_row.addWidget(close_btn)
+            layout.addLayout(btn_row)
+
+            dialog.exec()
+
+        def _on_clear_logs(self) -> None:
+            reply = QMessageBox.question(
+                self,
+                "Clear Logs",
+                "Clear GUI and user worker logs?\n\nRoot worker log requires pkexec.",
+                QMessageBox.Ok | QMessageBox.Cancel,
+            )
+            if reply != QMessageBox.Ok:
+                return
+
+            gui_log = _state_path().parent / "logs" / "gui.log"
+            user_worker_log = Path(_worker_log_path(is_root=False))
+            root_worker_log = Path(_worker_log_path(is_root=True))
+
+            cleared: list[str] = []
+            errors: list[str] = []
+
+            for path in (gui_log, user_worker_log):
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("", encoding="utf-8")
+                    cleared.append(str(path))
+                except Exception as exc:
+                    errors.append(f"{path}: {exc}")
+
+            root_note = ""
+            if root_worker_log.exists() and not os.access(root_worker_log, os.W_OK):
+                root_note = f"Root worker log not cleared: {root_worker_log}"
+
+            _log_gui_audit(
+                "clear-logs",
+                {
+                    "cleared": cleared,
+                    "errors": errors,
+                    "root_log": str(root_worker_log) if root_worker_log.exists() else None,
+                },
+            )
+
+            if errors or root_note:
+                details = "\n".join(errors + ([root_note] if root_note else []))
+                QMessageBox.warning(self, "Logs Cleared (with warnings)", details)
+                return
+
+            QMessageBox.information(self, "Logs Cleared", "Logs cleared successfully.")
+
+        def _ensure_system_profile(self) -> None:
+            profile = self.state.get("system_profile")
+            schema_ok = isinstance(profile, dict) and profile.get("schema") == 1
+            prev_distro = profile.get("distro_id") if schema_ok else None
+            knob_paths = profile.get("knob_paths") if schema_ok else None
+            expected_ids = {k.id for k in self.registry}
+            paths_ok = isinstance(knob_paths, dict) and expected_ids.issubset(knob_paths.keys())
+            try:
+                from audioknob_gui.worker.ops import detect_distro, scan_system_profile
+                current_distro = detect_distro().distro_id
+                if not schema_ok or prev_distro != current_distro or not paths_ok:
+                    self.state["system_profile"] = scan_system_profile(self.registry)
+                    save_state(self.state)
+            except Exception as exc:
+                _get_gui_logger().warning("System profile scan failed: %s", exc)
 
         def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
             if not isinstance(raw, dict):
@@ -2465,24 +2636,44 @@ def main() -> int:
             if not usermod:
                 QMessageBox.critical(self, "Error", "usermod not found on this system.")
                 logger.error("join groups failed: usermod not found")
+                _log_gui_audit(
+                    "join-groups",
+                    {
+                        "user": os.environ.get("USER") or "",
+                        "groups": groups_to_add,
+                        "error": "usermod not found",
+                    },
+                )
                 return
 
             user = os.environ.get("USER") or getpass.getuser()
             errors = []
             successes = []
+            results = []
             
             for group in groups_to_add:
                 try:
+                    cmd = ["pkexec", usermod, "-aG", group, user]
                     p = subprocess.run(
-                        ["pkexec", usermod, "-aG", group, user],
+                        cmd,
                         capture_output=True,
                         text=True
+                    )
+                    results.append(
+                        {
+                            "group": group,
+                            "cmd": cmd,
+                            "returncode": p.returncode,
+                            "stdout": p.stdout,
+                            "stderr": p.stderr,
+                        }
                     )
                     if p.returncode == 0:
                         successes.append(group)
                     else:
                         errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
                 except Exception as e:
+                    results.append({"group": group, "error": str(e)})
                     errors.append(f"{group}: {e}")
             
             # Report results
@@ -2496,6 +2687,16 @@ def main() -> int:
             
             QMessageBox.information(self, "Group Membership", "".join(msg))
             logger.info("join groups user=%s added=%s errors=%s", user, ",".join(successes), "; ".join(errors))
+            _log_gui_audit(
+                "join-groups",
+                {
+                    "user": user,
+                    "groups": groups_to_add,
+                    "added": successes,
+                    "errors": errors,
+                    "results": results,
+                },
+            )
             
             # Refresh (won't show changes until re-login, but update UI state)
             if successes:
@@ -2540,24 +2741,44 @@ def main() -> int:
             if not gpasswd and not usermod:
                 QMessageBox.critical(self, "Error", "Neither gpasswd nor usermod found on this system.")
                 logger.error("leave groups failed: no gpasswd/usermod")
+                _log_gui_audit(
+                    "leave-groups",
+                    {
+                        "user": user,
+                        "groups": groups_to_remove,
+                        "error": "no gpasswd/usermod",
+                    },
+                )
                 return
 
             errors = []
             successes = []
+            results = []
 
             if gpasswd:
                 for group in groups_to_remove:
                     try:
+                        cmd = ["pkexec", gpasswd, "-d", user, group]
                         p = subprocess.run(
-                            ["pkexec", gpasswd, "-d", user, group],
+                            cmd,
                             capture_output=True,
                             text=True,
+                        )
+                        results.append(
+                            {
+                                "group": group,
+                                "cmd": cmd,
+                                "returncode": p.returncode,
+                                "stdout": p.stdout,
+                                "stderr": p.stderr,
+                            }
                         )
                         if p.returncode == 0:
                             successes.append(group)
                         else:
                             errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
                     except Exception as e:
+                        results.append({"group": group, "error": str(e)})
                         errors.append(f"{group}: {e}")
             else:
                 # Fallback: replace supplementary groups via usermod -G
@@ -2571,16 +2792,27 @@ def main() -> int:
                             pass
                     keep_groups = [g for g in keep_groups if g not in groups_to_remove]
                     group_list = ",".join(sorted(set(keep_groups)))
+                    cmd = ["pkexec", usermod, "-G", group_list, user]
                     p = subprocess.run(
-                        ["pkexec", usermod, "-G", group_list, user],
+                        cmd,
                         capture_output=True,
                         text=True,
+                    )
+                    results.append(
+                        {
+                            "groups": groups_to_remove,
+                            "cmd": cmd,
+                            "returncode": p.returncode,
+                            "stdout": p.stdout,
+                            "stderr": p.stderr,
+                        }
                     )
                     if p.returncode == 0:
                         successes.extend(groups_to_remove)
                     else:
                         errors.append(p.stderr.strip() or "Failed to update groups")
                 except Exception as e:
+                    results.append({"groups": groups_to_remove, "error": str(e)})
                     errors.append(str(e))
 
             msg = []
@@ -2593,6 +2825,16 @@ def main() -> int:
 
             QMessageBox.information(self, "Group Membership", "".join(msg))
             logger.info("leave groups user=%s removed=%s errors=%s", user, ",".join(successes), "; ".join(errors))
+            _log_gui_audit(
+                "leave-groups",
+                {
+                    "user": user,
+                    "groups": groups_to_remove,
+                    "removed": successes,
+                    "errors": errors,
+                    "results": results,
+                },
+            )
 
             if successes:
                 self._knob_statuses["audio_group_membership"] = "pending_reboot"
@@ -2623,6 +2865,15 @@ def main() -> int:
                     f"Cannot determine package for: {', '.join(unknown)}\n\n"
                     f"Please install manually."
                 )
+                _log_gui_audit(
+                    "install-packages",
+                    {
+                        "commands": commands,
+                        "packages": packages,
+                        "unknown": unknown,
+                        "error": "unknown package mapping",
+                    },
+                )
                 return
             
             packages = list(set(packages))  # Dedupe
@@ -2636,6 +2887,14 @@ def main() -> int:
             )
             
             if reply != QMessageBox.Ok:
+                _log_gui_audit(
+                    "install-packages",
+                    {
+                        "commands": commands,
+                        "packages": packages,
+                        "status": "cancelled",
+                    },
+                )
                 return
             
             # Run package manager via pkexec
@@ -2656,6 +2915,14 @@ def main() -> int:
                     cmd = ["pkexec", "pacman", "-S", "--noconfirm", *packages]
                 else:
                     QMessageBox.warning(self, "Error", "Unknown package manager")
+                    _log_gui_audit(
+                        "install-packages",
+                        {
+                            "commands": commands,
+                            "packages": packages,
+                            "error": "unknown package manager",
+                        },
+                    )
                     return
                 
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -2668,12 +2935,34 @@ def main() -> int:
                         "Success",
                         f"Installed: {', '.join(packages)}"
                     )
+                    _log_gui_audit(
+                        "install-packages",
+                        {
+                            "commands": commands,
+                            "packages": packages,
+                            "cmd": cmd,
+                            "returncode": p.returncode,
+                            "stdout": p.stdout,
+                            "stderr": p.stderr,
+                        },
+                    )
                     self._populate()  # Refresh UI
                 else:
                     stderr = p.stderr.strip()
                     stdout = p.stdout.strip()
                     combined = (stderr + "\n" + stdout).lower()
                     logger.error("install packages failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
+                    _log_gui_audit(
+                        "install-packages",
+                        {
+                            "commands": commands,
+                            "packages": packages,
+                            "cmd": cmd,
+                            "returncode": p.returncode,
+                            "stdout": p.stdout,
+                            "stderr": p.stderr,
+                        },
+                    )
 
                     no_provider = any(
                         needle in combined
@@ -2734,12 +3023,36 @@ def main() -> int:
                                     "Success",
                                     f"Installed: {', '.join(packages)}"
                                 )
+                                _log_gui_audit(
+                                    "install-packages",
+                                    {
+                                        "commands": commands,
+                                        "packages": packages,
+                                        "cmd": cmd,
+                                        "returncode": p.returncode,
+                                        "stdout": p.stdout,
+                                        "stderr": p.stderr,
+                                        "retry": True,
+                                    },
+                                )
                                 self._populate()
                                 return
 
                             stderr = p.stderr.strip()
                             stdout = p.stdout.strip()
                             logger.error("install retry failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
+                            _log_gui_audit(
+                                "install-packages",
+                                {
+                                    "commands": commands,
+                                    "packages": packages,
+                                    "cmd": cmd,
+                                    "returncode": p.returncode,
+                                    "stdout": p.stdout,
+                                    "stderr": p.stderr,
+                                    "retry": True,
+                                },
+                            )
                             combined = (stderr + "\n" + stdout).lower()
                             if any(needle in combined for needle in ("no provider of", "nothing provides")):
                                 QMessageBox.critical(
@@ -2757,8 +3070,26 @@ def main() -> int:
                     )
             except subprocess.TimeoutExpired:
                 QMessageBox.critical(self, "Timeout", "Package installation timed out")
+                _log_gui_audit(
+                    "install-packages",
+                    {
+                        "commands": commands,
+                        "packages": packages,
+                        "cmd": cmd if "cmd" in locals() else None,
+                        "error": "timeout",
+                    },
+                )
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Install error: {e}")
+                _log_gui_audit(
+                    "install-packages",
+                    {
+                        "commands": commands,
+                        "packages": packages,
+                        "cmd": cmd if "cmd" in locals() else None,
+                        "error": str(e),
+                    },
+                )
 
         def _on_apply_knob(self, knob_id: str) -> None:
             """Apply a single knob optimization."""

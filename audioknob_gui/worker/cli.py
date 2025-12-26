@@ -9,8 +9,10 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from audioknob_gui.core.paths import default_paths
+from audioknob_gui.core.audit import log_audit_event
 from audioknob_gui.core.transaction import (
     RESET_BACKUP,
     RESET_DELETE,
@@ -50,6 +52,11 @@ def _setup_worker_logging() -> logging.Logger:
 
     logger.info("start euid=%s argv=%s", os.geteuid(), " ".join(sys.argv))
     return logger
+
+
+def _log_audit_event(action: str, payload: dict[str, Any]) -> None:
+    logger = logging.getLogger("audioknob.worker")
+    log_audit_event(logger, action, payload)
 
 
 def _require_root() -> None:
@@ -370,6 +377,16 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         "effects": effects,
     }
     write_manifest(tx, manifest)
+    _log_audit_event(
+        "apply-user",
+        {
+            "txid": tx.txid,
+            "applied": applied,
+            "backups": backups,
+            "effects": effects,
+            "manifest": str(tx.root / "manifest.json"),
+        },
+    )
 
     logger.info("apply-user done txid=%s applied=%s", tx.txid, ",".join(applied))
     print(json.dumps({"schema": 1, "txid": tx.txid, "applied": applied}, indent=2))
@@ -470,25 +487,15 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
             # Special case: persistent CPU governor requires additional config to survive reboot.
             if kid == "cpu_governor_performance_persistent":
-                from audioknob_gui.worker.ops import systemd_enable_now
+                from audioknob_gui.worker.ops import (
+                    read_os_release,
+                    resolve_cpupower_config_path,
+                    systemd_enable_now,
+                )
 
-                def _read_os_release_id() -> str:
-                    try:
-                        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
-                            if line.startswith("ID="):
-                                return line.split("=", 1)[1].strip().strip('"').strip("'")
-                    except Exception:
-                        pass
-                    return ""
-
-                distro_id = _read_os_release_id()
-                # Best-effort: openSUSE/Fedora use /etc/sysconfig/cpupower; Debian-family uses /etc/default/cpufrequtils.
-                if distro_id in ("debian", "ubuntu", "linuxmint", "pop"):
-                    cfg_path = "/etc/default/cpufrequtils"
-                    key = "GOVERNOR"
-                else:
-                    cfg_path = "/etc/sysconfig/cpupower"
-                    key = "GOVERNOR"
+                distro_id = read_os_release().get("ID", "")
+                cfg_path = resolve_cpupower_config_path(distro_id)
+                key = "GOVERNOR"
 
                 backups.append(backup_file(tx, cfg_path))
 
@@ -665,6 +672,18 @@ def cmd_apply(args: argparse.Namespace) -> int:
         "effects": effects,
     }
     write_manifest(tx, manifest)
+    audit_payload = {
+        "txid": tx.txid,
+        "applied": applied,
+        "backups": backups,
+        "effects": effects,
+        "manifest": str(tx.root / "manifest.json"),
+    }
+    if warnings:
+        audit_payload["warnings"] = warnings
+    if followups:
+        audit_payload["followups"] = followups
+    _log_audit_event("apply", audit_payload)
 
     logger.info("apply done txid=%s applied=%s", tx.txid, ",".join(applied))
     result = {"schema": 1, "txid": tx.txid, "applied": applied}
@@ -718,6 +737,16 @@ def cmd_restore(args: argparse.Namespace) -> int:
         elif e.get("kind") == "baloo_disable":
             baloo_enable()
 
+    _log_audit_event(
+        "restore",
+        {
+            "txid": args.txid,
+            "was_root": is_root,
+            "backups": manifest.get("backups", []),
+            "effects": effects,
+            "manifest": str(manifest_path),
+        },
+    )
     print(json.dumps({"schema": 1, "restored": args.txid, "was_root": is_root}, indent=2))
     return 0
 
@@ -804,7 +833,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                 break
 
     if not all_txs:
-        print(json.dumps({
+        payload = {
             "schema": 1,
             "message": "No transactions found - nothing to reset",
             "reset_count": 0,
@@ -812,7 +841,18 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             "errors": [],
             "scope": scope_filter,
             "needs_root_reset": needs_root_reset,
-        }, indent=2))
+        }
+        _log_audit_event(
+            "reset-defaults",
+            {
+                "scope": scope_filter,
+                "reset_count": 0,
+                "results": [],
+                "errors": [],
+                "needs_root_reset": needs_root_reset,
+            },
+        )
+        print(json.dumps(payload, indent=2))
         return 0
     
     # Track which files we've already reset (avoid duplicate resets)
@@ -977,6 +1017,16 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         except Exception as ex:
             errors.append(f"Bootloader update check failed: {ex}")
 
+    _log_audit_event(
+        "reset-defaults",
+        {
+            "scope": scope_filter,
+            "reset_count": len(reset_paths),
+            "results": results,
+            "errors": errors,
+            "needs_root_reset": needs_root_reset,
+        },
+    )
     print(json.dumps({
         "schema": 1,
         "message": f"Reset {len(reset_paths)} files to system defaults",
@@ -1358,6 +1408,7 @@ def _restore_knob_once(knob_id: str) -> dict:
 def cmd_restore_knob(args: argparse.Namespace) -> int:
     """Restore a specific knob to its original state."""
     result = _restore_knob_once(args.knob_id)
+    _log_audit_event("restore-knob", result)
     print(json.dumps(result, indent=2))
     return 0 if result.get("success") else 1
 
@@ -1383,13 +1434,15 @@ def cmd_restore_many(args: argparse.Namespace) -> int:
             errors.append(f"{knob_id}: restore failed")
 
     success = len(errors) == 0
-    print(json.dumps({
+    payload = {
         "schema": 1,
         "success": success,
         "restored": restored,
         "results": results,
         "errors": errors,
-    }, indent=2))
+    }
+    _log_audit_event("restore-many", payload)
+    print(json.dumps(payload, indent=2))
     return 0 if success else 1
 
 
@@ -1480,19 +1533,26 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     by_id = {k.id: k for k in reg}
     k = by_id.get(knob_id)
     if k is None:
-        print(json.dumps({"schema": 1, "success": False, "error": f"Unknown knob id: {knob_id}"}, indent=2))
+        payload = {"schema": 1, "success": False, "error": f"Unknown knob id: {knob_id}", "knob_id": knob_id}
+        _log_audit_event("force-reset-knob", payload)
+        print(json.dumps(payload, indent=2))
         return 1
 
     if k.requires_root and os.geteuid() != 0:
-        print(json.dumps({
+        payload = {
             "schema": 1,
             "success": False,
             "error": f"Knob {knob_id} requires root; run with pkexec",
-        }, indent=2))
+            "knob_id": knob_id,
+        }
+        _log_audit_event("force-reset-knob", payload)
+        print(json.dumps(payload, indent=2))
         return 1
 
     if not k.impl:
-        print(json.dumps({"schema": 1, "success": False, "error": "Knob not implemented"}, indent=2))
+        payload = {"schema": 1, "success": False, "error": "Knob not implemented", "knob_id": knob_id}
+        _log_audit_event("force-reset-knob", payload)
+        print(json.dumps(payload, indent=2))
         return 1
 
     kind = k.impl.kind
@@ -1510,12 +1570,14 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     else:
         message = f"Force reset not supported for kind: {kind}"
 
-    print(json.dumps({
+    payload = {
         "schema": 1,
         "success": success,
         "knob_id": knob_id,
         "message": message,
-    }, indent=2))
+    }
+    _log_audit_event("force-reset-knob", payload)
+    print(json.dumps(payload, indent=2))
     return 0 if success else 1
 
 

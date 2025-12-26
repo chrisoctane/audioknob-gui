@@ -4,12 +4,15 @@ import glob
 import subprocess
 import shlex
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from audioknob_gui.core.diffutil import unified_diff
+from audioknob_gui.core.paths import get_registry_path
 from audioknob_gui.core.qjackctl import ensure_server_flags, read_config
 from audioknob_gui.core.runner import run
+from audioknob_gui.registry import Knob, load_registry
 
 
 # ============================================================================
@@ -25,20 +28,47 @@ class DistroInfo:
     kernel_cmdline_update_cmd: list[str]
 
 
+def read_os_release() -> dict[str, str]:
+    os_release: dict[str, str] = {}
+    try:
+        content = Path("/etc/os-release").read_text(encoding="utf-8")
+        for line in content.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                os_release[key] = value.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return os_release
+
+
+def resolve_cpupower_config_path(distro_id: str) -> str:
+    deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
+    primary = "/etc/default/cpufrequtils" if deb_like else "/etc/sysconfig/cpupower"
+    secondary = "/etc/sysconfig/cpupower" if deb_like else "/etc/default/cpufrequtils"
+    if Path(primary).exists():
+        return primary
+    if Path(secondary).exists():
+        return secondary
+    return primary
+
+
+def resolve_rtirq_config_path(distro_id: str) -> str:
+    deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
+    primary = "/etc/default/rtirq" if deb_like else "/etc/sysconfig/rtirq"
+    secondary = "/etc/sysconfig/rtirq" if deb_like else "/etc/default/rtirq"
+    if Path(primary).exists():
+        return primary
+    if Path(secondary).exists():
+        return secondary
+    return primary
+
+
 def detect_distro() -> DistroInfo:
     """Detect distribution and boot system configuration."""
     from audioknob_gui.platform.packages import which_command
     
     # Parse /etc/os-release
-    os_release = {}
-    try:
-        content = Path("/etc/os-release").read_text()
-        for line in content.splitlines():
-            if "=" in line:
-                key, _, value = line.partition("=")
-                os_release[key] = value.strip('"\'')
-    except Exception:
-        pass
+    os_release = read_os_release()
     
     distro_id = os_release.get("ID", "unknown")
     version_id = os_release.get("VERSION_ID", "")
@@ -133,6 +163,161 @@ def detect_distro() -> DistroInfo:
         kernel_cmdline_file="",
         kernel_cmdline_update_cmd=[],
     )
+
+
+def _expand_path(path: str) -> str:
+    return str(Path(path).expanduser())
+
+
+def build_knob_paths(
+    *,
+    paths: dict[str, str],
+    distro: DistroInfo,
+    knobs: list[Knob] | None = None,
+) -> dict[str, dict[str, Any]]:
+    if knobs is None:
+        knobs = load_registry(get_registry_path())
+
+    out: dict[str, dict[str, Any]] = {}
+
+    for knob in knobs:
+        targets: list[dict[str, Any]] = []
+        kind = knob.impl.kind if knob.impl is not None else "none"
+        params = knob.impl.params if knob.impl is not None else {}
+
+        if kind in ("pam_limits_audio_group", "sysctl_conf", "udev_rule", "pipewire_conf", "qjackctl_server_prefix"):
+            path = str(params.get("path", ""))
+            targets.append({"type": "path", "value": _expand_path(path) if path else ""})
+        elif kind == "sysfs_glob_kv":
+            glob_pat = str(params.get("glob", ""))
+            if glob_pat:
+                targets.append({"type": "sysfs_glob", "value": glob_pat})
+        elif kind == "kernel_cmdline":
+            cmdline_path = paths.get("kernel_cmdline_file", "")
+            targets.append({"type": "kernel_cmdline_file", "value": cmdline_path})
+            param = str(params.get("param", ""))
+            if param:
+                targets.append({"type": "kernel_cmdline_param", "value": param})
+            if distro.kernel_cmdline_update_cmd:
+                targets.append({"type": "kernel_cmdline_update_cmd", "value": distro.kernel_cmdline_update_cmd})
+        elif kind == "systemd_unit_toggle":
+            unit = str(params.get("unit", ""))
+            targets.append({"type": "systemd_unit", "value": unit})
+        elif kind == "user_service_mask":
+            services = params.get("services")
+            if isinstance(services, list):
+                targets.append(
+                    {"type": "user_services", "value": [str(s) for s in services if s]}
+                )
+            else:
+                unit = str(params.get("unit", ""))
+                targets.append({"type": "user_service", "value": unit})
+        elif kind == "group_membership":
+            groups = params.get("groups")
+            if isinstance(groups, list):
+                targets.append({"type": "groups", "value": [str(g) for g in groups if g]})
+            elif knob.requires_groups:
+                targets.append({"type": "groups", "value": list(knob.requires_groups)})
+        elif kind == "baloo_disable":
+            targets.append({"type": "command", "value": "balooctl"})
+        elif kind == "read_only":
+            what = str(params.get("what", ""))
+            if what:
+                targets.append({"type": "read_only", "value": what})
+
+        if knob.id == "cpu_governor_performance_persistent":
+            cfg_path = paths.get("cpupower_config", "")
+            if cfg_path:
+                targets.append({"type": "path", "value": cfg_path})
+            targets.append({"type": "systemd_unit", "value": "cpupower.service"})
+
+        out[knob.id] = {"kind": kind, "targets": targets}
+
+    return out
+
+
+def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
+    """Build a distro-aware path profile for knob operations."""
+    distro = detect_distro()
+    os_release = read_os_release()
+    pretty_name = os_release.get("PRETTY_NAME", "")
+    version_id = os_release.get("VERSION_ID", "")
+
+    paths: dict[str, str] = {
+        "kernel_cmdline_file": distro.kernel_cmdline_file,
+        "cpupower_config": resolve_cpupower_config_path(distro.distro_id),
+        "rtirq_config": resolve_rtirq_config_path(distro.distro_id),
+        "pipewire_user_conf_dir": str(Path("~/.config/pipewire/pipewire.conf.d").expanduser()),
+        "pipewire_system_conf_dir": "/etc/pipewire/pipewire.conf.d",
+        "qjackctl_config": str(Path("~/.config/rncbc.org/QjackCtl.conf").expanduser()),
+        "limits_dir": "/etc/security/limits.d",
+        "sysctl_dir": "/etc/sysctl.d",
+        "udev_rules_dir": "/etc/udev/rules.d",
+    }
+
+    commands: dict[str, list[str]] = {
+        "kernel_cmdline_update": distro.kernel_cmdline_update_cmd,
+    }
+
+    try:
+        from audioknob_gui.platform.packages import resolve_package_commands
+        pkg_cmds = resolve_package_commands()
+        commands.update(
+            {
+                "package_install": pkg_cmds.get("install", []),
+                "package_remove": pkg_cmds.get("remove", []),
+                "package_reinstall": pkg_cmds.get("reinstall", []),
+                "package_query_owner": pkg_cmds.get("query_owner", []),
+            }
+        )
+    except Exception:
+        pass
+
+    def _check_path(path: str, *, expect_dir: bool) -> bool:
+        if not path:
+            return False
+        p = Path(path).expanduser()
+        return p.is_dir() if expect_dir else p.exists()
+
+    checks: dict[str, bool] = {
+        "kernel_cmdline_file": _check_path(paths["kernel_cmdline_file"], expect_dir=False),
+        "cpupower_config": _check_path(paths["cpupower_config"], expect_dir=False),
+        "rtirq_config": _check_path(paths["rtirq_config"], expect_dir=False),
+        "pipewire_user_conf_dir": _check_path(paths["pipewire_user_conf_dir"], expect_dir=True),
+        "pipewire_system_conf_dir": _check_path(paths["pipewire_system_conf_dir"], expect_dir=True),
+        "qjackctl_config": _check_path(paths["qjackctl_config"], expect_dir=False),
+        "limits_dir": _check_path(paths["limits_dir"], expect_dir=True),
+        "sysctl_dir": _check_path(paths["sysctl_dir"], expect_dir=True),
+        "udev_rules_dir": _check_path(paths["udev_rules_dir"], expect_dir=True),
+    }
+
+    notes: list[str] = []
+    if not paths["kernel_cmdline_file"]:
+        notes.append("No kernel cmdline file detected; kernel cmdline knobs may be unavailable.")
+    elif not checks["kernel_cmdline_file"]:
+        notes.append(f"Kernel cmdline file not found: {paths['kernel_cmdline_file']}")
+    if not checks["limits_dir"]:
+        notes.append(f"Limits.d directory missing: {paths['limits_dir']}")
+    if not checks["sysctl_dir"]:
+        notes.append(f"sysctl.d directory missing: {paths['sysctl_dir']}")
+    if not checks["udev_rules_dir"]:
+        notes.append(f"udev rules directory missing: {paths['udev_rules_dir']}")
+
+    knob_paths = build_knob_paths(paths=paths, distro=distro, knobs=knobs)
+
+    return {
+        "schema": 1,
+        "scanned_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "distro_id": distro.distro_id,
+        "version_id": version_id,
+        "pretty_name": pretty_name,
+        "boot_system": distro.boot_system,
+        "paths": paths,
+        "commands": commands,
+        "checks": checks,
+        "knob_paths": knob_paths,
+        "notes": notes,
+    }
 
 
 @dataclass(frozen=True)
@@ -883,17 +1068,9 @@ def check_knob_status(knob: Any) -> str:
             if base != "applied":
                 return base
 
-            def _read_os_release_id() -> str:
-                try:
-                    for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
-                        if line.startswith("ID="):
-                            return line.split("=", 1)[1].strip().strip('"').strip("'")
-                except Exception:
-                    pass
-                return ""
-
-            distro_id = _read_os_release_id()
-            cfg_path = "/etc/default/cpufrequtils" if distro_id in ("debian", "ubuntu", "linuxmint", "pop") else "/etc/sysconfig/cpupower"
+            os_release = read_os_release()
+            distro_id = os_release.get("ID", "")
+            cfg_path = resolve_cpupower_config_path(distro_id)
             cfg_ok = False
             try:
                 text = Path(cfg_path).read_text(encoding="utf-8")

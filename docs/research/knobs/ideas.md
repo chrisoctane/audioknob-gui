@@ -200,6 +200,38 @@ This list focuses on new knobs or meaningful improvements backed by the sources 
   - Improvement: surface RTIRQ priority lists in the UI (similar to QjackCtl cores).
   - Source: https://wiki.linuxaudio.org/wiki/system_configuration
 
+## Ubuntu Studio inspired candidates
+
+- Low-latency kernel install (`lowlatency_kernel_install`)
+  - What: install and default to the low-latency kernel (requires reboot).
+  - Why: Ubuntu Studio ships a low-latency kernel for pro audio responsiveness.
+  - Risk: package availability varies by distro; reboot required.
+  - Source: https://help.ubuntu.com/community/UbuntuStudio/RealTimeKernel
+
+- JACK periods/buffer tuning (`jack_periods`)
+  - What: expose JACK periods/buffer size (e.g., via QjackCtl config).
+  - Why: Ubuntu Studio Controls exposes a "Jack Periods" setting, especially for USB devices.
+  - Risk: misconfigured periods can cause xruns.
+  - Source: https://help.ubuntu.com/community/UbuntuStudio/UbuntuStudioControls
+
+- JACK USB hotplug bridge (`jack_usb_hotplug_bridge`)
+  - What: auto-bridge USB audio devices to JACK when plugged in.
+  - Why: Ubuntu Studio Controls supports USB device hotplugging into JACK.
+  - Risk: extra dependencies and device-specific behavior.
+  - Source: https://help.ubuntu.com/community/UbuntuStudio/UbuntuStudioControls
+
+- JACK multi-device bridge (`jack_multi_device_bridge`)
+  - What: enable multiple audio devices to be used by JACK simultaneously.
+  - Why: Ubuntu Studio Controls supports multi-device JACK setups.
+  - Risk: complex routing and higher latency; requires careful UX.
+  - Source: https://help.ubuntu.com/community/UbuntuStudio/UbuntuStudioControls
+
+- JACK bridge helpers (`jack_bridge_alsa_midi`, `jack_bridge_pulseaudio`)
+  - What: enable ALSA MIDI and PulseAudio bridges for JACK (e.g., a2jmidid, module-jack).
+  - Why: Ubuntu Studio Controls includes these bridges for interoperability.
+  - Risk: may conflict with PipeWire; should be gated by stack detection.
+  - Source: https://help.ubuntu.com/community/UbuntuStudio/UbuntuStudioControls
+
 ## Research backlog
 
 - PipeWire performance tuning wiki

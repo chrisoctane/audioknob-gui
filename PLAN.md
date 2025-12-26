@@ -84,6 +84,19 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 - GUI: `~/.local/state/audioknob-gui/logs/gui.log`
 - Worker (user scope): `~/.local/state/audioknob-gui/logs/worker.log`
 - Worker (root scope): `/var/lib/audioknob-gui/logs/worker.log`
+- Worker logs include JSON audit entries (prefixed `audit`) with txid, files
+  changed, effects, and command output/errors. GUI-only actions (group changes,
+  package installs) also emit audit entries into the user-scope worker log.
+- The header includes **Logs** (view + copy) and **Clear Logs** (clears GUI +
+  user worker logs) to keep test runs clean.
+
+### Startup system profile scan (first run)
+
+On first GUI launch, the app records the detected distro, package commands, and
+per-knob locations in `~/.local/state/audioknob-gui/state.json`. This confirms
+distro-specific paths (e.g., kernel cmdline handling on Tumbleweed vs
+Ubuntu/Fedora) and ensures each knob has a resolved location entry. If the file
+is removed, the schema changes, or the distro changes, the scan runs again.
 
 ---
 

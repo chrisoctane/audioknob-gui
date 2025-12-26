@@ -75,6 +75,12 @@ Notes:
 - GUI: `~/.local/state/audioknob-gui/logs/gui.log`
 - Worker (user scope): `~/.local/state/audioknob-gui/logs/worker.log`
 - Worker (root scope): `/var/lib/audioknob-gui/logs/worker.log`
+- Worker logs include JSON audit entries (prefixed `audit`) with txid, file
+  changes, effects, and command output/errors.
+- GUI-only actions (group changes, package installs) also emit audit entries
+  into the user-scope worker log for a unified audit trail.
+- The GUI header includes **Logs** (view + copy) and **Clear Logs** (clears GUI
+  and user worker logs).
 
 ### Future Enhancements (P2)
 
@@ -581,7 +587,30 @@ else:
   "font_size": 11,
   "qjackctl_cpu_cores": [2, 3],
   "pipewire_quantum": 256,
-  "pipewire_sample_rate": 48000
+  "pipewire_sample_rate": 48000,
+  "system_profile": {
+    "schema": 1,
+    "distro_id": "opensuse-tumbleweed",
+    "boot_system": "grub2-bls",
+    "paths": {
+      "kernel_cmdline_file": "/etc/kernel/cmdline",
+      "cpupower_config": "/etc/sysconfig/cpupower"
+    },
+    "commands": {
+      "package_install": ["zypper", "--non-interactive", "install"],
+      "kernel_cmdline_update": ["sdbootutil", "update-all-entries"]
+    },
+    "knob_paths": {
+      "rt_limits_audio_group": {
+        "kind": "pam_limits_audio_group",
+        "targets": [{"type": "path", "value": "/etc/security/limits.d/99-audioknob-gui.conf"}]
+      },
+      "kernel_threadirqs": {
+        "kind": "kernel_cmdline",
+        "targets": [{"type": "kernel_cmdline_file", "value": "/etc/kernel/cmdline"}]
+      }
+    }
+  }
 }
 ```
 
@@ -604,6 +633,12 @@ else:
 - Sample rate selection is a GUI-level preference (44100/48000/88200/96000/192000)
 - Applied via override in the worker for the `pipewire_sample_rate` knob
 - Applying either PipeWire knob restarts PipeWire services automatically (best-effort)
+
+**Why store system_profile?**
+- Records detected distro and resolved path map on first startup
+- Used to confirm distro-specific paths (e.g., kernel cmdline handling)
+- Rescanned if schema changes or distro changes
+- Includes a per-knob location entry (file path, glob, unit, or command)
 
 ### Status Refresh Flow
 
@@ -1264,6 +1299,9 @@ fi
 We currently detect:
 - Package manager (rpm/dpkg/pacman) in `platform/packages.py`
 - Audio stack (PipeWire/JACK) in `platform/detect.py`
+- System profile on first GUI startup (distro + key paths) for Ubuntu/Fedora/Tumbleweed,
+  stored in `state.json` and used to confirm distro-specific paths (kernel cmdline,
+  cpupower, rtirq).
 
 #### Phase 2: Needed Detection
 
