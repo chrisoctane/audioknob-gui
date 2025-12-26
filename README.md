@@ -159,6 +159,9 @@ pip install -e .
 sudo ./packaging/install-polkit.sh
 ```
 
+This writes `/etc/audioknob-gui/dev.conf` with your repo path. Re-run this script
+if you move the repo.
+
 #### 5) Install desktop entry (user)
 
 ```bash
@@ -237,6 +240,9 @@ pip install -e .
 ```bash
 sudo ./packaging/install-polkit.sh
 ```
+
+This writes `/etc/audioknob-gui/dev.conf` with your repo path. Re-run this script
+if you move the repo.
 
 #### 5) Install desktop entry (user)
 
