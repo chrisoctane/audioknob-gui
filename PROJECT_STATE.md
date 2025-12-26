@@ -58,7 +58,8 @@ Notes:
 - Reset errors now surface detailed messages instead of a generic "Unknown error".
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
-- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt.
+- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt (systemd_unit_toggle, kernel_cmdline, and sysfs_glob_kv when a default can be inferred from sysfs options).
+- Queued resets now group "no transaction" knobs and offer a force-reset prompt instead of failing the whole queue.
 - QjackCtl RT now warns to restart QjackCtl when it is running; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
 - Kernel cmdline apply can prompt to run the bootloader update command via pkexec.
@@ -360,7 +361,7 @@ audioknob-gui/
 2. GUI calls worker with restore-knob command
 3. Worker:
    a. Finds transaction that applied this knob
-   b. Reads backup metadata from manifest
+   b. Reads backup metadata from manifest (uses the oldest entry per file path)
    c. Based on reset_strategy:
       - "delete": Remove the file we created
       - "backup": Copy backup file back to original location
@@ -1464,8 +1465,8 @@ python3 -m audioknob_gui.worker.cli list-pending
 
 # Notes:
 # - `list-changes` is historical audit (all transactions ever).
-# - `list-pending` is current-state (what still needs reset). For effects, it deduplicates by kind+path and keeps
-#   the OLDEST entry so restore returns to the original baseline state.
+# - `list-pending` is current-state (what still needs reset). For files and effects, it keeps the OLDEST entry
+#   so restore returns to the original baseline state.
 
 # Reset defaults in two phases (what GUI does for “Reset All”):
 python3 -m audioknob_gui.worker.cli reset-defaults --scope user

@@ -3509,6 +3509,10 @@ def main() -> int:
 
             applied_ids: set[str] = set()
             restored_ids: set[str] = set()
+            user_result: dict[str, Any] = {}
+            root_result: dict[str, Any] = {}
+            reset_user: dict[str, Any] = {}
+            reset_root: dict[str, Any] = {}
             if isinstance(payload, dict):
                 user_result = payload.get("apply_user") or {}
                 root_result = payload.get("apply_root") or {}
@@ -3544,8 +3548,36 @@ def main() -> int:
                     self._refresh_statuses()
                     self._populate()
                     return
-                _get_gui_logger().error("apply queue failed error=%s", message)
-                QMessageBox.critical(self, "Failed", message or "Unknown error")
+
+                missing_user, other_user = self._collect_no_transaction_knobs(reset_user)
+                missing_root, other_root = self._collect_no_transaction_knobs(reset_root)
+                missing_ids = list(dict.fromkeys(missing_user + missing_root))
+                other_errors = other_user + other_root
+
+                show_error = True
+                if missing_ids and not other_errors:
+                    show_error = False
+
+                if show_error:
+                    _get_gui_logger().error("apply queue failed error=%s", message)
+                    QMessageBox.critical(self, "Failed", message or "Unknown error")
+
+                if missing_ids:
+                    supported = [kid for kid in missing_ids if self._force_reset_supported(kid)]
+                    unsupported = [kid for kid in missing_ids if kid not in supported]
+                    if supported and self._confirm_force_reset_many(supported):
+                        for kid in supported:
+                            self._queued_actions.pop(kid, None)
+                        self._save_queue()
+                        self._update_queue_ui()
+                        self._run_force_reset_many(supported)
+                    if unsupported:
+                        msg = (
+                            "No transaction was recorded for:\n"
+                            + "\n".join(unsupported)
+                            + "\n\nForce reset is not supported for these knobs."
+                        )
+                        QMessageBox.warning(self, "Force reset unavailable", msg)
 
             if "qjackctl_server_prefix_rt" in applied_ids and self._is_process_running(["qjackctl", "qjackctl6"]):
                 QMessageBox.information(
@@ -3608,6 +3640,114 @@ def main() -> int:
                 return True, {"result": result}, result.get("message", "")
 
             self._run_knob_task(knob_id, "force_reset", _task)
+
+        def _force_reset_supported(self, knob_id: str) -> bool:
+            k = next((k for k in self.registry if k.id == knob_id), None)
+            if not k or not k.impl:
+                return False
+            return k.impl.kind in ("systemd_unit_toggle", "kernel_cmdline", "sysfs_glob_kv")
+
+        def _collect_no_transaction_knobs(self, result: dict[str, Any]) -> tuple[list[str], list[str]]:
+            no_tx: list[str] = []
+            other_errors: list[str] = []
+            if not isinstance(result, dict):
+                return no_tx, other_errors
+
+            results = result.get("results") or []
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                knob_id = item.get("knob_id")
+                errors: list[str] = []
+                if item.get("error"):
+                    errors.append(str(item["error"]))
+                errors.extend([str(e) for e in item.get("errors") or []])
+                if not errors:
+                    continue
+                if any(_is_no_transaction_error(e) for e in errors):
+                    if knob_id and knob_id not in no_tx:
+                        no_tx.append(knob_id)
+                    for err in errors:
+                        if not _is_no_transaction_error(err):
+                            other_errors.append(err)
+                else:
+                    other_errors.extend(errors)
+
+            for err in result.get("errors") or []:
+                err_str = str(err)
+                if _is_no_transaction_error(err_str):
+                    if ":" in err_str:
+                        kid = err_str.split(":", 1)[0].strip()
+                        if kid and kid not in no_tx:
+                            no_tx.append(kid)
+                else:
+                    other_errors.append(err_str)
+
+            return no_tx, other_errors
+
+        def _confirm_force_reset_many(self, knob_ids: list[str]) -> bool:
+            by_id = {k.id: k for k in self.registry}
+            names = []
+            for kid in knob_ids:
+                k = by_id.get(kid)
+                if k:
+                    names.append(f"{k.title} ({k.id})")
+                else:
+                    names.append(kid)
+            msg = (
+                "No transaction was recorded for these knobs:\n\n"
+                + "\n".join(names)
+                + "\n\nForce reset will attempt to revert the settings to system defaults "
+                "even if they were not applied by this app.\n\nContinue?"
+            )
+            return QMessageBox.question(self, "Force reset", msg) == QMessageBox.Yes
+
+        def _run_force_reset_many(self, knob_ids: list[str]) -> None:
+            by_id = {k.id: k for k in self.registry}
+            for kid in knob_ids:
+                self._busy_knobs.add(kid)
+                self._knob_statuses[kid] = "running"
+            self._populate()
+
+            def _task():
+                results = []
+                errors: list[str] = []
+                for kid in knob_ids:
+                    k = by_id.get(kid)
+                    if not k:
+                        errors.append(f"{kid}: unknown knob")
+                        continue
+                    try:
+                        if k.requires_root:
+                            result = _run_worker_force_reset_pkexec(kid)
+                        else:
+                            result = _run_worker_force_reset_user(kid)
+                        results.append(result)
+                        if not result.get("success", True):
+                            msg = result.get("message") or result.get("error") or "force reset failed"
+                            errors.append(f"{kid}: {msg}")
+                    except Exception as e:
+                        errors.append(f"{kid}: {e}")
+                return len(errors) == 0, {"results": results, "errors": errors}, "\n".join(errors)
+
+            worker = QueueTaskWorker(_task, parent=self)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                for kid in knob_ids:
+                    self._busy_knobs.discard(kid)
+                self._refresh_statuses()
+                self._populate()
+                if not success:
+                    QMessageBox.warning(
+                        self,
+                        "Force reset incomplete",
+                        message or "Some knobs failed to reset.",
+                    )
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
 
         def _restore_knob_internal(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
             """Restore a single knob to its original state."""

@@ -881,11 +881,13 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         tx_root = Path(tx_info["root"])
         tx = Transaction(txid=txid, root=tx_root)
 
-        # Record file backups (keep OLDEST entry by overwriting as we iterate)
+        # Record file backups (keep OLDEST entry per transaction; older tx overrides)
+        seen_paths: set[str] = set()
         for meta in backups:
             file_path = meta.get("path", "")
-            if not file_path:
+            if not file_path or file_path in seen_paths:
                 continue
+            seen_paths.add(file_path)
             file_targets[file_path] = {"tx": tx, "meta": meta}
         
         # Handle effects (sysfs, systemd, user services, etc.)
@@ -1122,11 +1124,14 @@ def cmd_list_pending(_: argparse.Namespace) -> int:
     for tx_info in root_txs + user_txs:
         scope = "root" if tx_info in root_txs else "user"
         
-        # Collect file backups - but only if file still exists (or we created it and it's there)
+        # Collect file backups - but only if file still exists (or we created it and it's there).
+        # Keep OLDEST entry per file (older transactions replace newer).
+        seen_paths: set[str] = set()
         for meta in tx_info.get("backups", []):
             file_path = meta.get("path", "")
-            if not file_path or file_path in pending_files:
+            if not file_path or file_path in seen_paths:
                 continue
+            seen_paths.add(file_path)
             
             # Check if file still exists (meaning we still need to reset it)
             from pathlib import Path
@@ -1323,10 +1328,15 @@ def _restore_knob_once(knob_id: str) -> dict:
     # Restore only the backups from this knob's transaction
     restored = []
     errors = []
+    seen_paths: set[str] = set()
     for meta in manifest.get("backups", []):
+        file_path = meta.get("path", "")
+        if not file_path or file_path in seen_paths:
+            continue
+        seen_paths.add(file_path)
         success, message = reset_file_to_default(meta, tx)
         if success:
-            restored.append(meta["path"])
+            restored.append(file_path)
         else:
             errors.append(message)
 
@@ -1467,6 +1477,42 @@ def _force_reset_systemd(unit: str, action: str) -> tuple[bool, str]:
     return False, f"Unsupported systemd action: {action}"
 
 
+def _force_reset_sysfs_glob(glob_spec: str | list[str]) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import _expand_sysfs_globs
+
+    targets = _expand_sysfs_globs(glob_spec)
+    if not targets:
+        return False, f"No sysfs entries found for: {glob_spec}"
+
+    errors: list[str] = []
+    updated = 0
+    for path_str in targets:
+        path = Path(path_str)
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            errors.append(f"{path_str}: {e}")
+            continue
+        if not raw:
+            errors.append(f"{path_str}: empty sysfs value")
+            continue
+        tokens = raw.split()
+        default = tokens[0].strip("[]") if tokens else ""
+        if not default:
+            errors.append(f"{path_str}: unable to infer default from '{raw}'")
+            continue
+        try:
+            path.write_text(default + "\n", encoding="utf-8")
+            updated += 1
+        except Exception as e:
+            errors.append(f"{path_str}: {e}")
+
+    if errors:
+        return False, "; ".join(errors)
+    suffix = "entry" if updated == 1 else "entries"
+    return True, f"Reset {updated} sysfs {suffix}"
+
+
 def _force_reset_kernel_cmdline(param: str) -> tuple[bool, str]:
     from audioknob_gui.worker.ops import detect_distro
 
@@ -1573,6 +1619,9 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
         unit = str(params.get("unit", ""))
         action = str(params.get("action", ""))
         success, message = _force_reset_systemd(unit, action)
+    elif kind == "sysfs_glob_kv":
+        glob_spec = params.get("glob", "")
+        success, message = _force_reset_sysfs_glob(glob_spec)
     elif kind == "kernel_cmdline":
         param = str(params.get("param", ""))
         success, message = _force_reset_kernel_cmdline(param)
