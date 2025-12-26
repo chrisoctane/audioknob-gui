@@ -681,12 +681,26 @@ def _list_user_units() -> set[str]:
     try:
         result = run(["systemctl", "--user", "list-unit-files", "--no-legend", "--no-pager"])
     except Exception:
+        result = None
+
+    if result and result.returncode == 0:
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if parts:
+                units.add(parts[0])
+
+    try:
+        live = run(["systemctl", "--user", "list-units", "--all", "--no-legend", "--no-pager"])
+    except Exception:
         return units
 
-    if result.returncode != 0:
+    if live.returncode != 0:
         return units
 
-    for line in result.stdout.splitlines():
+    for line in live.stdout.splitlines():
         line = line.strip()
         if not line:
             continue

@@ -2369,7 +2369,12 @@ def main() -> int:
                 elif kind == "user_service_mask":
                     services = params.get("services")
                     if isinstance(services, list):
-                        for svc in [str(s) for s in services if s]:
+                        from audioknob_gui.worker.ops import resolve_user_services
+
+                        resolved = resolve_user_services([str(s) for s in services if s])
+                        if not resolved:
+                            lines.append("user units: [no matches]")
+                        for svc in resolved:
                             lines.append(f"user unit: {svc}")
                             for label, cmd in (
                                 ("user is-enabled", ["systemctl", "--user", "is-enabled", svc]),
