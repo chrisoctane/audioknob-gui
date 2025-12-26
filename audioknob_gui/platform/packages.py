@@ -332,7 +332,15 @@ def which_command(command: str) -> str | None:
 
     # GUI sessions often have a reduced PATH that omits sbin.
     for cand in cands:
-        for d in ("/usr/bin", "/usr/sbin", "/bin", "/sbin", "/usr/local/bin", "/usr/local/sbin"):
+        for d in (
+            "/usr/bin",
+            "/usr/sbin",
+            "/bin",
+            "/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/etc/init.d",
+        ):
             p = Path(d) / cand
             if p.exists() and p.is_file() and os.access(p, os.X_OK):
                 return str(p)
