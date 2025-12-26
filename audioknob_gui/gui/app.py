@@ -2367,14 +2367,25 @@ def main() -> int:
                             r = subprocess.run(cmd, capture_output=True, text=True)
                             lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
                 elif kind == "user_service_mask":
-                    unit = str(params.get("unit", ""))
-                    if unit:
-                        for label, cmd in (
-                            ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
-                            ("user is-active", ["systemctl", "--user", "is-active", unit]),
-                        ):
-                            r = subprocess.run(cmd, capture_output=True, text=True)
-                            lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                    services = params.get("services")
+                    if isinstance(services, list):
+                        for svc in [str(s) for s in services if s]:
+                            lines.append(f"user unit: {svc}")
+                            for label, cmd in (
+                                ("user is-enabled", ["systemctl", "--user", "is-enabled", svc]),
+                                ("user is-active", ["systemctl", "--user", "is-active", svc]),
+                            ):
+                                r = subprocess.run(cmd, capture_output=True, text=True)
+                                lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                    else:
+                        unit = str(params.get("unit", ""))
+                        if unit:
+                            for label, cmd in (
+                                ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
+                                ("user is-active", ["systemctl", "--user", "is-active", unit]),
+                            ):
+                                r = subprocess.run(cmd, capture_output=True, text=True)
+                                lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
                 elif kind == "sysctl_conf":
                     path = str(params.get("path", ""))
                     if path:

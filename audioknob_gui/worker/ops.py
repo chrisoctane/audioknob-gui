@@ -660,6 +660,24 @@ def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]],
 
 def user_unit_exists(unit: str) -> bool:
     """Return True if a user systemd unit file exists."""
+    unit = unit.strip()
+    if not unit:
+        return False
+
+    user_paths = [
+        Path("~/.config/systemd/user").expanduser(),
+        Path("~/.local/share/systemd/user").expanduser(),
+        Path("/etc/systemd/user"),
+        Path("/usr/lib/systemd/user"),
+        Path("/lib/systemd/user"),
+    ]
+    for base in user_paths:
+        try:
+            if (base / unit).exists():
+                return True
+        except Exception:
+            continue
+
     try:
         result = run(["systemctl", "--user", "list-unit-files", unit])
     except Exception:
