@@ -677,6 +677,7 @@ def main() -> int:
             self._knob_statuses: dict[str, str] = {}
             self._busy_knobs: set[str] = set()
             self._task_threads: list[QThread] = []
+            self._install_busy = False
             self._user_groups: set[str] = set()
             self._refresh_user_groups()
             self._refresh_statuses()
@@ -1410,7 +1411,11 @@ def main() -> int:
                     self._set_action_cell(r, btn)
                 elif k.id == "scheduler_jitter_test":
                     btn = self._make_action_button("Test")
-                    btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
+                    if busy:
+                        btn.setText("Working...")
+                        btn.setEnabled(False)
+                    else:
+                        btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
                     self._set_action_cell(r, btn)
                 elif k.id == "blocker_check":
                     btn = self._make_action_button("Scan")
@@ -2076,24 +2081,48 @@ def main() -> int:
         def on_run_test(self, knob_id: str) -> None:
             """Run a test and update the status column with results."""
             if knob_id == "scheduler_jitter_test":
-                k = next((k for k in self.registry if k.id == knob_id), None)
+                if knob_id in self._busy_knobs:
+                    return
+                self._busy_knobs.add(knob_id)
                 # Show a brief "running" indicator
                 self._update_knob_status(knob_id, "running", "⏳ Running...")
-                QApplication.processEvents()  # Update UI immediately
-                
-                headline, detail, payload = jitter_test_summary(duration_s=5, use_pkexec=False)
-                self.state["jitter_test_last"] = payload
-                save_state(self.state)
-                
-                # Update status with result (e.g., "max 12 µs")
-                max_us = payload.get("max_us")
-                if isinstance(max_us, int):
-                    self._knob_statuses[knob_id] = f"result:{max_us} µs"
-                else:
-                    self._knob_statuses[knob_id] = "error"
-                    QMessageBox.warning(self, "Jitter Test Failed", detail)
-                
                 self._populate()
+
+                def _task() -> tuple[bool, object, str]:
+                    headline, detail, payload = jitter_test_summary(duration_s=5, use_pkexec=False)
+                    return True, {"headline": headline, "detail": detail, "payload": payload}, ""
+
+                worker = QueueTaskWorker(_task, parent=self)
+
+                def _on_done(success: bool, payload: object, message: str) -> None:
+                    self._busy_knobs.discard(knob_id)
+                    if not success or not isinstance(payload, dict):
+                        self._knob_statuses[knob_id] = "error"
+                        self._populate()
+                        QMessageBox.warning(self, "Jitter Test Failed", message or "Jitter test failed")
+                        return
+
+                    detail = str(payload.get("detail", ""))
+                    result = payload.get("payload")
+                    if isinstance(result, dict):
+                        self.state["jitter_test_last"] = result
+                        save_state(self.state)
+                        max_us = result.get("max_us")
+                        if isinstance(max_us, int):
+                            self._knob_statuses[knob_id] = f"result:{max_us} µs"
+                        else:
+                            self._knob_statuses[knob_id] = "error"
+                            QMessageBox.warning(self, "Jitter Test Failed", detail or "No results")
+                    else:
+                        self._knob_statuses[knob_id] = "error"
+                        QMessageBox.warning(self, "Jitter Test Failed", detail or "No results")
+
+                    self._populate()
+
+                worker.finished.connect(_on_done)
+                worker.finished.connect(worker.deleteLater)
+                self._task_threads.append(worker)
+                worker.start()
 
         def _update_knob_status(self, knob_id: str, status: str, display: str) -> None:
             """Update the status cell for a specific knob."""
@@ -2586,69 +2615,101 @@ def main() -> int:
 
         def on_check_blockers(self) -> None:
             """Run comprehensive realtime configuration scan."""
-            from audioknob_gui.testing.rtcheck import run_full_scan, format_scan_html, CheckStatus
-            
-            # Run the scan
-            result = run_full_scan()
-            
-            # Filter to actionable checks: show only those with fix_knob
-            # (This is what user can actually improve via the knob menu)
-            actionable_checks = [c for c in result.checks if c.fix_knob is not None]
-            actionable_issues = [c for c in actionable_checks if c.status not in (CheckStatus.PASS, CheckStatus.SKIP)]
-            
-            # Build focused HTML (actionable items only)
-            html = ["<h3>RT Configuration Issues You Can Fix</h3>"]
-            
-            if actionable_issues:
-                html.append(f"<p>Found {len(actionable_issues)} issue(s) with available fixes.</p>")
-                html.append("<table style='width:100%'>")
-                for c in actionable_issues:
-                    color = {"warn": "#f57c00", "fail": "#d32f2f"}.get(c.status.value, "#000")
-                    icon = {"warn": "⚠", "fail": "✗"}.get(c.status.value, "?")
-                    html.append(f"<tr><td style='color:{color}'>{icon}</td>")
-                    html.append(f"<td><b>{c.name}</b></td>")
-                    html.append(f"<td>{c.message}</td></tr>")
-                    html.append("<tr><td></td><td colspan='2' style='color:#666; font-size:0.9em'>")
-                    if c.detail:
-                        html.append(f"{c.detail}<br/>")
-                    html.append(f"<i>Fix: Use '{c.fix_knob}' knob in the main menu</i>")
-                    html.append("</td></tr>")
-                html.append("</table>")
-            else:
-                html.append("<p style='color:#2e7d32'>✓ All fixable checks passed!</p>")
-            
-            # Show full stats
-            html.append("<hr/>")
-            html.append(f"<p style='color:#666; font-size:0.9em'>Full scan: {result.passed} passed, {result.warnings} warnings, {result.failed} failed (score: {result.score}%)</p>")
-            
-            # Show in a resizable dialog
             dialog = QDialog(self)
             dialog.setWindowTitle("RT Config Scan")
             dialog.resize(600, 400)
             layout = QVBoxLayout(dialog)
-            
+            status_label = QLabel("Running scan...")
+            layout.addWidget(status_label)
+
             text = QTextEdit()
             text.setReadOnly(True)
-            text.setHtml("".join(html))
+            text.setPlainText("Collecting system info...")
             layout.addWidget(text)
-            
+
             # Button row with Show Full Scan option
             btn_layout = QHBoxLayout()
-            
-            def show_full_scan():
-                text.setHtml(format_scan_html(result))
-                dialog.setWindowTitle(f"RT Config Scan (Full) - Score: {result.score}%")
-            
+
+            full_html: dict[str, str] = {}
+            def show_full_scan() -> None:
+                html = full_html.get("full")
+                if html:
+                    text.setHtml(html)
+                    dialog.setWindowTitle(full_html.get("title", "RT Config Scan (Full)"))
+
             full_btn = QPushButton("Show Full Scan")
+            full_btn.setEnabled(False)
             full_btn.clicked.connect(show_full_scan)
             btn_layout.addWidget(full_btn)
             btn_layout.addStretch()
-            
+
             close_btn = QPushButton("Close")
             close_btn.clicked.connect(dialog.reject)
             btn_layout.addWidget(close_btn)
             layout.addLayout(btn_layout)
-            
+
+            def _task() -> tuple[bool, object, str]:
+                from audioknob_gui.testing.rtcheck import run_full_scan, format_scan_html, CheckStatus
+
+                result = run_full_scan()
+
+                actionable_checks = [c for c in result.checks if c.fix_knob is not None]
+                actionable_issues = [
+                    c for c in actionable_checks if c.status not in (CheckStatus.PASS, CheckStatus.SKIP)
+                ]
+
+                html = ["<h3>RT Configuration Issues You Can Fix</h3>"]
+
+                if actionable_issues:
+                    html.append(f"<p>Found {len(actionable_issues)} issue(s) with available fixes.</p>")
+                    html.append("<table style='width:100%'>")
+                    for c in actionable_issues:
+                        color = {"warn": "#f57c00", "fail": "#d32f2f"}.get(c.status.value, "#000")
+                        icon = {"warn": "⚠", "fail": "✗"}.get(c.status.value, "?")
+                        html.append(f"<tr><td style='color:{color}'>{icon}</td>")
+                        html.append(f"<td><b>{c.name}</b></td>")
+                        html.append(f"<td>{c.message}</td></tr>")
+                        html.append("<tr><td></td><td colspan='2' style='color:#666; font-size:0.9em'>")
+                        if c.detail:
+                            html.append(f"{c.detail}<br/>")
+                        html.append(f"<i>Fix: Use '{c.fix_knob}' knob in the main menu</i>")
+                        html.append("</td></tr>")
+                    html.append("</table>")
+                else:
+                    html.append("<p style='color:#2e7d32'>✓ All fixable checks passed!</p>")
+
+                html.append("<hr/>")
+                html.append(
+                    f"<p style='color:#666; font-size:0.9em'>Full scan: {result.passed} passed, "
+                    f"{result.warnings} warnings, {result.failed} failed (score: {result.score}%)</p>"
+                )
+
+                return True, {
+                    "summary_html": "".join(html),
+                    "full_html": format_scan_html(result),
+                    "score": result.score,
+                }, ""
+
+            worker = QueueTaskWorker(_task, parent=dialog)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                if not success or not isinstance(payload, dict):
+                    status_label.setText("Scan failed")
+                    text.setPlainText(message or "Scan failed")
+                    return
+                status_label.setText("Scan complete")
+                text.setHtml(payload.get("summary_html", ""))
+                score = payload.get("score")
+                full_html["full"] = payload.get("full_html", "")
+                if isinstance(score, int):
+                    full_html["title"] = f"RT Config Scan (Full) - Score: {score}%"
+                full_btn.setEnabled(bool(full_html.get("full")))
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
+
             dialog.exec()
 
         def _on_join_groups(self) -> None:
@@ -2905,7 +2966,11 @@ def main() -> int:
         def _on_install_packages(self, commands: list[str]) -> None:
             """Install packages that provide the given commands."""
             from audioknob_gui.platform.packages import get_package_name, detect_package_manager
-            
+
+            if self._install_busy:
+                QMessageBox.information(self, "Install in progress", "Package installation is already running.")
+                return
+
             logger = _get_gui_logger()
             # Map commands to package names
             packages = []
@@ -2983,161 +3048,189 @@ def main() -> int:
                         },
                     )
                     return
-                
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                
-                if p.returncode == 0:
-                    if any(cmd_name in ("qjackctl", "qjackctl6") for cmd_name in commands):
-                        self._prime_qjackctl_preset()
-                    QMessageBox.information(
-                        self,
-                        "Success",
-                        f"Installed: {', '.join(packages)}"
-                    )
-                    _log_gui_audit(
-                        "install-packages",
-                        {
-                            "commands": commands,
-                            "packages": packages,
-                            "cmd": cmd,
-                            "returncode": p.returncode,
-                            "stdout": p.stdout,
-                            "stderr": p.stderr,
-                        },
-                    )
-                    self._populate()  # Refresh UI
-                else:
-                    stderr = p.stderr.strip()
-                    stdout = p.stdout.strip()
-                    combined = (stderr + "\n" + stdout).lower()
-                    logger.error("install packages failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
-                    _log_gui_audit(
-                        "install-packages",
-                        {
-                            "commands": commands,
-                            "packages": packages,
-                            "cmd": cmd,
-                            "returncode": p.returncode,
-                            "stdout": p.stdout,
-                            "stderr": p.stderr,
-                        },
-                    )
 
-                    no_provider = any(
-                        needle in combined
-                        for needle in (
-                            "no provider of",
-                            "no provider found",
-                            "nothing provides",
-                            "not found in enabled repositories",
-                            "not found in enabled repos",
-                        )
-                    )
-                    if no_provider and manager == PackageManager.RPM and shutil.which("zypper"):
-                        reply = QMessageBox.question(
-                            self,
-                            "Add Repositories",
-                            "Packages not found in enabled repos.\n\n"
-                            "Add repositories and retry?\n\n"
-                            "• multimedia:proaudio\n"
-                            "• packman",
-                            QMessageBox.Ok | QMessageBox.Cancel
-                        )
-                        if reply == QMessageBox.Ok:
-                            repo_defs = [
-                                ("multimedia:proaudio", "https://download.opensuse.org/repositories/multimedia:/proaudio/openSUSE_Tumbleweed/"),
-                                ("packman", "https://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Tumbleweed/"),
-                            ]
-                            repo_errors = []
-                            for name, url in repo_defs:
-                                add_cmd = ["pkexec", "zypper", "ar", "-f", "-n", name, url, name]
-                                r = subprocess.run(add_cmd, capture_output=True, text=True, timeout=120)
-                                if r.returncode != 0:
-                                    msg = (r.stderr.strip() or r.stdout.strip())
-                                    if "already exists" not in msg.lower():
-                                        repo_errors.append(f"{name}: {msg or 'failed'}")
-
-                            if not repo_errors:
-                                refresh_cmd = ["pkexec", "zypper", "--gpg-auto-import-keys", "refresh"]
-                                r = subprocess.run(refresh_cmd, capture_output=True, text=True, timeout=300)
-                                if r.returncode != 0:
-                                    repo_errors.append(r.stderr.strip() or r.stdout.strip() or "refresh failed")
-
-                            if repo_errors:
-                                logger.error("repo add failed errors=%s", "; ".join(repo_errors))
-                                QMessageBox.critical(
-                                    self,
-                                    "Repo Add Failed",
-                                    "Failed to add repositories:\n\n" + "\n".join(repo_errors)
-                                )
-                                return
-
-                            # Retry install after adding repos.
+                def _run_install(*, retry: bool) -> None:
+                    def _task() -> tuple[bool, object, str]:
+                        try:
                             p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                            if p.returncode == 0:
-                                if any(cmd_name in ("qjackctl", "qjackctl6") for cmd_name in commands):
-                                    self._prime_qjackctl_preset()
-                                QMessageBox.information(
-                                    self,
-                                    "Success",
-                                    f"Installed: {', '.join(packages)}"
-                                )
-                                _log_gui_audit(
-                                    "install-packages",
-                                    {
-                                        "commands": commands,
-                                        "packages": packages,
-                                        "cmd": cmd,
-                                        "returncode": p.returncode,
-                                        "stdout": p.stdout,
-                                        "stderr": p.stderr,
-                                        "retry": True,
-                                    },
-                                )
-                                self._populate()
-                                return
+                        except subprocess.TimeoutExpired:
+                            return False, {
+                                "cmd": cmd,
+                                "returncode": -1,
+                                "stdout": "",
+                                "stderr": "timeout",
+                                "retry": retry,
+                                "timeout": True,
+                            }, "timeout"
+                        return p.returncode == 0, {
+                            "cmd": cmd,
+                            "returncode": p.returncode,
+                            "stdout": p.stdout,
+                            "stderr": p.stderr,
+                            "retry": retry,
+                        }, ""
 
-                            stderr = p.stderr.strip()
-                            stdout = p.stdout.strip()
-                            logger.error("install retry failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, p.returncode, stderr, stdout)
+                    worker = QueueTaskWorker(_task, parent=self)
+
+                    def _on_done(success: bool, payload: object, message: str) -> None:
+                        if not isinstance(payload, dict):
+                            self._install_busy = False
+                            QMessageBox.critical(self, "Error", message or "Install error")
+                            return
+
+                        stderr = (payload.get("stderr") or "").strip()
+                        stdout = (payload.get("stdout") or "").strip()
+                        rc = payload.get("returncode")
+                        retry_flag = bool(payload.get("retry"))
+
+                        if success:
+                            if any(cmd_name in ("qjackctl", "qjackctl6") for cmd_name in commands):
+                                self._prime_qjackctl_preset()
+                            QMessageBox.information(
+                                self,
+                                "Success",
+                                f"Installed: {', '.join(packages)}"
+                            )
                             _log_gui_audit(
                                 "install-packages",
                                 {
                                     "commands": commands,
                                     "packages": packages,
                                     "cmd": cmd,
-                                    "returncode": p.returncode,
-                                    "stdout": p.stdout,
-                                    "stderr": p.stderr,
-                                    "retry": True,
+                                    "returncode": rc,
+                                    "stdout": stdout,
+                                    "stderr": stderr,
+                                    "retry": retry_flag,
                                 },
                             )
-                            combined = (stderr + "\n" + stdout).lower()
-                            if any(needle in combined for needle in ("no provider of", "nothing provides")):
-                                QMessageBox.critical(
-                                    self,
-                                    "Install Failed",
-                                    "Package not found in enabled repositories.\n\n"
-                                    "rtirq may not be available for this distro snapshot."
-                                )
+                            self._populate()
+                            self._install_busy = False
+                            return
+
+                        if payload.get("timeout"):
+                            QMessageBox.critical(self, "Timeout", "Package installation timed out")
+                            _log_gui_audit(
+                                "install-packages",
+                                {
+                                    "commands": commands,
+                                    "packages": packages,
+                                    "cmd": cmd,
+                                    "error": "timeout",
+                                },
+                            )
+                            self._install_busy = False
+                            return
+
+                        combined = (stderr + "\n" + stdout).lower()
+                        logger.error("install packages failed cmd=%s rc=%s stderr=%s stdout=%s", cmd, rc, stderr, stdout)
+                        _log_gui_audit(
+                            "install-packages",
+                            {
+                                "commands": commands,
+                                "packages": packages,
+                                "cmd": cmd,
+                                "returncode": rc,
+                                "stdout": stdout,
+                                "stderr": stderr,
+                                "retry": retry_flag,
+                            },
+                        )
+
+                        no_provider = any(
+                            needle in combined
+                            for needle in (
+                                "no provider of",
+                                "no provider found",
+                                "nothing provides",
+                                "not found in enabled repositories",
+                                "not found in enabled repos",
+                            )
+                        )
+                        if no_provider and manager == PackageManager.RPM and shutil.which("zypper"):
+                            reply = QMessageBox.question(
+                                self,
+                                "Add Repositories",
+                                "Packages not found in enabled repos.\n\n"
+                                "Add repositories and retry?\n\n"
+                                "• multimedia:proaudio\n"
+                                "• packman",
+                                QMessageBox.Ok | QMessageBox.Cancel
+                            )
+                            if reply == QMessageBox.Ok:
+                                repo_defs = [
+                                    ("multimedia:proaudio", "https://download.opensuse.org/repositories/multimedia:/proaudio/openSUSE_Tumbleweed/"),
+                                    ("packman", "https://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Tumbleweed/"),
+                                ]
+
+                                def _repo_task() -> tuple[bool, object, str]:
+                                    repo_errors = []
+                                    for name, url in repo_defs:
+                                        add_cmd = ["pkexec", "zypper", "ar", "-f", "-n", name, url, name]
+                                        r = subprocess.run(add_cmd, capture_output=True, text=True, timeout=120)
+                                        if r.returncode != 0:
+                                            msg = (r.stderr.strip() or r.stdout.strip())
+                                            if "already exists" not in msg.lower():
+                                                repo_errors.append(f"{name}: {msg or 'failed'}")
+
+                                    if not repo_errors:
+                                        refresh_cmd = ["pkexec", "zypper", "--gpg-auto-import-keys", "refresh"]
+                                        r = subprocess.run(refresh_cmd, capture_output=True, text=True, timeout=300)
+                                        if r.returncode != 0:
+                                            repo_errors.append(r.stderr.strip() or r.stdout.strip() or "refresh failed")
+
+                                    if repo_errors:
+                                        return False, {"errors": repo_errors}, "repo add failed"
+                                    return True, {"errors": []}, ""
+
+                                repo_worker = QueueTaskWorker(_repo_task, parent=self)
+
+                                def _on_repo_done(success: bool, payload: object, message: str) -> None:
+                                    if not success or not isinstance(payload, dict):
+                                        self._install_busy = False
+                                        QMessageBox.critical(self, "Repo Add Failed", message or "Repo add failed")
+                                        return
+                                    repo_errors = payload.get("errors") or []
+                                    if repo_errors:
+                                        self._install_busy = False
+                                        logger.error("repo add failed errors=%s", "; ".join(repo_errors))
+                                        QMessageBox.critical(
+                                            self,
+                                            "Repo Add Failed",
+                                            "Failed to add repositories:\n\n" + "\n".join(repo_errors)
+                                        )
+                                        return
+
+                                    _run_install(retry=True)
+
+                                repo_worker.finished.connect(_on_repo_done)
+                                repo_worker.finished.connect(repo_worker.deleteLater)
+                                self._task_threads.append(repo_worker)
+                                repo_worker.start()
                                 return
 
-                    QMessageBox.critical(
-                        self,
-                        "Install Failed",
-                        f"Failed to install packages:\n\n{stderr or stdout}"
-                    )
-            except subprocess.TimeoutExpired:
-                QMessageBox.critical(self, "Timeout", "Package installation timed out")
-                _log_gui_audit(
-                    "install-packages",
-                    {
-                        "commands": commands,
-                        "packages": packages,
-                        "cmd": cmd if "cmd" in locals() else None,
-                        "error": "timeout",
-                    },
-                )
+                        if any(needle in combined for needle in ("no provider of", "nothing provides")):
+                            QMessageBox.critical(
+                                self,
+                                "Install Failed",
+                                "Package not found in enabled repositories.\n\n"
+                                "rtirq may not be available for this distro snapshot."
+                            )
+                        else:
+                            QMessageBox.critical(
+                                self,
+                                "Install Failed",
+                                f"Failed to install packages:\n\n{stderr or stdout}"
+                            )
+                        self._install_busy = False
+
+                    worker.finished.connect(_on_done)
+                    worker.finished.connect(worker.deleteLater)
+                    self._task_threads.append(worker)
+                    worker.start()
+
+                self._install_busy = True
+                _run_install(retry=False)
+
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Install error: {e}")
                 _log_gui_audit(
@@ -3149,6 +3242,7 @@ def main() -> int:
                         "error": str(e),
                     },
                 )
+                self._install_busy = False
 
         def _on_apply_knob(self, knob_id: str) -> None:
             """Apply a single knob optimization."""
