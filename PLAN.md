@@ -224,7 +224,7 @@ self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
 Apply and Reset now queue the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot.
 Group join/leave actions remain immediate because they require explicit confirmation.
-If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (for both single and queued resets). Force reset is supported for `systemd_unit_toggle`, `kernel_cmdline`, and `sysfs_glob_kv` knobs when a default can be inferred from sysfs options.
+If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (for both single and queued resets). Force reset is supported where defaults can be inferred or safely removed: `systemd_unit_toggle`, `kernel_cmdline`, `sysfs_glob_kv` (only when sysfs exposes a bracketed default), `pam_limits_audio_group`, `sysctl_conf`, `udev_rule` (only if file matches audioknob content), `pipewire_conf` (only if file has audioknob header), `user_service_mask`, and `baloo_disable`.
 Reboot-required knobs are disabled until the user enables the "Enable reboot-required changes" toggle.
 Knobs requiring audio groups stay locked while group membership is pending reboot.
 

@@ -3645,7 +3645,17 @@ def main() -> int:
             k = next((k for k in self.registry if k.id == knob_id), None)
             if not k or not k.impl:
                 return False
-            return k.impl.kind in ("systemd_unit_toggle", "kernel_cmdline", "sysfs_glob_kv")
+            return k.impl.kind in (
+                "systemd_unit_toggle",
+                "kernel_cmdline",
+                "sysfs_glob_kv",
+                "pam_limits_audio_group",
+                "sysctl_conf",
+                "udev_rule",
+                "pipewire_conf",
+                "user_service_mask",
+                "baloo_disable",
+            )
 
         def _collect_no_transaction_knobs(self, result: dict[str, Any]) -> tuple[list[str], list[str]]:
             no_tx: list[str] = []

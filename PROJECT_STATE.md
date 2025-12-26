@@ -58,7 +58,7 @@ Notes:
 - Reset errors now surface detailed messages instead of a generic "Unknown error".
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
-- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt (systemd_unit_toggle, kernel_cmdline, and sysfs_glob_kv when a default can be inferred from sysfs options).
+- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt when defaults can be inferred or safely removed: systemd_unit_toggle, kernel_cmdline, sysfs_glob_kv (bracketed default only), pam_limits_audio_group, sysctl_conf, udev_rule (only if file matches audioknob content), pipewire_conf (audioknob header), user_service_mask, baloo_disable.
 - Queued resets now group "no transaction" knobs and offer a force-reset prompt instead of failing the whole queue.
 - QjackCtl RT now warns to restart QjackCtl when it is running; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.

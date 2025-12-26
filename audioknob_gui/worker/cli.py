@@ -1477,6 +1477,121 @@ def _force_reset_systemd(unit: str, action: str) -> tuple[bool, str]:
     return False, f"Unsupported systemd action: {action}"
 
 
+def _force_reset_remove_lines(path_str: str, remove_lines: list[str]) -> tuple[bool, str]:
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    wanted = [str(x) for x in remove_lines if str(x).strip() != ""]
+    if not wanted:
+        return False, "No reset lines provided"
+
+    new_lines = [line for line in lines if line not in wanted]
+    removed = len(lines) - len(new_lines)
+    if removed == 0:
+        return True, f"No matching lines in {path}"
+
+    if not any(line.strip() for line in new_lines):
+        try:
+            path.unlink()
+        except Exception as e:
+            return False, f"Failed to delete {path}: {e}"
+        return True, f"Deleted {path}"
+
+    try:
+        path.write_text("\n".join(new_lines).rstrip("\n") + "\n", encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to write {path}: {e}"
+
+    return True, f"Removed {removed} line(s) from {path}"
+
+
+def _force_reset_udev_rule(path_str: str, content: str) -> tuple[bool, str]:
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        current = path.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    expected = str(content).strip()
+    if current != expected:
+        return False, f"{path} does not match expected audioknob rule"
+
+    try:
+        path.unlink()
+    except Exception as e:
+        return False, f"Failed to delete {path}: {e}"
+
+    try:
+        subprocess.run(["udevadm", "control", "--reload-rules"], check=False, capture_output=True)
+        subprocess.run(["udevadm", "trigger"], check=False, capture_output=True)
+    except Exception:
+        pass
+
+    return True, f"Deleted {path}"
+
+
+def _force_reset_pipewire_conf(path_str: str) -> tuple[bool, str]:
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    if "# audioknob-gui PipeWire configuration" not in content.splitlines()[:3]:
+        return False, f"{path} does not appear to be an audioknob config"
+
+    try:
+        path.unlink()
+    except Exception as e:
+        return False, f"Failed to delete {path}: {e}"
+
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "restart", "pipewire.service", "pipewire-pulse.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception:
+        pass
+
+    return True, f"Deleted {path}"
+
+
+def _force_reset_user_services(services: list[str]) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import resolve_user_services, user_service_unmask
+
+    resolved = resolve_user_services(services)
+    if not resolved:
+        return True, "No matching user services found"
+
+    user_service_unmask(resolved)
+    return True, f"Unmasked {len(resolved)} user service(s)"
+
+
+def _force_reset_baloo_disable() -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import baloo_enable
+
+    try:
+        baloo_enable()
+    except Exception as e:
+        return False, f"Failed to enable Baloo: {e}"
+    return True, "Enabled Baloo"
+
+
 def _force_reset_sysfs_glob(glob_spec: str | list[str]) -> tuple[bool, str]:
     from audioknob_gui.worker.ops import _expand_sysfs_globs
 
@@ -1497,10 +1612,11 @@ def _force_reset_sysfs_glob(glob_spec: str | list[str]) -> tuple[bool, str]:
             errors.append(f"{path_str}: empty sysfs value")
             continue
         tokens = raw.split()
-        default = tokens[0].strip("[]") if tokens else ""
-        if not default:
+        bracketed = [t for t in tokens if t.startswith("[") and t.endswith("]")]
+        if not bracketed:
             errors.append(f"{path_str}: unable to infer default from '{raw}'")
             continue
+        default = bracketed[0].strip("[]")
         try:
             path.write_text(default + "\n", encoding="utf-8")
             updated += 1
@@ -1619,12 +1735,34 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
         unit = str(params.get("unit", ""))
         action = str(params.get("action", ""))
         success, message = _force_reset_systemd(unit, action)
+    elif kind == "pam_limits_audio_group":
+        path = str(params.get("path", ""))
+        lines = params.get("lines", [])
+        success, message = _force_reset_remove_lines(path, lines)
+    elif kind == "sysctl_conf":
+        path = str(params.get("path", ""))
+        lines = params.get("lines", [])
+        success, message = _force_reset_remove_lines(path, lines)
+    elif kind == "udev_rule":
+        path = str(params.get("path", ""))
+        content = str(params.get("content", ""))
+        success, message = _force_reset_udev_rule(path, content)
     elif kind == "sysfs_glob_kv":
         glob_spec = params.get("glob", "")
         success, message = _force_reset_sysfs_glob(glob_spec)
     elif kind == "kernel_cmdline":
         param = str(params.get("param", ""))
         success, message = _force_reset_kernel_cmdline(param)
+    elif kind == "pipewire_conf":
+        path = str(params.get("path", ""))
+        success, message = _force_reset_pipewire_conf(path)
+    elif kind == "user_service_mask":
+        services = params.get("services", [])
+        if isinstance(services, str):
+            services = [services]
+        success, message = _force_reset_user_services([str(s) for s in services])
+    elif kind == "baloo_disable":
+        success, message = _force_reset_baloo_disable()
     else:
         message = f"Force reset not supported for kind: {kind}"
 
