@@ -702,6 +702,23 @@ def main() -> int:
             except Exception:
                 self._user_groups = set()
 
+        def _detect_desktop(self) -> str:
+            """Return 'gnome', 'kde', or 'unknown' based on session env vars."""
+            raw = " ".join(
+                v
+                for v in (
+                    os.environ.get("XDG_CURRENT_DESKTOP", ""),
+                    os.environ.get("XDG_SESSION_DESKTOP", ""),
+                    os.environ.get("DESKTOP_SESSION", ""),
+                )
+                if v
+            ).lower()
+            if "gnome" in raw or "ubuntu" in raw:
+                return "gnome"
+            if "kde" in raw or "plasma" in raw:
+                return "kde"
+            return "unknown"
+
         def _knob_group_ok(self, k) -> bool:
             """Check if user has required groups for this knob."""
             if not k.requires_groups:
@@ -1147,6 +1164,7 @@ def main() -> int:
             self.table.clearSpans()
             reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
             group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
+            desktop_kind = self._detect_desktop()
 
             reboot_knobs = [k for k in self.registry if k.requires_reboot]
             other_knobs = [k for k in self.registry if not k.requires_reboot]
@@ -1219,6 +1237,13 @@ def main() -> int:
                 busy = k.id in self._busy_knobs
                 display_status = "running" if busy else status
                 not_applicable = (status == "not_applicable")
+                not_applicable_reason = "Not available on this system"
+                if k.id == "disable_tracker" and desktop_kind == "kde":
+                    not_applicable = True
+                    not_applicable_reason = "Requires GNOME desktop"
+                elif k.id == "disable_baloo" and desktop_kind == "gnome":
+                    not_applicable = True
+                    not_applicable_reason = "Requires KDE desktop"
                 locked_bg = QColor("#2f2f2f")
                 locked_fg = QColor("#7a7a7a")
                 locked_style = (
@@ -1279,7 +1304,7 @@ def main() -> int:
                 if locked:
                     title_item.setToolTip(lock_reason)
                 elif not_applicable:
-                    title_item.setToolTip("Not available on this system")
+                    title_item.setToolTip(not_applicable_reason)
                 self.table.setItem(r, 1, title_item)
 
                 # Column 4: Status (with color)
@@ -1290,7 +1315,7 @@ def main() -> int:
                 elif not_applicable:
                     status_item = QTableWidgetItem("N/A")
                     status_item.setForeground(locked_fg)
-                    status_item.setToolTip("Not available on this system")
+                    status_item.setToolTip(not_applicable_reason)
                 else:
                     status_text, status_color = self._status_display(display_status)
                     status_item = QTableWidgetItem(status_text)
@@ -1361,7 +1386,7 @@ def main() -> int:
                 elif not_applicable:
                     btn = self._make_action_button("N/A")
                     btn.setEnabled(False)
-                    btn.setToolTip("Not available on this system")
+                    btn.setToolTip(not_applicable_reason)
                     btn.setStyleSheet(locked_style)
                     self._set_action_cell(r, btn)
                 elif k.id == "stack_detect":
@@ -2059,8 +2084,11 @@ def main() -> int:
             """Update the status cell for a specific knob."""
             # Keep backing store in sync so subsequent _populate() reflects the new state.
             self._knob_statuses[knob_id] = status
-            for r, k in enumerate(self.registry):
-                if k.id == knob_id:
+            for r in range(self.table.rowCount()):
+                item = self.table.item(r, 1)
+                if item is None:
+                    continue
+                if item.data(Qt.UserRole) == knob_id:
                     status_item = QTableWidgetItem(display)
                     status_item.setForeground(QColor("#1976d2"))
                     # Status column is col 4 (col 1 is knob title).
