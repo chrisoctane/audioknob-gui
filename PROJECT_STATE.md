@@ -66,6 +66,7 @@ Notes:
 - Reboot-required knobs are gated behind a header toggle; group-required knobs stay locked while group changes are pending reboot.
 - Reboot-required toggle preserves scroll position instead of jumping the table.
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
+- "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

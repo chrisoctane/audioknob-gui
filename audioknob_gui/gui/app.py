@@ -1874,8 +1874,8 @@ def main() -> int:
                 except Exception:
                     pass
 
-        def _on_reboot_now(self) -> None:
-            if not getattr(self, "_needs_reboot", False):
+        def _on_reboot_now(self, *, force: bool = False) -> None:
+            if not force and not getattr(self, "_needs_reboot", False):
                 return
             msg = (
                 "Restart now to apply pending changes?\n\n"
@@ -3612,7 +3612,7 @@ def main() -> int:
                     "Log out/in or reboot to activate.",
                 )
             if success and queue_reboot:
-                self._on_reboot_now()
+                self._on_reboot_now(force=True)
             self._populate()
 
         def _confirm_force_reset(self, knob_id: str) -> bool:
