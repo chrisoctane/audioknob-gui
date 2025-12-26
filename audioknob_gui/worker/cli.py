@@ -855,8 +855,9 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
     
-    # Track which files we've already reset (avoid duplicate resets)
+    # Track files to reset (oldest backup wins for true baseline reset)
     reset_paths: set[str] = set()
+    file_targets: dict[str, dict[str, Any]] = {}
     needs_bootloader_update = False
     
     # Process all transactions (newest first - they're already sorted)
@@ -879,31 +880,13 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         from audioknob_gui.core.transaction import Transaction
         tx_root = Path(tx_info["root"])
         tx = Transaction(txid=txid, root=tx_root)
-        
+
+        # Record file backups (keep OLDEST entry by overwriting as we iterate)
         for meta in backups:
             file_path = meta.get("path", "")
-            if not file_path or file_path in reset_paths:
+            if not file_path:
                 continue
-            
-            strategy = meta.get("reset_strategy", RESET_BACKUP)
-            
-            # Check if we need root for package restore
-            if strategy == RESET_PACKAGE and os.geteuid() != 0:
-                errors.append(f"Need root to restore {file_path} from package")
-                continue
-            
-            success, message = reset_file_to_default(meta, tx)
-            results.append({
-                "path": file_path,
-                "strategy": strategy,
-                "success": success,
-                "message": message,
-            })
-            
-            if success:
-                reset_paths.add(file_path)
-            else:
-                errors.append(message)
+            file_targets[file_path] = {"tx": tx, "meta": meta}
         
         # Handle effects (sysfs, systemd, user services, etc.)
         effects = tx_info.get("effects", [])
@@ -951,6 +934,32 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                     "success": True,
                     "message": f"Restored {user_effects_restored} user effect(s)",
                 })
+
+    # Reset files using oldest backups (true baseline)
+    for file_path in sorted(file_targets.keys()):
+        entry = file_targets[file_path]
+        meta = entry["meta"]
+        tx = entry["tx"]
+        if file_path in reset_paths:
+            continue
+
+        strategy = meta.get("reset_strategy", RESET_BACKUP)
+        if strategy == RESET_PACKAGE and os.geteuid() != 0:
+            errors.append(f"Need root to restore {file_path} from package")
+            continue
+
+        success, message = reset_file_to_default(meta, tx)
+        results.append({
+            "path": file_path,
+            "strategy": strategy,
+            "success": success,
+            "message": message,
+        })
+
+        if success:
+            reset_paths.add(file_path)
+        else:
+            errors.append(message)
     
     # Check if there are pending root changes (for informing GUI)
     # Use list-pending semantics: only count files that still exist + restorable effects

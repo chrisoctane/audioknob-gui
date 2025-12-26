@@ -3776,88 +3776,113 @@ def main() -> int:
                 return
 
             # Execute reset in two phases: user-scope first, then root-scope
-            results_text = []
-            errors = []
-
-            # Phase 1: User-scope reset (no pkexec needed)
-            try:
-                argv = [
-                    sys.executable,
-                    "-m",
-                    "audioknob_gui.worker.cli",
-                    "reset-defaults",
-                    "--scope", "user",
-                ]
-                p = subprocess.run(argv, text=True, capture_output=True)
-                if p.returncode != 0:
-                    err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
-                    errors.append(f"User reset failed: {err_msg}")
-                elif p.stdout:
-                    try:
-                        result = json.loads(p.stdout)
-                        if result.get("reset_count", 0) > 0:
-                            results_text.append(f"Reset {result['reset_count']} user file(s)")
-                        errors.extend(result.get("errors", []))
-                    except json.JSONDecodeError as e:
-                        errors.append(f"User reset: invalid response: {e}")
-            except Exception as e:
-                errors.append(f"User reset failed: {e}")
-
-            # Phase 2: Root-scope reset (needs pkexec)
             root_files = [f for f in files if f.get("scope") == "root"]
             needs_root = bool(root_files) or has_root_effects
-            
-            if needs_root:
+
+            self.btn_reset.setEnabled(False)
+            self.btn_reset.setText("Working...")
+
+            def _task() -> tuple[bool, object, str]:
+                results_text: list[str] = []
+                errors: list[str] = []
+
+                # Phase 1: User-scope reset (no pkexec needed)
                 try:
-                    worker = _pick_root_worker_path()
                     argv = [
-                        "pkexec",
-                        worker,
+                        sys.executable,
+                        "-m",
+                        "audioknob_gui.worker.cli",
                         "reset-defaults",
-                        "--scope", "root",
+                        "--scope", "user",
                     ]
-                    p = subprocess.run(argv, text=True, capture_output=True)
+                    p = subprocess.run(argv, text=True, capture_output=True, timeout=120)
                     if p.returncode != 0:
                         err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
-                        errors.append(f"Root reset failed: {err_msg}")
+                        errors.append(f"User reset failed: {err_msg}")
                     elif p.stdout:
                         try:
                             result = json.loads(p.stdout)
                             if result.get("reset_count", 0) > 0:
-                                results_text.append(f"Reset {result['reset_count']} system file(s)")
+                                results_text.append(f"Reset {result['reset_count']} user file(s)")
                             errors.extend(result.get("errors", []))
                         except json.JSONDecodeError as e:
-                            errors.append(f"Root reset: invalid response: {e}")
+                            errors.append(f"User reset: invalid response: {e}")
                 except Exception as e:
-                    errors.append(f"Root reset failed: {e}")
+                    errors.append(f"User reset failed: {e}")
 
-            # Clear all stored txids
-            self.state["last_txid"] = None
-            self.state["last_user_txid"] = None
-            self.state["last_root_txid"] = None
-            self._queued_actions = {}
-            self.state["queued_actions"] = {}
-            save_state(self.state)
-            self._update_queue_ui()
+                # Phase 2: Root-scope reset (needs pkexec)
+                if needs_root:
+                    try:
+                        worker = _pick_root_worker_path()
+                        argv = [
+                            "pkexec",
+                            worker,
+                            "reset-defaults",
+                            "--scope", "root",
+                        ]
+                        p = subprocess.run(argv, text=True, capture_output=True, timeout=300)
+                        if p.returncode != 0:
+                            err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
+                            errors.append(f"Root reset failed: {err_msg}")
+                        elif p.stdout:
+                            try:
+                                result = json.loads(p.stdout)
+                                if result.get("reset_count", 0) > 0:
+                                    results_text.append(f"Reset {result['reset_count']} system file(s)")
+                                errors.extend(result.get("errors", []))
+                            except json.JSONDecodeError as e:
+                                errors.append(f"Root reset: invalid response: {e}")
+                    except Exception as e:
+                        errors.append(f"Root reset failed: {e}")
 
-            # Refresh the UI to show updated status
-            self._refresh_statuses()
-            self._populate()
+                return True, {"results_text": results_text, "errors": errors}, ""
 
-            # Show results
-            if errors:
-                QMessageBox.warning(
-                    self,
-                    "Reset completed with errors",
-                    "\n".join(results_text) + "\n\nErrors:\n" + "\n".join(errors[:5])
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "Reset complete",
-                    "All audioknob-gui changes have been reset to system defaults.\n\n"
-                    + "\n".join(results_text)
-                )
+            worker = QueueTaskWorker(_task, parent=self)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                self.btn_reset.setEnabled(True)
+                self.btn_reset.setText("Reset All")
+
+                results_text: list[str] = []
+                errors: list[str] = []
+                if isinstance(payload, dict):
+                    results_text = payload.get("results_text") or []
+                    errors = payload.get("errors") or []
+                elif message:
+                    errors = [message]
+
+                # Clear all stored txids
+                self.state["last_txid"] = None
+                self.state["last_user_txid"] = None
+                self.state["last_root_txid"] = None
+                self._queued_actions = {}
+                self.state["queued_actions"] = {}
+                save_state(self.state)
+                self._update_queue_ui()
+
+                # Refresh the UI to show updated status
+                self._refresh_statuses()
+                self._populate()
+
+                # Show results
+                if errors:
+                    QMessageBox.warning(
+                        self,
+                        "Reset completed with errors",
+                        "\n".join(results_text) + "\n\nErrors:\n" + "\n".join(errors[:5])
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Reset complete",
+                        "All audioknob-gui changes have been reset to system defaults.\n\n"
+                        + "\n".join(results_text)
+                    )
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
 
     app = QApplication(sys.argv)
     win = MainWindow()
