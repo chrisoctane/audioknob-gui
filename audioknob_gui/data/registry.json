@@ -458,7 +458,20 @@
             "tracker-miner-fs-3.service",
             "tracker-miner-fs.service",
             "tracker-extract-3.service",
-            "tracker-extract.service"
+            "tracker-extract.service",
+            "tracker-miner-rss-3.service",
+            "tracker-miner-rss.service",
+            "tracker-writeback-3.service",
+            "tracker-writeback.service",
+            "tracker-store.service",
+            "tracker-miner-apps-3.service",
+            "tracker-miner-apps.service",
+            "tracker3-miner-fs-3.service",
+            "tracker3-miner-fs.service",
+            "tracker3-miner-rss-3.service",
+            "tracker3-miner-rss.service",
+            "localsearch*.service",
+            "org.gnome.Localsearch*.service"
           ]
         }
       },

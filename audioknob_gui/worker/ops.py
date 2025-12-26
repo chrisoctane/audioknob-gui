@@ -4,6 +4,7 @@ import glob
 import subprocess
 import shlex
 from dataclasses import dataclass
+import fnmatch
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -643,6 +644,7 @@ def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]],
     services = params.get("services", [])
     if isinstance(services, str):
         services = [services]
+    services = resolve_user_services(services)
     
     would_run: list[list[str]] = []
     notes: list[str] = []
@@ -658,12 +660,8 @@ def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]],
     return would_run, notes
 
 
-def user_unit_exists(unit: str) -> bool:
-    """Return True if a user systemd unit file exists."""
-    unit = unit.strip()
-    if not unit:
-        return False
-
+def _list_user_units() -> set[str]:
+    units: set[str] = set()
     user_paths = [
         Path("~/.config/systemd/user").expanduser(),
         Path("~/.local/share/systemd/user").expanduser(),
@@ -673,27 +671,52 @@ def user_unit_exists(unit: str) -> bool:
     ]
     for base in user_paths:
         try:
-            if (base / unit).exists():
-                return True
+            if not base.exists():
+                continue
+            for p in base.glob("*.service"):
+                units.add(p.name)
         except Exception:
             continue
 
     try:
-        result = run(["systemctl", "--user", "list-unit-files", unit])
+        result = run(["systemctl", "--user", "list-unit-files", "--no-legend", "--no-pager"])
     except Exception:
-        return False
+        return units
 
     if result.returncode != 0:
-        return False
+        return units
 
     for line in result.stdout.splitlines():
         line = line.strip()
-        if not line or line.startswith("UNIT FILE"):
+        if not line:
             continue
         parts = line.split()
-        if parts and parts[0] == unit:
-            return True
-    return False
+        if parts:
+            units.add(parts[0])
+    return units
+
+
+def resolve_user_services(services: list[str]) -> list[str]:
+    units = _list_user_units()
+    resolved: list[str] = []
+    for svc in services:
+        svc = str(svc).strip()
+        if not svc:
+            continue
+        if any(ch in svc for ch in ("*", "?", "[")):
+            matches = sorted(u for u in units if fnmatch.fnmatch(u, svc))
+            resolved.extend(matches)
+        elif svc in units:
+            resolved.append(svc)
+    return list(dict.fromkeys(resolved))
+
+
+def user_unit_exists(unit: str) -> bool:
+    """Return True if a user systemd unit file exists."""
+    unit = unit.strip()
+    if not unit:
+        return False
+    return unit in _list_user_units()
 
 
 def _baloo_disable_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
@@ -1272,7 +1295,7 @@ def check_knob_status(knob: Any) -> str:
         if not services:
             return "unknown"
 
-        existing = [svc for svc in services if user_unit_exists(svc)]
+        existing = resolve_user_services(services)
         if not existing:
             return "not_applicable"
 

@@ -31,7 +31,7 @@ from audioknob_gui.worker.ops import (
     preview,
     restore_sysfs,
     systemd_restore,
-    user_unit_exists,
+    resolve_user_services,
 )
 
 
@@ -303,7 +303,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             if isinstance(services, str):
                 services = [services]
 
-            existing = [svc for svc in services if user_unit_exists(svc)]
+            existing = resolve_user_services(services)
             if not existing:
                 raise SystemExit("No matching user services found to mask")
 
