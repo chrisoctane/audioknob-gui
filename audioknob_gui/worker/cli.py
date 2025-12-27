@@ -1413,6 +1413,20 @@ def _restore_knob_once(knob_id: str) -> dict:
         except Exception as ex:
             errors.append(f"Bootloader update check failed: {ex}")
 
+    # If a reset did not actually revert the kernel cmdline param, surface a force-reset hint.
+    try:
+        from audioknob_gui.core.paths import get_registry_path
+        reg = load_registry(get_registry_path())
+        knob = next((k for k in reg if k.id == knob_id), None)
+        if knob and knob.impl and knob.impl.kind == "kernel_cmdline":
+            status = check_knob_status(knob)
+            if status == "applied":
+                errors.append(
+                    "Reset did not remove the kernel parameter; use force reset to return to system defaults."
+                )
+    except Exception:
+        pass
+
     return {
         "schema": 1,
         "success": len(errors) == 0,

@@ -45,6 +45,11 @@ def _is_no_transaction_error(msg: str) -> bool:
     return "no transaction found" in (msg or "").lower()
 
 
+def _is_force_reset_error(msg: str) -> bool:
+    lower = (msg or "").lower()
+    return "force reset" in lower and ("reset did not" in lower or "did not remove" in lower)
+
+
 def _worker_log_path(*, is_root: bool) -> str:
     from audioknob_gui.core.paths import default_paths
     paths = default_paths()
@@ -3544,8 +3549,9 @@ def main() -> int:
                     self._populate()
                     _get_gui_logger().info("apply queue cancelled")
                     return
-                if action == "reset" and _is_no_transaction_error(message):
-                    if self._confirm_force_reset(knob_id):
+                if action == "reset" and (_is_no_transaction_error(message) or _is_force_reset_error(message)):
+                    reason = "reset_no_effect" if _is_force_reset_error(message) else None
+                    if self._confirm_force_reset(knob_id, reason=reason):
                         self._run_force_reset(knob_id)
                     else:
                         self._refresh_statuses()
@@ -3713,16 +3719,24 @@ def main() -> int:
                 self._on_reboot_now(force=True)
             self._populate()
 
-        def _confirm_force_reset(self, knob_id: str) -> bool:
+        def _confirm_force_reset(self, knob_id: str, *, reason: str | None = None) -> bool:
             k = next((k for k in self.registry if k.id == knob_id), None)
             if not k:
                 return False
-            msg = (
-                "No transaction was recorded for this knob.\n\n"
-                "Force reset will attempt to revert the setting to system defaults "
-                "even if it was not applied by this app.\n\n"
-                "Continue?"
-            )
+            if reason == "reset_no_effect":
+                msg = (
+                    "Reset did not revert this knob to defaults.\n\n"
+                    "Force reset will attempt to revert the setting to system defaults "
+                    "even if it was not applied by this app.\n\n"
+                    "Continue?"
+                )
+            else:
+                msg = (
+                    "No transaction was recorded for this knob.\n\n"
+                    "Force reset will attempt to revert the setting to system defaults "
+                    "even if it was not applied by this app.\n\n"
+                    "Continue?"
+                )
             return QMessageBox.question(self, "Force reset", msg) == QMessageBox.Yes
 
         def _run_force_reset(self, knob_id: str) -> None:
@@ -3772,18 +3786,18 @@ def main() -> int:
                 errors.extend([str(e) for e in item.get("errors") or []])
                 if not errors:
                     continue
-                if any(_is_no_transaction_error(e) for e in errors):
+                if any(_is_no_transaction_error(e) or _is_force_reset_error(e) for e in errors):
                     if knob_id and knob_id not in no_tx:
                         no_tx.append(knob_id)
                     for err in errors:
-                        if not _is_no_transaction_error(err):
+                        if not (_is_no_transaction_error(err) or _is_force_reset_error(err)):
                             other_errors.append(err)
                 else:
                     other_errors.extend(errors)
 
             for err in result.get("errors") or []:
                 err_str = str(err)
-                if _is_no_transaction_error(err_str):
+                if _is_no_transaction_error(err_str) or _is_force_reset_error(err_str):
                     if ":" in err_str:
                         kid = err_str.split(":", 1)[0].strip()
                         if kid and kid not in no_tx:
@@ -3803,10 +3817,11 @@ def main() -> int:
                 else:
                     names.append(kid)
             msg = (
-                "No transaction was recorded for these knobs:\n\n"
+                "Force reset recommended for:\n\n"
                 + "\n".join(names)
                 + "\n\nForce reset will attempt to revert the settings to system defaults "
-                "even if they were not applied by this app.\n\nContinue?"
+                "even if they were not applied by this app or if reset did not change them.\n\n"
+                "Continue?"
             )
             return QMessageBox.question(self, "Force reset", msg) == QMessageBox.Yes
 
