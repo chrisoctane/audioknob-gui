@@ -38,6 +38,11 @@ It is for agent control only and does not change public docs.
   - `config/registry.schema.json` → `audioknob_gui/data/registry.schema.json`
 - New knob kinds require preview/apply/status support in worker.
 - Every knob must have a system_profile location entry (per-knob path/target map).
+- For knobs that share a file (GRUB cmdline, sysctl.d, limits.d, pipewire.conf.d, udev rules, etc.):
+  - Apply must be additive (append or edit only the knob’s lines/param).
+  - Reset must be surgical (remove only the knob’s lines/param), never restore the full file,
+    unless the knob owns the entire file by design.
+  - If multiple knobs touch the same file, verify a reset of one does not revert the others.
 - Prefer small, reversible changes; refactor when it makes the codebase cleaner
   or more consistent with existing patterns.
 - Match existing style and structure; do not introduce new patterns unless they
