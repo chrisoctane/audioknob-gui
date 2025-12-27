@@ -2857,6 +2857,8 @@ def main() -> int:
             from audioknob_gui.platform.packages import which_command
             
             logger = _get_gui_logger()
+            if "audio_group_membership" in self._busy_knobs:
+                return
             missing = get_missing_groups()
             available = get_available_audio_groups()
             
@@ -2906,64 +2908,81 @@ def main() -> int:
                 return
 
             user = os.environ.get("USER") or getpass.getuser()
-            errors = []
-            successes = []
-            results = []
-            
-            for group in groups_to_add:
-                try:
-                    cmd = ["pkexec", usermod, "-aG", group, user]
-                    p = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True
-                    )
-                    results.append(
-                        {
-                            "group": group,
-                            "cmd": cmd,
-                            "returncode": p.returncode,
-                            "stdout": p.stdout,
-                            "stderr": p.stderr,
-                        }
-                    )
-                    if p.returncode == 0:
-                        successes.append(group)
-                    else:
-                        errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
-                except Exception as e:
-                    results.append({"group": group, "error": str(e)})
-                    errors.append(f"{group}: {e}")
-            
-            # Report results
-            msg = []
-            if successes:
-                msg.append(f"<b style='color: #2e7d32;'>Added to:</b> {', '.join(successes)}")
-            if errors:
-                msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
-            if successes:
-                msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
-            
-            QMessageBox.information(self, "Group Membership", "".join(msg))
-            logger.info("join groups user=%s added=%s errors=%s", user, ",".join(successes), "; ".join(errors))
-            _log_gui_audit(
-                "join-groups",
-                {
+            self._busy_knobs.add("audio_group_membership")
+            self._knob_statuses["audio_group_membership"] = "running"
+            self._populate()
+
+            def _task() -> tuple[bool, object, str]:
+                errors: list[str] = []
+                successes: list[str] = []
+                results: list[dict[str, object]] = []
+
+                for group in groups_to_add:
+                    try:
+                        cmd = ["pkexec", usermod, "-aG", group, user]
+                        p = subprocess.run(cmd, capture_output=True, text=True)
+                        results.append(
+                            {
+                                "group": group,
+                                "cmd": cmd,
+                                "returncode": p.returncode,
+                                "stdout": p.stdout,
+                                "stderr": p.stderr,
+                            }
+                        )
+                        if p.returncode == 0:
+                            successes.append(group)
+                        else:
+                            errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
+                    except Exception as e:
+                        results.append({"group": group, "error": str(e)})
+                        errors.append(f"{group}: {e}")
+
+                payload = {
                     "user": user,
                     "groups": groups_to_add,
                     "added": successes,
                     "errors": errors,
                     "results": results,
-                },
-            )
-            
-            # Refresh (won't show changes until re-login, but update UI state)
-            if successes:
-                self._knob_statuses["audio_group_membership"] = "pending_reboot"
-                self._update_reboot_banner()
+                }
+                return len(errors) == 0, payload, ""
 
-            self._refresh_user_groups()
-            self._populate()
+            worker = QueueTaskWorker(_task, parent=self)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                self._busy_knobs.discard("audio_group_membership")
+                errors: list[str] = []
+                added: list[str] = []
+                if isinstance(payload, dict):
+                    errors = payload.get("errors") or []
+                    added = payload.get("added") or []
+                if not added and not errors and message:
+                    errors = [message]
+
+                msg = []
+                if added:
+                    msg.append(f"<b style='color: #2e7d32;'>Added to:</b> {', '.join(added)}")
+                if errors:
+                    msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
+                if added:
+                    msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
+
+                QMessageBox.information(self, "Group Membership", "".join(msg))
+                logger.info("join groups user=%s added=%s errors=%s", user, ",".join(added), "; ".join(errors))
+                if isinstance(payload, dict):
+                    _log_gui_audit("join-groups", payload)
+
+                if added:
+                    self._knob_statuses["audio_group_membership"] = "pending_reboot"
+                    self._update_reboot_banner()
+
+                self._refresh_user_groups()
+                self._populate()
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
 
         def _on_leave_groups(self) -> None:
             """Remove current user from audio groups."""
@@ -2971,6 +2990,8 @@ def main() -> int:
             from audioknob_gui.platform.packages import which_command
 
             logger = _get_gui_logger()
+            if "audio_group_membership" in self._busy_knobs:
+                return
             self._refresh_user_groups()
             available = get_available_audio_groups()
             groups_to_remove = [g for g in available if g in self._user_groups]
@@ -3009,23 +3030,52 @@ def main() -> int:
                     },
                 )
                 return
+            self._busy_knobs.add("audio_group_membership")
+            self._knob_statuses["audio_group_membership"] = "running"
+            self._populate()
 
-            errors = []
-            successes = []
-            results = []
+            def _task() -> tuple[bool, object, str]:
+                errors: list[str] = []
+                successes: list[str] = []
+                results: list[dict[str, object]] = []
 
-            if gpasswd:
-                for group in groups_to_remove:
+                if gpasswd:
+                    for group in groups_to_remove:
+                        try:
+                            cmd = ["pkexec", gpasswd, "-d", user, group]
+                            p = subprocess.run(cmd, capture_output=True, text=True)
+                            results.append(
+                                {
+                                    "group": group,
+                                    "cmd": cmd,
+                                    "returncode": p.returncode,
+                                    "stdout": p.stdout,
+                                    "stderr": p.stderr,
+                                }
+                            )
+                            if p.returncode == 0:
+                                successes.append(group)
+                            else:
+                                errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
+                        except Exception as e:
+                            results.append({"group": group, "error": str(e)})
+                            errors.append(f"{group}: {e}")
+                else:
                     try:
-                        cmd = ["pkexec", gpasswd, "-d", user, group]
-                        p = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                        )
+                        import grp
+                        keep_groups = []
+                        for gid in os.getgroups():
+                            try:
+                                keep_groups.append(grp.getgrgid(gid).gr_name)
+                            except KeyError:
+                                pass
+                        keep_groups = [g for g in keep_groups if g not in groups_to_remove]
+                        group_list = ",".join(sorted(set(keep_groups)))
+                        cmd = ["pkexec", usermod, "-G", group_list, user]
+                        p = subprocess.run(cmd, capture_output=True, text=True)
                         results.append(
                             {
-                                "group": group,
+                                "groups": groups_to_remove,
                                 "cmd": cmd,
                                 "returncode": p.returncode,
                                 "stdout": p.stdout,
@@ -3033,74 +3083,58 @@ def main() -> int:
                             }
                         )
                         if p.returncode == 0:
-                            successes.append(group)
+                            successes.extend(groups_to_remove)
                         else:
-                            errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
+                            errors.append(p.stderr.strip() or "Failed to update groups")
                     except Exception as e:
-                        results.append({"group": group, "error": str(e)})
-                        errors.append(f"{group}: {e}")
-            else:
-                # Fallback: replace supplementary groups via usermod -G
-                try:
-                    import grp
-                    keep_groups = []
-                    for gid in os.getgroups():
-                        try:
-                            keep_groups.append(grp.getgrgid(gid).gr_name)
-                        except KeyError:
-                            pass
-                    keep_groups = [g for g in keep_groups if g not in groups_to_remove]
-                    group_list = ",".join(sorted(set(keep_groups)))
-                    cmd = ["pkexec", usermod, "-G", group_list, user]
-                    p = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                    )
-                    results.append(
-                        {
-                            "groups": groups_to_remove,
-                            "cmd": cmd,
-                            "returncode": p.returncode,
-                            "stdout": p.stdout,
-                            "stderr": p.stderr,
-                        }
-                    )
-                    if p.returncode == 0:
-                        successes.extend(groups_to_remove)
-                    else:
-                        errors.append(p.stderr.strip() or "Failed to update groups")
-                except Exception as e:
-                    results.append({"groups": groups_to_remove, "error": str(e)})
-                    errors.append(str(e))
+                        results.append({"groups": groups_to_remove, "error": str(e)})
+                        errors.append(str(e))
 
-            msg = []
-            if successes:
-                msg.append(f"<b style='color: #2e7d32;'>Removed from:</b> {', '.join(successes)}")
-            if errors:
-                msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
-            if successes:
-                msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
-
-            QMessageBox.information(self, "Group Membership", "".join(msg))
-            logger.info("leave groups user=%s removed=%s errors=%s", user, ",".join(successes), "; ".join(errors))
-            _log_gui_audit(
-                "leave-groups",
-                {
+                payload = {
                     "user": user,
                     "groups": groups_to_remove,
                     "removed": successes,
                     "errors": errors,
                     "results": results,
-                },
-            )
+                }
+                return len(errors) == 0, payload, ""
 
-            if successes:
-                self._knob_statuses["audio_group_membership"] = "pending_reboot"
-                self._update_reboot_banner()
+            worker = QueueTaskWorker(_task, parent=self)
 
-            self._refresh_user_groups()
-            self._populate()
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                self._busy_knobs.discard("audio_group_membership")
+                errors: list[str] = []
+                removed: list[str] = []
+                if isinstance(payload, dict):
+                    errors = payload.get("errors") or []
+                    removed = payload.get("removed") or []
+                if not removed and not errors and message:
+                    errors = [message]
+
+                msg = []
+                if removed:
+                    msg.append(f"<b style='color: #2e7d32;'>Removed from:</b> {', '.join(removed)}")
+                if errors:
+                    msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
+                if removed:
+                    msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
+
+                QMessageBox.information(self, "Group Membership", "".join(msg))
+                logger.info("leave groups user=%s removed=%s errors=%s", user, ",".join(removed), "; ".join(errors))
+                if isinstance(payload, dict):
+                    _log_gui_audit("leave-groups", payload)
+
+                if removed:
+                    self._knob_statuses["audio_group_membership"] = "pending_reboot"
+                    self._update_reboot_banner()
+
+                self._refresh_user_groups()
+                self._populate()
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
 
         def _on_install_packages(self, commands: list[str]) -> None:
             """Install packages that provide the given commands."""
