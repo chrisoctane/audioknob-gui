@@ -1346,6 +1346,26 @@ def main() -> int:
                     if prev is None or ts < prev:
                         tx_times[knob_id] = float(ts)
 
+            root_tx_dir = Path(paths.var_lib_dir) / "transactions"
+            if root_tx_dir.exists():
+                if not os.access(root_tx_dir, os.R_OK | os.X_OK):
+                    root_unknown = True
+                    return tx_times, root_unknown
+                try:
+                    for entry in root_tx_dir.iterdir():
+                        if not entry.is_dir():
+                            continue
+                        manifest_path = entry / "manifest.json"
+                        if manifest_path.exists() and not os.access(manifest_path, os.R_OK):
+                            root_unknown = True
+                            return tx_times, root_unknown
+                except PermissionError:
+                    root_unknown = True
+                    return tx_times, root_unknown
+                except Exception:
+                    root_unknown = True
+                    return tx_times, root_unknown
+
             try:
                 root_txs = list_transactions(paths.var_lib_dir)
             except PermissionError:
