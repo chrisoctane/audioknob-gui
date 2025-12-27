@@ -995,6 +995,32 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             reset_paths.add(file_path)
         else:
             errors.append(message)
+
+    kernel_params_to_remove = set(kernel_params)
+    if kernel_params and scope_filter in ("root", "all") and os.geteuid() == 0:
+        try:
+            from audioknob_gui.worker.ops import detect_distro
+
+            distro = detect_distro()
+            cmdline_path = distro.kernel_cmdline_file
+            if cmdline_path and cmdline_path in file_targets:
+                entry = file_targets[cmdline_path]
+                meta = entry["meta"]
+                tx = entry["tx"]
+                backup_key = meta.get("backup_key")
+                if backup_key:
+                    backup_path = tx.root / "backups" / backup_key
+                    if backup_path.exists():
+                        baseline_text = backup_path.read_text(encoding="utf-8")
+                        tokens = _kernel_cmdline_tokens(baseline_text, distro.boot_system)
+                        baseline_params = {
+                            param
+                            for param in kernel_params
+                            if _kernel_cmdline_param_present(param, tokens)
+                        }
+                        kernel_params_to_remove = kernel_params - baseline_params
+        except Exception:
+            kernel_params_to_remove = set(kernel_params)
     
     # Check if there are pending root changes (for informing GUI)
     # Use list-pending semantics: only count files that still exist + restorable effects
@@ -1019,8 +1045,8 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                 break
 
     # Ensure kernel cmdline params are removed even if backups still contain them.
-    if scope_filter in ("root", "all") and os.geteuid() == 0 and kernel_params:
-        success, message = _force_reset_kernel_cmdline_params(kernel_params, run_update=True)
+    if scope_filter in ("root", "all") and os.geteuid() == 0 and kernel_params_to_remove:
+        success, message = _force_reset_kernel_cmdline_params(kernel_params_to_remove, run_update=True)
         if success:
             kernel_cmdline_updated = True
             results.append({
@@ -1046,7 +1072,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                             return True
                 return False
 
-            needs_reboot = any(_param_in_tokens(p, running_tokens) for p in kernel_params)
+            needs_reboot = any(_param_in_tokens(p, running_tokens) for p in kernel_params_to_remove)
         except Exception:
             pass
 
@@ -1899,6 +1925,33 @@ def _force_reset_sysfs_glob(glob_spec: str | list[str]) -> tuple[bool, str]:
         return False, "; ".join(errors)
     suffix = "entry" if updated == 1 else "entries"
     return True, f"Reset {updated} sysfs {suffix}"
+
+
+def _kernel_cmdline_tokens(text: str, boot_system: str) -> list[str]:
+    if boot_system in ("grub2-bls", "bls", "systemd-boot"):
+        return text.strip().split()
+    if boot_system == "grub2":
+        for line in text.splitlines():
+            if not line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                continue
+            _, _, rhs = line.partition("=")
+            rhs = rhs.strip()
+            if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                rhs = rhs[1:-1]
+            try:
+                return shlex.split(rhs)
+            except Exception:
+                return rhs.split()
+        return []
+    return text.strip().split()
+
+
+def _kernel_cmdline_param_present(param: str, tokens: list[str]) -> bool:
+    if not param:
+        return False
+    if "=" in param:
+        return any(t == param for t in tokens)
+    return any(t == param or t.startswith(param + "=") for t in tokens)
 
 
 def _force_reset_kernel_cmdline_params(params: set[str], *, run_update: bool = True) -> tuple[bool, str]:
