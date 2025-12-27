@@ -123,6 +123,15 @@ def _pipewire_sample_rate_override(state: dict) -> int | None:
     return None
 
 
+def _backup_once(tx, backups: list[dict], path: str, *, we_created: bool = False) -> dict:
+    for meta in backups:
+        if meta.get("path") == path:
+            return meta
+    meta = backup_file(tx, path, we_created=we_created)
+    backups.append(meta)
+    return meta
+
+
 def cmd_detect(_: argparse.Namespace) -> int:
     print(json.dumps(dump_detect(), indent=2, sort_keys=True))
     return 0
@@ -238,7 +247,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         if kind == "qjackctl_server_prefix":
             path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
             path = Path(path_str).expanduser()
-            backups.append(backup_file(tx, str(path)))
+            _backup_once(tx, backups, str(path))
 
             from audioknob_gui.core.qjackctl import ensure_server_flags
 
@@ -257,7 +266,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
 
             path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
             path = Path(path_str).expanduser()
-            backups.append(backup_file(tx, str(path)))
+            _backup_once(tx, backups, str(path))
             
             # Build config content
             lines = ["# audioknob-gui PipeWire configuration"]
@@ -424,7 +433,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         if kind == "pam_limits_audio_group":
             path = str(params["path"])
-            backups.append(backup_file(tx, path))
+            _backup_once(tx, backups, path)
 
             want_lines = [str(x) for x in params.get("lines", [])]
             before = ""
@@ -443,7 +452,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         elif kind == "sysctl_conf":
             path = str(params["path"])
-            backups.append(backup_file(tx, path))
+            _backup_once(tx, backups, path)
 
             want_lines = [str(x) for x in params.get("lines", [])]
             before = ""
@@ -497,7 +506,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 cfg_path = resolve_cpupower_config_path(distro_id)
                 key = "GOVERNOR"
 
-                backups.append(backup_file(tx, cfg_path))
+                _backup_once(tx, backups, cfg_path)
 
                 before = ""
                 try:
@@ -530,7 +539,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         elif kind == "udev_rule":
             path = str(params["path"])
             content = str(params["content"])
-            backups.append(backup_file(tx, path))
+            _backup_once(tx, backups, path)
             
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(content.rstrip("\n") + "\n", encoding="utf-8")
@@ -552,7 +561,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 raise SystemExit(f"Unknown boot system for {distro.distro_id}; cannot modify kernel cmdline")
             
             cmdline_file = distro.kernel_cmdline_file
-            backups.append(backup_file(tx, cmdline_file))
+            _backup_once(tx, backups, cmdline_file)
             
             before = ""
             try:
@@ -1428,6 +1437,8 @@ def _restore_knob_once(knob_id: str) -> dict:
             return [t for t in tokens if t != param and not t.startswith(param + "=")]
 
         updated = False
+        current_tokens = _tokens_for_content(current_content, distro.boot_system)
+        param_in_current = _param_present(param, current_tokens)
         if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
             tokens = _tokens_for_content(current_content, distro.boot_system)
             new_tokens = _apply_param(tokens, want_present)
@@ -1485,6 +1496,14 @@ def _restore_knob_once(knob_id: str) -> dict:
                 "success": False,
                 "knob_id": knob_id,
                 "error": f"Unsupported boot system: {distro.boot_system}",
+            }
+
+        if not updated and want_present and param_in_current:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Force reset available: reset did not remove {param} from {cmdline_path}",
             }
 
         restored: list[str] = [cmdline_path]
