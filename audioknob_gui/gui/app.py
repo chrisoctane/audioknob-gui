@@ -627,6 +627,7 @@ def main() -> int:
             self._dependency_index = self._build_dependency_index()
             _get_gui_logger().info("gui started")
             self._ensure_system_profile()
+            self._task_threads: list[QThread] = []
             self._baseline_ready = self._baseline_available()
             self._baseline_busy = False
             self._ensure_baseline_state()
@@ -752,7 +753,6 @@ def main() -> int:
 
             self._knob_statuses: dict[str, str] = {}
             self._busy_knobs: set[str] = set()
-            self._task_threads: list[QThread] = []
             self._install_busy = False
             self._logs_busy = False
             self._reboot_busy = False
