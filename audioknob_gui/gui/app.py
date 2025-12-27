@@ -204,6 +204,61 @@ def _run_worker_restore_pkexec(txid: str) -> dict:
     return json.loads(p.stdout)
 
 
+def _run_worker_restore_user(txid: str) -> dict:
+    argv = [
+        sys.executable,
+        "-m",
+        "audioknob_gui.worker.cli",
+        "restore",
+        txid,
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        log_path = _worker_log_path(is_root=False)
+        msg = p.stderr.strip() or p.stdout.strip() or "worker restore failed"
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
+    return json.loads(p.stdout)
+
+
+def _run_worker_history_user() -> dict:
+    argv = [
+        sys.executable,
+        "-m",
+        "audioknob_gui.worker.cli",
+        "history",
+        "--scope",
+        "user",
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        log_path = _worker_log_path(is_root=False)
+        msg = p.stderr.strip() or p.stdout.strip() or "worker history failed"
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
+    return json.loads(p.stdout)
+
+
+def _run_worker_history_pkexec() -> dict:
+    if not _pkexec_available():
+        raise RuntimeError("pkexec not found")
+
+    worker = _pick_root_worker_path()
+    argv = [
+        "pkexec",
+        worker,
+        "history",
+        "--scope",
+        "root",
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        log_path = _worker_log_path(is_root=True)
+        msg = p.stderr.strip() or p.stdout.strip() or "worker history failed"
+        if _is_pkexec_cancel(msg):
+            raise RuntimeError(_PKEXEC_CANCELLED)
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
+    return json.loads(p.stdout)
+
+
 def _run_worker_force_reset_pkexec(knob_id: str) -> dict:
     if not _pkexec_available():
         raise RuntimeError("pkexec not found")
@@ -387,6 +442,8 @@ def load_state() -> dict:
         "baseline_statuses": {},  # knob_id -> status string (first-run baseline)
         "baseline_checks": {},  # knob_id -> list[str] lines (first-run snapshot)
         "baseline_captured_at": None,  # ISO timestamp
+        "baseline_txid_user": None,  # last_user_txid at capture time
+        "baseline_txid_root": None,  # last_root_txid at capture time
     }
     if not p.exists():
         return default
@@ -414,6 +471,10 @@ def load_state() -> dict:
             data["baseline_checks"] = {}
         if "baseline_captured_at" not in data:
             data["baseline_captured_at"] = None
+        if "baseline_txid_user" not in data:
+            data["baseline_txid_user"] = None
+        if "baseline_txid_root" not in data:
+            data["baseline_txid_root"] = None
         if "enable_reboot_knobs" not in data:
             data["enable_reboot_knobs"] = False
         if "queued_knobs" not in data:
@@ -445,6 +506,10 @@ def load_state() -> dict:
             data["baseline_statuses"] = {}
         if data.get("baseline_checks") is not None and not isinstance(data.get("baseline_checks"), dict):
             data["baseline_checks"] = {}
+        if data.get("baseline_txid_user") is not None and not isinstance(data.get("baseline_txid_user"), str):
+            data["baseline_txid_user"] = None
+        if data.get("baseline_txid_root") is not None and not isinstance(data.get("baseline_txid_root"), str):
+            data["baseline_txid_root"] = None
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
         try:
             q = data.get("pipewire_quantum")
@@ -622,12 +687,12 @@ def main() -> int:
             self.setWindowTitle(_app_title())
             self.resize(980, 640)
 
+            self._task_threads: list[QThread] = []
             self.state = load_state()
             self.registry = load_registry(_registry_path())
             self._dependency_index = self._build_dependency_index()
             _get_gui_logger().info("gui started")
             self._ensure_system_profile()
-            self._task_threads: list[QThread] = []
             self._baseline_ready = self._baseline_available()
             self._baseline_busy = False
             self._ensure_baseline_state()
@@ -711,6 +776,11 @@ def main() -> int:
             self.btn_logs.setToolTip("Open logs for copy/paste")
             self.btn_logs.clicked.connect(self._on_show_logs)
             top.addWidget(self.btn_logs)
+
+            self.btn_tx_history = QPushButton("Tx History")
+            self.btn_tx_history.setToolTip("View transactions (txid) and restore")
+            self.btn_tx_history.clicked.connect(self._on_show_tx_history)
+            top.addWidget(self.btn_tx_history)
 
             self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
@@ -992,6 +1062,284 @@ def main() -> int:
             self._task_threads.append(worker)
             worker.start()
 
+        def _summarize_effect(self, effect: dict[str, Any]) -> str:
+            kind = str(effect.get("kind", ""))
+            if kind == "kernel_cmdline":
+                param = str(effect.get("param", "")).strip()
+                path = str(effect.get("file") or effect.get("path") or "").strip()
+                if param and path:
+                    return f"kernel_cmdline: {param} ({path})"
+                if param:
+                    return f"kernel_cmdline: {param}"
+                if path:
+                    return f"kernel_cmdline ({path})"
+                return "kernel_cmdline"
+            if kind == "sysfs_write":
+                path = str(effect.get("path", "")).strip()
+                return f"sysfs_write: {path}" if path else "sysfs_write"
+            if kind == "systemd_unit_toggle":
+                unit = str(effect.get("unit", "")).strip()
+                return f"systemd_unit_toggle: {unit}" if unit else "systemd_unit_toggle"
+            if kind == "user_service_mask":
+                services = effect.get("services", [])
+                units: list[str] = []
+                if isinstance(services, list):
+                    for svc in services:
+                        if isinstance(svc, dict):
+                            unit = str(svc.get("unit", "")).strip()
+                        else:
+                            unit = str(svc).strip()
+                        if unit:
+                            units.append(unit)
+                if units:
+                    suffix = "..." if len(units) > 3 else ""
+                    return f"user_service_mask: {', '.join(units[:3])}{suffix}"
+                return "user_service_mask"
+            if kind == "pipewire_restart":
+                return "pipewire_restart"
+            if kind == "baloo_disable":
+                return "baloo_disable"
+            return kind or "effect"
+
+        def _format_tx_preview(self, item: dict[str, Any], titles: dict[str, str]) -> str:
+            txid = str(item.get("txid", ""))
+            scope = str(item.get("scope", "unknown"))
+            ts = item.get("timestamp")
+            if isinstance(ts, (int, float)) and ts > 0:
+                when = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                when = "-"
+            lines = [f"txid: {txid}", f"scope: {scope}", f"time: {when}"]
+
+            applied = item.get("applied") or []
+            if isinstance(applied, list) and applied:
+                lines.append("")
+                lines.append("knobs:")
+                for kid in applied:
+                    if not isinstance(kid, str):
+                        continue
+                    title = titles.get(kid, kid)
+                    if title and title != kid:
+                        lines.append(f"- {title} ({kid})")
+                    else:
+                        lines.append(f"- {kid}")
+
+            backups = item.get("backups") or []
+            file_paths: list[str] = []
+            if isinstance(backups, list):
+                for meta in backups:
+                    if isinstance(meta, dict):
+                        path = meta.get("path")
+                        if isinstance(path, str) and path not in file_paths:
+                            file_paths.append(path)
+            if file_paths:
+                lines.append("")
+                lines.append("files:")
+                for path in file_paths:
+                    lines.append(f"- {path}")
+
+            effects = item.get("effects") or []
+            if isinstance(effects, list) and effects:
+                lines.append("")
+                lines.append("effects:")
+                for effect in effects:
+                    if isinstance(effect, dict):
+                        lines.append(f"- {self._summarize_effect(effect)}")
+
+            return "\n".join(lines)
+
+        def _on_show_tx_history(self) -> None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Tx History")
+            dialog.resize(780, 520)
+            layout = QVBoxLayout(dialog)
+
+            baseline_ts = self.state.get("baseline_captured_at") or "-"
+            baseline_user = self.state.get("baseline_txid_user") or "-"
+            baseline_root = self.state.get("baseline_txid_root") or "-"
+            baseline_label = QLabel(
+                f"Baseline: {baseline_ts} (user txid: {baseline_user}, root txid: {baseline_root})"
+            )
+            layout.addWidget(baseline_label)
+
+            table = QTableWidget(0, 7)
+            table.setHorizontalHeaderLabels(
+                ["TxID", "Scope", "When", "Knobs", "Files", "Effects", "Restore"]
+            )
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.setSelectionMode(QAbstractItemView.SingleSelection)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setAlternatingRowColors(True)
+            table.setWordWrap(False)
+            table.setTextElideMode(Qt.ElideRight)
+            table.horizontalHeader().setStretchLastSection(True)
+            layout.addWidget(table)
+
+            btn_row = QHBoxLayout()
+            refresh_btn = QPushButton("Refresh")
+            btn_row.addWidget(refresh_btn)
+            btn_row.addStretch(1)
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.reject)
+            btn_row.addWidget(close_btn)
+            layout.addLayout(btn_row)
+
+            titles = {k.id: k.title for k in self.registry}
+
+            def _render(items: list[dict[str, Any]]) -> None:
+                table.setRowCount(0)
+                for row, item in enumerate(items):
+                    txid = str(item.get("txid", ""))
+                    scope = str(item.get("scope", "unknown"))
+                    ts = item.get("timestamp")
+                    if isinstance(ts, (int, float)) and ts > 0:
+                        when = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                    else:
+                        when = "-"
+
+                    applied = item.get("applied") or []
+                    applied_names = [
+                        titles.get(kid, kid)
+                        for kid in applied
+                        if isinstance(kid, str)
+                    ]
+                    knobs_text = ", ".join(applied_names) if applied_names else "-"
+
+                    backups = item.get("backups") or []
+                    file_paths = {
+                        meta.get("path")
+                        for meta in backups
+                        if isinstance(meta, dict) and isinstance(meta.get("path"), str)
+                    }
+                    files_text = str(len(file_paths)) if file_paths else "-"
+
+                    effects = item.get("effects") or []
+                    effects_text = str(len(effects)) if isinstance(effects, list) and effects else "-"
+
+                    preview = self._format_tx_preview(item, titles)
+
+                    table.insertRow(row)
+                    tx_item = QTableWidgetItem(txid)
+                    tx_item.setToolTip(preview)
+                    table.setItem(row, 0, tx_item)
+                    scope_item = QTableWidgetItem(scope)
+                    scope_item.setToolTip(preview)
+                    table.setItem(row, 1, scope_item)
+                    when_item = QTableWidgetItem(when)
+                    when_item.setToolTip(preview)
+                    table.setItem(row, 2, when_item)
+                    knobs_item = QTableWidgetItem(knobs_text)
+                    knobs_item.setToolTip(preview)
+                    table.setItem(row, 3, knobs_item)
+                    files_item = QTableWidgetItem(files_text)
+                    files_item.setToolTip(preview)
+                    table.setItem(row, 4, files_item)
+                    effects_item = QTableWidgetItem(effects_text)
+                    effects_item.setToolTip(preview)
+                    table.setItem(row, 5, effects_item)
+
+                    restore_btn = QPushButton("Restore")
+                    restore_btn.setToolTip(preview)
+
+                    def _restore(_checked=False, *, tx=txid, sc=scope, details=preview):
+                        msg = "Restore this transaction?\n\n" + details
+                        if QMessageBox.question(self, "Restore Transaction", msg) != QMessageBox.Yes:
+                            return
+
+                        def _task():
+                            if sc == "root":
+                                result = _run_worker_restore_pkexec(tx)
+                            else:
+                                result = _run_worker_restore_user(tx)
+                            return True, result, ""
+
+                        worker = QueueTaskWorker(_task, parent=dialog)
+
+                        def _on_done(success: bool, payload: object, message: str) -> None:
+                            if not success:
+                                if message == _PKEXEC_CANCELLED:
+                                    return
+                                QMessageBox.warning(
+                                    dialog,
+                                    "Restore Failed",
+                                    message or "Restore failed",
+                                )
+                                return
+                            QMessageBox.information(dialog, "Restore", "Transaction restored.")
+                            self._refresh_statuses()
+                            _refresh_history()
+
+                        worker.finished.connect(_on_done)
+                        worker.finished.connect(worker.deleteLater)
+                        self._task_threads.append(worker)
+                        worker.start()
+
+                    restore_btn.clicked.connect(_restore)
+                    table.setCellWidget(row, 6, restore_btn)
+
+                table.resizeColumnsToContents()
+
+            def _refresh_history() -> None:
+                refresh_btn.setEnabled(False)
+
+                def _task():
+                    payload = {
+                        "user": None,
+                        "root": None,
+                        "errors": [],
+                        "root_cancelled": False,
+                    }
+                    try:
+                        payload["user"] = _run_worker_history_user()
+                    except Exception as exc:
+                        payload["errors"].append(str(exc))
+                    try:
+                        payload["root"] = _run_worker_history_pkexec()
+                    except Exception as exc:
+                        if str(exc) == _PKEXEC_CANCELLED:
+                            payload["root_cancelled"] = True
+                        else:
+                            payload["errors"].append(str(exc))
+                    if not payload["user"] and not payload["root"]:
+                        return False, payload, "No history data"
+                    return True, payload, ""
+
+                worker = QueueTaskWorker(_task, parent=dialog)
+
+                def _on_done(success: bool, payload: object, message: str) -> None:
+                    refresh_btn.setEnabled(True)
+                    if not success:
+                        QMessageBox.warning(dialog, "Tx History", message or "History load failed")
+                        return
+                    if not isinstance(payload, dict):
+                        return
+                    items: list[dict[str, Any]] = []
+                    user_data = payload.get("user") or {}
+                    root_data = payload.get("root") or {}
+                    for item in user_data.get("items") or []:
+                        if isinstance(item, dict):
+                            item.setdefault("scope", "user")
+                            items.append(item)
+                    for item in root_data.get("items") or []:
+                        if isinstance(item, dict):
+                            item.setdefault("scope", "root")
+                            items.append(item)
+                    items.sort(key=lambda i: float(i.get("timestamp") or 0), reverse=True)
+                    _render(items)
+                    errors = payload.get("errors") or []
+                    if errors:
+                        details = "\n".join(str(e) for e in errors)
+                        QMessageBox.warning(dialog, "Tx History (warnings)", details)
+
+                worker.finished.connect(_on_done)
+                worker.finished.connect(worker.deleteLater)
+                self._task_threads.append(worker)
+                worker.start()
+
+            refresh_btn.clicked.connect(_refresh_history)
+            _refresh_history()
+            dialog.exec()
+
         def _ensure_system_profile(self) -> None:
             try:
                 from audioknob_gui.worker.ops import scan_system_profile
@@ -1118,6 +1466,8 @@ def main() -> int:
                     return
                 self.state["baseline_statuses"] = statuses
                 self.state["baseline_captured_at"] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+                self.state["baseline_txid_user"] = self.state.get("last_user_txid")
+                self.state["baseline_txid_root"] = self.state.get("last_root_txid")
                 self.state["baseline_checks"] = self._build_baseline_checks(statuses)
                 save_state(self.state)
                 self._baseline_ready = True
@@ -1295,6 +1645,20 @@ def main() -> int:
                 return
             baseline_ts = self._parse_baseline_timestamp()
             tx_times, root_tx_unknown = self._collect_transaction_times()
+            baseline_user_txid = self.state.get("baseline_txid_user")
+            baseline_root_txid = self.state.get("baseline_txid_root")
+            last_user_txid = self.state.get("last_user_txid")
+            last_root_txid = self.state.get("last_root_txid")
+            user_diverged = (
+                isinstance(baseline_user_txid, str)
+                and isinstance(last_user_txid, str)
+                and baseline_user_txid != last_user_txid
+            )
+            root_diverged = (
+                isinstance(baseline_root_txid, str)
+                and isinstance(last_root_txid, str)
+                and baseline_root_txid != last_root_txid
+            )
             for knob in self.registry:
                 current = self._knob_statuses.get(knob.id)
                 if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable"):
@@ -1309,6 +1673,11 @@ def main() -> int:
                     continue
                 if tx_time is not None and baseline_ts is None:
                     continue
+                if tx_time is None:
+                    if knob.requires_root and root_diverged:
+                        continue
+                    if not knob.requires_root and user_diverged:
+                        continue
                 if current == base:
                     self._knob_statuses[knob.id] = "sys_default"
                     continue

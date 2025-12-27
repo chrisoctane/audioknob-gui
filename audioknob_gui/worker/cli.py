@@ -760,26 +760,40 @@ def cmd_restore(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_history(_: argparse.Namespace) -> int:
+def cmd_history(args: argparse.Namespace) -> int:
+    """List transactions for user/root scope."""
     paths = default_paths()
-    tx_dir = Path(paths.var_lib_dir) / "transactions"
+    scope = getattr(args, "scope", "all")
     items: list[dict] = []
+    root_unavailable = False
 
-    if tx_dir.exists():
-        for p in sorted(tx_dir.iterdir()):
-            if not p.is_dir():
-                continue
-            mp = p / "manifest.json"
-            if mp.exists():
-                try:
-                    m = json.loads(mp.read_text(encoding="utf-8"))
-                except Exception:
-                    m = {"schema": 0}
-                items.append({"txid": p.name, "manifest": m})
-            else:
-                items.append({"txid": p.name, "manifest": None})
+    if scope in ("root", "all"):
+        if os.geteuid() != 0:
+            if scope == "root":
+                raise SystemExit("history --scope root requires pkexec")
+            root_unavailable = True
+        else:
+            for tx in list_transactions(paths.var_lib_dir):
+                tx["scope"] = "root"
+                items.append(tx)
 
-    print(json.dumps({"schema": 1, "items": items}, indent=2))
+    if scope in ("user", "all"):
+        for tx in list_transactions(paths.user_state_dir):
+            tx["scope"] = "user"
+            items.append(tx)
+
+    items.sort(key=lambda item: float(item.get("timestamp") or 0), reverse=True)
+    print(
+        json.dumps(
+            {
+                "schema": 1,
+                "items": items,
+                "scope": scope,
+                "root_unavailable": root_unavailable,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -2019,6 +2033,12 @@ def main(argv: list[str] | None = None) -> int:
     sr.set_defaults(func=cmd_restore)
 
     sh = sub.add_parser("history", help="List transactions")
+    sh.add_argument(
+        "--scope",
+        choices=["user", "root", "all"],
+        default="all",
+        help="Which transactions to list (default: all; root requires pkexec)",
+    )
     sh.set_defaults(func=cmd_history)
 
     srd = sub.add_parser("reset-defaults", help="Reset ALL changes to system defaults")
