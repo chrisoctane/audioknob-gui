@@ -937,18 +937,16 @@ def main() -> int:
                 text.setPlainText(self._collect_log_text())
 
         def _ensure_system_profile(self) -> None:
-            profile = self.state.get("system_profile")
-            schema_ok = isinstance(profile, dict) and profile.get("schema") == 1
-            prev_distro = profile.get("distro_id") if schema_ok else None
-            knob_paths = profile.get("knob_paths") if schema_ok else None
-            expected_ids = {k.id for k in self.registry}
-            paths_ok = isinstance(knob_paths, dict) and expected_ids.issubset(knob_paths.keys())
             try:
-                from audioknob_gui.worker.ops import detect_distro, scan_system_profile
-                current_distro = detect_distro().distro_id
-                if not schema_ok or prev_distro != current_distro or not paths_ok:
-                    self.state["system_profile"] = scan_system_profile(self.registry)
-                    save_state(self.state)
+                from audioknob_gui.worker.ops import scan_system_profile
+                profile = scan_system_profile(self.registry)
+                self.state["system_profile"] = profile
+                save_state(self.state)
+                _get_gui_logger().info(
+                    "system profile scanned distro=%s boot=%s",
+                    profile.get("distro_id"),
+                    profile.get("boot_system"),
+                )
             except Exception as exc:
                 _get_gui_logger().warning("System profile scan failed: %s", exc)
 
