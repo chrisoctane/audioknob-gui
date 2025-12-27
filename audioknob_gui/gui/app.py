@@ -2541,6 +2541,7 @@ def main() -> int:
                 }
                 QTableWidget::item {
                     padding: 4px;
+                    font-weight: normal;
                 }
                 QTableWidget::item:selected {
                     background-color: #46525d;
@@ -2550,6 +2551,7 @@ def main() -> int:
                     background-color: #404040;
                     color: #e0e0e0;
                     padding: 6px;
+                    font-weight: normal;
                     border: none;
                     border-bottom: 1px solid #555555;
                 }
@@ -2782,6 +2784,11 @@ def main() -> int:
                 # None (unset) means "don't override existing pinning".
                 self.state["qjackctl_cpu_cores"] = chosen
                 save_state(self.state)
+                status = self._knob_statuses.get(knob_id)
+                if status in ("applied", "pending_reboot"):
+                    _get_gui_logger().info("qjackctl cores updated; reapplying")
+                    self._on_apply_knob(knob_id)
+                    return
                 QMessageBox.information(
                     self,
                     "Saved",
@@ -4828,6 +4835,7 @@ def main() -> int:
             def _task() -> tuple[bool, object, str]:
                 results_text: list[str] = []
                 errors: list[str] = []
+                needs_reboot = False
 
                 # Phase 1: User-scope reset (no pkexec needed)
                 try:
@@ -4848,6 +4856,7 @@ def main() -> int:
                             if result.get("reset_count", 0) > 0:
                                 results_text.append(f"Reset {result['reset_count']} user file(s)")
                             errors.extend(result.get("errors", []))
+                            needs_reboot = bool(result.get("needs_reboot", False)) or needs_reboot
                         except json.JSONDecodeError as e:
                             errors.append(f"User reset: invalid response: {e}")
                 except Exception as e:
@@ -4873,12 +4882,13 @@ def main() -> int:
                                 if result.get("reset_count", 0) > 0:
                                     results_text.append(f"Reset {result['reset_count']} system file(s)")
                                 errors.extend(result.get("errors", []))
+                                needs_reboot = bool(result.get("needs_reboot", False)) or needs_reboot
                             except json.JSONDecodeError as e:
                                 errors.append(f"Root reset: invalid response: {e}")
                     except Exception as e:
                         errors.append(f"Root reset failed: {e}")
 
-                return True, {"results_text": results_text, "errors": errors}, ""
+                return True, {"results_text": results_text, "errors": errors, "needs_reboot": needs_reboot}, ""
 
             worker = QueueTaskWorker(_task, parent=self)
 
@@ -4888,9 +4898,11 @@ def main() -> int:
 
                 results_text: list[str] = []
                 errors: list[str] = []
+                needs_reboot = False
                 if isinstance(payload, dict):
                     results_text = payload.get("results_text") or []
                     errors = payload.get("errors") or []
+                    needs_reboot = bool(payload.get("needs_reboot", False))
                 elif message:
                     errors = [message]
 
@@ -4910,18 +4922,21 @@ def main() -> int:
                 # Show results
                 if errors:
                     _get_gui_logger().error("reset defaults failed error=%s", "; ".join(errors))
+                    reboot_note = "\n\nReboot required to finish kernel cmdline resets." if needs_reboot else ""
                     QMessageBox.warning(
                         self,
                         "Reset completed with errors",
-                        "\n".join(results_text) + "\n\nErrors:\n" + "\n".join(errors[:5])
+                        "\n".join(results_text) + "\n\nErrors:\n" + "\n".join(errors[:5]) + reboot_note
                     )
                 else:
                     _get_gui_logger().info("reset defaults done")
+                    reboot_note = "\n\nReboot required to finish kernel cmdline resets." if needs_reboot else ""
                     QMessageBox.information(
                         self,
                         "Reset complete",
                         "All audioknob-gui changes have been reset to system defaults.\n\n"
                         + "\n".join(results_text)
+                        + reboot_note
                     )
 
             worker.finished.connect(_on_done)

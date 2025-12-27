@@ -849,7 +849,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             # Pending effects: restorable effects
             for effect in tx_info.get("effects", []):
                 kind = effect.get("kind", "")
-                if kind in ("sysfs_write", "systemd_unit_toggle"):
+                if kind in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline"):
                     needs_root_reset = True
                     break
             if needs_root_reset:
@@ -864,6 +864,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             "errors": [],
             "scope": scope_filter,
             "needs_root_reset": needs_root_reset,
+            "needs_reboot": False,
         }
         _log_audit_event(
             "reset-defaults",
@@ -873,6 +874,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                 "results": [],
                 "errors": [],
                 "needs_root_reset": needs_root_reset,
+                "needs_reboot": False,
             },
         )
         print(json.dumps(payload, indent=2))
@@ -882,6 +884,9 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
     reset_paths: set[str] = set()
     file_targets: dict[str, dict[str, Any]] = {}
     needs_bootloader_update = False
+    kernel_params: set[str] = set()
+    kernel_cmdline_updated = False
+    needs_reboot = False
     
     # Process all transactions (newest first - they're already sorted)
     for tx_info in all_txs:
@@ -915,8 +920,13 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         
         # Handle effects (sysfs, systemd, user services, etc.)
         effects = tx_info.get("effects", [])
-        if any(e.get("kind") == "kernel_cmdline" for e in effects):
+        for e in effects:
+            if e.get("kind") != "kernel_cmdline":
+                continue
             needs_bootloader_update = True
+            param = e.get("param")
+            if isinstance(param, str) and param:
+                kernel_params.add(param)
         
         if scope == "root" and effects and os.geteuid() == 0:
             sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
@@ -1002,14 +1012,46 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             # Check for restorable effects (sysfs, systemd - not pipewire_restart)
             for effect in tx_info.get("effects", []):
                 kind = effect.get("kind", "")
-                if kind in ("sysfs_write", "systemd_unit_toggle"):
+                if kind in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline"):
                     needs_root_reset = True
                     break
             if needs_root_reset:
                 break
-    
+
+    # Ensure kernel cmdline params are removed even if backups still contain them.
+    if scope_filter in ("root", "all") and os.geteuid() == 0 and kernel_params:
+        success, message = _force_reset_kernel_cmdline_params(kernel_params, run_update=True)
+        if success:
+            kernel_cmdline_updated = True
+            results.append({
+                "path": "(kernel cmdline)",
+                "strategy": "kernel_cmdline",
+                "success": True,
+                "message": message,
+            })
+        else:
+            errors.append(message)
+
+        try:
+            cmdline = Path("/proc/cmdline").read_text(encoding="utf-8")
+            running_tokens = cmdline.split()
+
+            def _param_in_tokens(p: str, tokens: list[str]) -> bool:
+                for token in tokens:
+                    if token == p:
+                        return True
+                    if "=" in p:
+                        param_key = p.split("=")[0]
+                        if token.startswith(param_key + "=") and token == p:
+                            return True
+                return False
+
+            needs_reboot = any(_param_in_tokens(p, running_tokens) for p in kernel_params)
+        except Exception:
+            pass
+
     # If kernel cmdline was reset, update the bootloader so changes stick after reboot.
-    if scope_filter in ("root", "all") and os.geteuid() == 0:
+    if scope_filter in ("root", "all") and os.geteuid() == 0 and not kernel_cmdline_updated:
         try:
             from audioknob_gui.worker.ops import detect_distro
             distro = detect_distro()
@@ -1059,6 +1101,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             "results": results,
             "errors": errors,
             "needs_root_reset": needs_root_reset,
+            "needs_reboot": needs_reboot,
         },
     )
     print(json.dumps({
@@ -1069,6 +1112,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         "errors": errors,
         "scope": scope_filter,
         "needs_root_reset": needs_root_reset,
+        "needs_reboot": needs_reboot,
     }, indent=2))
     
     return 1 if errors else 0
@@ -1855,6 +1899,90 @@ def _force_reset_sysfs_glob(glob_spec: str | list[str]) -> tuple[bool, str]:
         return False, "; ".join(errors)
     suffix = "entry" if updated == 1 else "entries"
     return True, f"Reset {updated} sysfs {suffix}"
+
+
+def _force_reset_kernel_cmdline_params(params: set[str], *, run_update: bool = True) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import detect_distro
+
+    params = {p for p in params if p}
+    if not params:
+        return True, "No kernel params to remove"
+
+    distro = detect_distro()
+    if distro.boot_system == "unknown" or not distro.kernel_cmdline_file:
+        return False, "No kernel cmdline file detected"
+
+    path = Path(distro.kernel_cmdline_file)
+    try:
+        before = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    def _remove_params(tokens: list[str]) -> list[str]:
+        out: list[str] = []
+        for token in tokens:
+            keep = True
+            for param in params:
+                if "=" in param:
+                    if token == param:
+                        keep = False
+                        break
+                else:
+                    if token == param or token.startswith(param + "="):
+                        keep = False
+                        break
+            if keep:
+                out.append(token)
+        return out
+
+    after = before
+    if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+        tokens = before.strip().split()
+        new_tokens = _remove_params(tokens)
+        after = " ".join(new_tokens).strip() + ("\n" if before.endswith("\n") or new_tokens else "")
+    elif distro.boot_system == "grub2":
+        lines = before.splitlines()
+        out_lines: list[str] = []
+        updated = False
+        for line in lines:
+            if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                _, _, rhs = line.partition("=")
+                rhs = rhs.strip()
+                if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                    inner = rhs[1:-1]
+                else:
+                    inner = rhs
+                try:
+                    tokens = shlex.split(inner)
+                except Exception:
+                    tokens = inner.split()
+                new_tokens = _remove_params(tokens)
+                new_rhs = " ".join(new_tokens)
+                out_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{new_rhs}"')
+                updated = True
+            else:
+                out_lines.append(line)
+        if not updated:
+            return False, "GRUB_CMDLINE_LINUX_DEFAULT not found"
+        after = "\n".join(out_lines)
+        if after and not after.endswith("\n"):
+            after += "\n"
+    else:
+        return False, f"Unsupported boot system: {distro.boot_system}"
+
+    try:
+        path.write_text(after, encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to write {path}: {e}"
+
+    if run_update and distro.kernel_cmdline_update_cmd:
+        try:
+            subprocess.run(distro.kernel_cmdline_update_cmd, check=False, capture_output=True, text=True)
+        except Exception:
+            pass
+
+    removed = ", ".join(sorted(params))
+    return True, f"Removed {removed} from {path}"
 
 
 def _force_reset_kernel_cmdline(param: str) -> tuple[bool, str]:
