@@ -730,6 +730,8 @@ def main() -> int:
             self._busy_knobs: set[str] = set()
             self._task_threads: list[QThread] = []
             self._install_busy = False
+            self._logs_busy = False
+            self._reboot_busy = False
             self._status_busy = False
             self._user_groups: set[str] = set()
             self._refresh_user_groups()
@@ -876,7 +878,7 @@ def main() -> int:
             copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(text.toPlainText()))
             btn_row.addWidget(copy_btn)
             clear_btn = QPushButton("Clear Logs")
-            clear_btn.clicked.connect(lambda: self._on_clear_logs(text))
+            clear_btn.clicked.connect(lambda: self._on_clear_logs(text, clear_btn))
             btn_row.addWidget(clear_btn)
             btn_row.addStretch(1)
             close_btn = QPushButton("Close")
@@ -886,7 +888,14 @@ def main() -> int:
 
             dialog.exec()
 
-        def _on_clear_logs(self, text: QTextEdit | None = None) -> None:
+        def _on_clear_logs(
+            self,
+            text: QTextEdit | None = None,
+            clear_btn: QPushButton | None = None,
+        ) -> None:
+            if self._logs_busy:
+                QMessageBox.information(self, "Clear Logs", "Log clearing is already running.")
+                return
             reply = QMessageBox.question(
                 self,
                 "Clear Logs",
@@ -895,46 +904,66 @@ def main() -> int:
             )
             if reply != QMessageBox.Ok:
                 return
+            self._logs_busy = True
+            if clear_btn is not None:
+                clear_btn.setEnabled(False)
 
             gui_log = _state_path().parent / "logs" / "gui.log"
             user_worker_log = Path(_worker_log_path(is_root=False))
             root_worker_log = Path(_worker_log_path(is_root=True))
 
-            cleared: list[str] = []
-            errors: list[str] = []
+            def _task() -> tuple[bool, object, str]:
+                cleared: list[str] = []
+                errors: list[str] = []
 
-            for path in (gui_log, user_worker_log):
-                try:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text("", encoding="utf-8")
-                    cleared.append(str(path))
-                except Exception as exc:
-                    errors.append(f"{path}: {exc}")
+                for path in (gui_log, user_worker_log):
+                    try:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text("", encoding="utf-8")
+                        cleared.append(str(path))
+                    except Exception as exc:
+                        errors.append(f"{path}: {exc}")
 
-            if root_worker_log.exists():
-                try:
-                    _run_pkexec_command(["/bin/sh", "-c", f": > {root_worker_log}"])
-                    cleared.append(str(root_worker_log))
-                except Exception as exc:
-                    errors.append(f"{root_worker_log}: {exc}")
+                if root_worker_log.exists():
+                    try:
+                        _run_pkexec_command(["/bin/sh", "-c", f": > {root_worker_log}"])
+                        cleared.append(str(root_worker_log))
+                    except Exception as exc:
+                        errors.append(f"{root_worker_log}: {exc}")
 
-            _log_gui_audit(
-                "clear-logs",
-                {
+                payload = {
                     "cleared": cleared,
                     "errors": errors,
                     "root_log": str(root_worker_log) if root_worker_log.exists() else None,
-                },
-            )
+                }
+                return True, payload, ""
 
-            if errors:
-                details = "\n".join(errors)
-                QMessageBox.warning(self, "Logs Cleared (with warnings)", details)
-            else:
-                QMessageBox.information(self, "Logs Cleared", "Logs cleared successfully.")
+            worker = QueueTaskWorker(_task, parent=self)
 
-            if text is not None:
-                text.setPlainText(self._collect_log_text())
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                self._logs_busy = False
+                if clear_btn is not None:
+                    clear_btn.setEnabled(True)
+                if not isinstance(payload, dict):
+                    payload = {
+                        "cleared": [],
+                        "errors": [message or "Log clear failed"],
+                        "root_log": str(root_worker_log),
+                    }
+                errors = payload.get("errors") or []
+                _log_gui_audit("clear-logs", payload)
+                if errors:
+                    details = "\n".join(str(e) for e in errors)
+                    QMessageBox.warning(self, "Logs Cleared (with warnings)", details)
+                else:
+                    QMessageBox.information(self, "Logs Cleared", "Logs cleared successfully.")
+                if text is not None:
+                    text.setPlainText(self._collect_log_text())
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
 
         def _ensure_system_profile(self) -> None:
             try:
@@ -1944,17 +1973,36 @@ def main() -> int:
         def _on_reboot_now(self, *, force: bool = False) -> None:
             if not force and not getattr(self, "_needs_reboot", False):
                 return
+            if self._reboot_busy:
+                return
             msg = (
                 "Restart now to apply pending changes?\n\n"
                 "Unsaved work in other apps may be lost."
             )
             if QMessageBox.question(self, "Reboot", msg) != QMessageBox.Yes:
                 return
-            try:
-                _run_pkexec_command(["systemctl", "reboot"])
-            except RuntimeError as e:
-                if str(e) != _PKEXEC_CANCELLED:
-                    QMessageBox.warning(self, "Reboot Failed", str(e))
+            self._reboot_busy = True
+            self.reboot_button.setEnabled(False)
+
+            def _task() -> tuple[bool, object, str]:
+                try:
+                    _run_pkexec_command(["systemctl", "reboot"])
+                except Exception as e:
+                    return False, {}, str(e)
+                return True, {}, ""
+
+            worker = QueueTaskWorker(_task, parent=self)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                self._reboot_busy = False
+                self.reboot_button.setEnabled(True)
+                if not success and message != _PKEXEC_CANCELLED:
+                    QMessageBox.warning(self, "Reboot Failed", message or "Reboot failed")
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
 
         def _on_header_sort(self, column: int) -> None:
             if self._sort_column == column:
@@ -3509,11 +3557,25 @@ def main() -> int:
                     box.addButton("Later", QMessageBox.RejectRole)
                     box.exec()
                     if box.clickedButton() == run_btn:
-                        try:
-                            _run_pkexec_command([str(x) for x in cmd])
-                        except RuntimeError as e:
-                            if str(e) != _PKEXEC_CANCELLED:
-                                QMessageBox.warning(self, "Update Failed", str(e))
+                        update_cmd = [str(x) for x in cmd]
+
+                        def _task() -> tuple[bool, object, str]:
+                            try:
+                                _run_pkexec_command(update_cmd)
+                            except Exception as e:
+                                return False, {"cmd": update_cmd}, str(e)
+                            return True, {"cmd": update_cmd}, ""
+
+                        worker = QueueTaskWorker(_task, parent=self)
+
+                        def _on_done(success: bool, payload: object, message: str) -> None:
+                            if not success and message != _PKEXEC_CANCELLED:
+                                QMessageBox.warning(self, "Update Failed", message or "Update failed")
+
+                        worker.finished.connect(_on_done)
+                        worker.finished.connect(worker.deleteLater)
+                        self._task_threads.append(worker)
+                        worker.start()
 
         def _on_knob_task_finished(self, knob_id: str, action: str, success: bool, payload: object, message: str) -> None:
             self._busy_knobs.discard(knob_id)
