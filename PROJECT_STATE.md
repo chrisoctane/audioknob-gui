@@ -22,6 +22,9 @@
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Reset All** - reverts all changes to system defaults
+- **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
+- **Re-check State** - header button refreshes current status for dev/testing
+- **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
@@ -37,6 +40,7 @@ Notes:
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - QjackCtl defaults to taskset cores 0,1 and adds -R and -P90 when applied.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
+- Header row includes a Re-check State button to refresh current status.
 - Main window title includes app version and git short SHA when available.
 ```
 
@@ -68,6 +72,8 @@ Notes:
 - Reboot-required toggle preserves scroll position instead of jumping the table.
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
 - "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
+- Resetting a knob that others depend on now prompts and cascades dependent resets when accepted.
+- Baseline-aware status now labels knobs as “Sys Default” when current matches the initial scan.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

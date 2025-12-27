@@ -60,6 +60,11 @@
           "items": {"type": "string"},
           "description": "Commands that must be available (e.g., cyclictest)"
         },
+        "depends_on": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Knob ids that must remain enabled for this knob"
+        },
         "capabilities": {
           "type": "object",
           "required": ["read", "apply", "restore"],

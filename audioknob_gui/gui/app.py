@@ -10,6 +10,7 @@ import shutil
 import glob
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -383,6 +384,9 @@ def load_state() -> dict:
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
         "jitter_test_last": None,  # dict payload from last run or None
         "system_profile": None,  # dict from startup scan or None
+        "baseline_statuses": {},  # knob_id -> status string (first-run baseline)
+        "baseline_checks": {},  # knob_id -> list[str] lines (first-run snapshot)
+        "baseline_captured_at": None,  # ISO timestamp
     }
     if not p.exists():
         return default
@@ -404,6 +408,12 @@ def load_state() -> dict:
             data["jitter_test_last"] = None
         if "system_profile" not in data:
             data["system_profile"] = None
+        if "baseline_statuses" not in data:
+            data["baseline_statuses"] = {}
+        if "baseline_checks" not in data:
+            data["baseline_checks"] = {}
+        if "baseline_captured_at" not in data:
+            data["baseline_captured_at"] = None
         if "enable_reboot_knobs" not in data:
             data["enable_reboot_knobs"] = False
         if "queued_knobs" not in data:
@@ -431,6 +441,10 @@ def load_state() -> dict:
             data["jitter_test_last"] = None
         if data.get("system_profile") is not None and not isinstance(data.get("system_profile"), dict):
             data["system_profile"] = None
+        if data.get("baseline_statuses") is not None and not isinstance(data.get("baseline_statuses"), dict):
+            data["baseline_statuses"] = {}
+        if data.get("baseline_checks") is not None and not isinstance(data.get("baseline_checks"), dict):
+            data["baseline_checks"] = {}
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
         try:
             q = data.get("pipewire_quantum")
@@ -610,8 +624,12 @@ def main() -> int:
 
             self.state = load_state()
             self.registry = load_registry(_registry_path())
+            self._dependency_index = self._build_dependency_index()
             _get_gui_logger().info("gui started")
             self._ensure_system_profile()
+            self._baseline_ready = self._baseline_available()
+            self._baseline_busy = False
+            self._ensure_baseline_state()
             self._queued_actions = self._sanitize_queue_actions(self.state.get("queued_actions"))
             if self._queued_actions != self.state.get("queued_actions"):
                 self.state["queued_actions"] = dict(self._queued_actions)
@@ -683,6 +701,11 @@ def main() -> int:
             self.reboot_button.setVisible(False)
             top.addWidget(self.reboot_button)
 
+            self.btn_recheck = QPushButton("Re-check State")
+            self.btn_recheck.setToolTip("Re-scan current system state")
+            self.btn_recheck.clicked.connect(self._on_recheck_state)
+            top.addWidget(self.btn_recheck)
+
             self.btn_logs = QPushButton("Logs")
             self.btn_logs.setToolTip("Open logs for copy/paste")
             self.btn_logs.clicked.connect(self._on_show_logs)
@@ -690,6 +713,7 @@ def main() -> int:
 
             self.btn_reset = QPushButton("Reset All")
             self.btn_reset.setToolTip("Reset all changes to system defaults")
+            self.btn_reset.setEnabled(self._baseline_ready)
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
@@ -742,6 +766,9 @@ def main() -> int:
             self.btn_reset.clicked.connect(self.on_reset_defaults)
             self.table.cellEntered.connect(self._on_row_hover)
             self.table.viewport().installEventFilter(self)
+            self.table.horizontalHeader().installEventFilter(self)
+            self.table.installEventFilter(self)
+            self.installEventFilter(self)
 
         def _refresh_user_groups(self) -> None:
             """Get current user's group memberships."""
@@ -979,6 +1006,139 @@ def main() -> int:
             except Exception as exc:
                 _get_gui_logger().warning("System profile scan failed: %s", exc)
 
+        def _build_dependency_index(self) -> dict[str, list[str]]:
+            index: dict[str, list[str]] = {}
+            for knob in self.registry:
+                for dep in getattr(knob, "depends_on", ()):
+                    index.setdefault(dep, []).append(knob.id)
+            return index
+
+        def _collect_dependent_resets(self, knob_ids: list[str]) -> list[str]:
+            dependents: list[str] = []
+            pending = list(knob_ids)
+            seen = set(knob_ids)
+            while pending:
+                base = pending.pop()
+                for child in self._dependency_index.get(base, []):
+                    if child in seen:
+                        continue
+                    action = self._queued_actions.get(child)
+                    status = self._knob_statuses.get(child, "unknown")
+                    if action == "apply" or status in ("applied", "pending_reboot"):
+                        dependents.append(child)
+                        seen.add(child)
+                        pending.append(child)
+            return dependents
+
+        def _confirm_dependency_reset(self, reset_ids: list[str]) -> list[str] | None:
+            dependents = self._collect_dependent_resets(reset_ids)
+            if not dependents:
+                return []
+            by_id = {k.id: k for k in self.registry}
+            reset_titles = [by_id[k].title for k in reset_ids if k in by_id]
+            dep_titles = [by_id[k].title for k in dependents if k in by_id]
+            msg = (
+                "Resetting these knobs will also reset dependent knobs:\n\n"
+                + "\n".join(f"- {title}" for title in dep_titles)
+                + "\n\nContinue?"
+            )
+            if reset_titles:
+                msg = (
+                    "Resetting:\n"
+                    + "\n".join(f"- {title}" for title in reset_titles)
+                    + "\n\n"
+                    + msg
+                )
+            if QMessageBox.question(self, "Reset Dependencies", msg) != QMessageBox.Yes:
+                return None
+            return dependents
+
+        def _baseline_available(self) -> bool:
+            baseline = self.state.get("baseline_statuses")
+            return isinstance(baseline, dict) and bool(baseline)
+
+        def _ensure_baseline_state(self) -> None:
+            if self._baseline_ready or self._baseline_busy:
+                return
+            self._baseline_busy = True
+
+            def _task() -> tuple[bool, object, str]:
+                argv = [
+                    sys.executable,
+                    "-m",
+                    "audioknob_gui.worker.cli",
+                    "--registry",
+                    _registry_path(),
+                    "status",
+                ]
+                if _pkexec_available():
+                    worker = _pick_root_worker_path()
+                    argv = ["pkexec", worker, "--registry", _registry_path(), "status"]
+                try:
+                    p = subprocess.run(argv, text=True, capture_output=True)
+                except Exception as e:
+                    return False, {}, str(e)
+                if not p.stdout.strip():
+                    err = p.stderr.strip() or "Baseline scan failed"
+                    if _is_pkexec_cancel(err):
+                        return False, {}, _PKEXEC_CANCELLED
+                    return False, {}, err
+                try:
+                    payload = json.loads(p.stdout)
+                except Exception:
+                    err = p.stderr.strip() or p.stdout.strip() or "Baseline parse failed"
+                    if _is_pkexec_cancel(err):
+                        return False, {}, _PKEXEC_CANCELLED
+                    return False, {}, err
+                status_map: dict[str, str] = {}
+                for item in payload.get("statuses", []):
+                    if isinstance(item, dict) and item.get("knob_id"):
+                        status_map[str(item["knob_id"])] = str(item.get("status", "unknown"))
+                return True, {"statuses": status_map}, ""
+
+            worker = QueueTaskWorker(_task, parent=self)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                self._baseline_busy = False
+                if not success:
+                    if message == _PKEXEC_CANCELLED:
+                        QMessageBox.information(
+                            self,
+                            "Baseline Required",
+                            "Initial state capture was cancelled.\n\n"
+                            "Run 'Re-check State' to capture baseline before making changes.",
+                        )
+                    else:
+                        _get_gui_logger().warning("baseline scan failed error=%s", message)
+                    return
+                if not isinstance(payload, dict):
+                    return
+                statuses = payload.get("statuses") or {}
+                if not isinstance(statuses, dict) or not statuses:
+                    return
+                self.state["baseline_statuses"] = statuses
+                self.state["baseline_captured_at"] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+                self.state["baseline_checks"] = self._build_baseline_checks(statuses)
+                save_state(self.state)
+                self._baseline_ready = True
+                self._refresh_statuses()
+                self._populate()
+                _get_gui_logger().info("baseline scan complete")
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
+
+        def _build_baseline_checks(self, statuses: dict[str, str]) -> dict[str, list[str]]:
+            baseline_checks: dict[str, list[str]] = {}
+            for knob in self.registry:
+                status = statuses.get(knob.id)
+                if status is None:
+                    continue
+                baseline_checks[knob.id] = self._collect_live_checks(knob, status_override=status)
+            return baseline_checks
+
         def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
             if not isinstance(raw, dict):
                 return {}
@@ -1038,8 +1198,11 @@ def main() -> int:
                 self.btn_apply_queue.setVisible(False)
                 self.btn_apply_queue_reboot.setVisible(False)
             enabled = count > 0 and not self._queue_busy
+            if not self._baseline_ready:
+                enabled = False
             self.btn_apply_queue.setEnabled(enabled)
             self.btn_apply_queue_reboot.setEnabled(enabled and self._queue_requires_reboot())
+            self.btn_reset.setEnabled(self._baseline_ready)
 
         def _apply_queue_button_state(self, btn: QPushButton, knob_id: str, action: str) -> None:
             if self._queued_actions.get(knob_id) == action:
@@ -1062,6 +1225,15 @@ def main() -> int:
                 btn.setToolTip(tip)
             else:
                 btn.setStyleSheet("")
+
+        def _on_recheck_state(self) -> None:
+            if self._status_busy:
+                return
+            _get_gui_logger().info("state recheck requested")
+            if not self._baseline_ready:
+                self._ensure_baseline_state()
+                return
+            self._refresh_statuses()
 
         def _refresh_statuses(self) -> None:
             """Fetch current status of all knobs (async)."""
@@ -1115,6 +1287,25 @@ def main() -> int:
             status = self._knob_statuses.get("audio_group_membership")
             if status == "applied" and not self._audio_groups_active():
                 self._knob_statuses["audio_group_membership"] = "pending_reboot"
+            self._apply_baseline_statuses()
+
+        def _apply_baseline_statuses(self) -> None:
+            baseline = self.state.get("baseline_statuses")
+            if not isinstance(baseline, dict) or not baseline:
+                return
+            for knob in self.registry:
+                current = self._knob_statuses.get(knob.id)
+                if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable"):
+                    continue
+                base = baseline.get(knob.id)
+                if base is None:
+                    continue
+                if current == base:
+                    self._knob_statuses[knob.id] = "sys_default"
+                    continue
+                if current == "applied":
+                    continue
+                self._knob_statuses[knob.id] = "deviated"
 
         def _rt_limits_active(self) -> bool:
             try:
@@ -1262,6 +1453,15 @@ def main() -> int:
                 btn.setText("Working...")
                 btn.setEnabled(False)
 
+        def _apply_baseline_lock(self, btn: QPushButton) -> None:
+            if self._baseline_ready:
+                return
+            label = btn.text().strip().lower()
+            if label not in ("apply", "reset", "install", "join", "leave"):
+                return
+            btn.setEnabled(False)
+            btn.setToolTip("Initial state scan pending. Finish baseline scan before changes.")
+
         def _install_hover_tracking(self, widget: QWidget, row: int) -> None:
             widget.setProperty("hover_row", row)
             widget.setMouseTracking(True)
@@ -1269,6 +1469,8 @@ def main() -> int:
 
         def _set_action_cell(self, row: int, widget: QWidget) -> None:
             self._install_hover_tracking(widget, row)
+            if isinstance(widget, QPushButton):
+                self._apply_baseline_lock(widget)
             self.table.setCellWidget(row, 2, widget)
 
         def _status_display(self, status: str) -> tuple[str, str]:
@@ -1280,6 +1482,7 @@ def main() -> int:
             mapping = {
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
                 "sys_default": ("✓ Sys Default", "#1976d2"), # Blue
+                "deviated": ("⚠ Deviated", "#f57c00"),   # Orange warning
                 "not_applied": ("—", "#757575"),          # Gray dash
                 "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
@@ -1309,11 +1512,12 @@ def main() -> int:
                 status_order = {
                     "applied": 0,
                     "pending_reboot": 1,
-                    "partial": 2,
-                    "sys_default": 3,
-                    "not_applied": 4,
-                    "not_applicable": 5,
-                    "unknown": 6,
+                    "deviated": 2,
+                    "partial": 3,
+                    "sys_default": 4,
+                    "not_applied": 5,
+                    "not_applicable": 6,
+                    "unknown": 7,
                 }
                 risk_order = {"low": 0, "medium": 1, "high": 2}
 
@@ -1761,6 +1965,7 @@ def main() -> int:
                 "Locked",
                 "✓ Applied",
                 "✓ Sys Default",
+                "⚠ Deviated",
                 "⟳ Reboot",
                 "◐ Partial",
                 "N/A",
@@ -2020,7 +2225,11 @@ def main() -> int:
                 self.table.selectRow(row)
 
         def eventFilter(self, obj, event):
-            if obj is self.table.viewport() and event.type() == QEvent.Leave:
+            if obj is self and event.type() in (QEvent.Leave, QEvent.WindowDeactivate, QEvent.FocusOut):
+                self.table.clearSelection()
+                self._clear_dim_hover()
+                return False
+            if obj in (self.table.viewport(), self.table.horizontalHeader(), self.table) and event.type() == QEvent.Leave:
                 pos = self.table.mapFromGlobal(QCursor.pos())
                 if not self.table.rect().contains(pos):
                     self.table.clearSelection()
@@ -2500,6 +2709,158 @@ def main() -> int:
 
             dialog.exec()
 
+        def _collect_live_checks(self, knob, *, status_override: str | None = None) -> list[str]:
+            def _read_file(path: str, *, max_lines: int = 40) -> list[str]:
+                p = Path(path).expanduser()
+                if not p.exists():
+                    return [f"{path}: missing"]
+                try:
+                    content = p.read_text(encoding="utf-8").splitlines()
+                except Exception as e:
+                    return [f"{path}: unreadable: {e}"]
+                if len(content) > max_lines:
+                    content = content[:max_lines] + ["... (truncated)"]
+                return [f"{path}:"] + content
+
+            def _param_present(tokens: list[str], param: str) -> bool:
+                if "=" in param:
+                    return param in tokens
+                for token in tokens:
+                    if token == param or token.startswith(param + "="):
+                        return True
+                return False
+
+            lines: list[str] = []
+            lines.append(f"knob_id: {knob.id}")
+            lines.append(f"title: {knob.title}")
+            status = status_override or self._knob_statuses.get(knob.id, "unknown")
+            lines.append(f"status: {status}")
+            lines.append("")
+
+            kind = knob.impl.kind if knob.impl else ""
+            params = dict(knob.impl.params) if knob.impl else {}
+            lines.append(f"kind: {kind}")
+
+            if kind == "qjackctl_server_prefix":
+                path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
+                lines.append("")
+                lines.append("qjackctl_config:")
+                for line in _read_file(path, max_lines=200):
+                    if any(key in line for key in ("DefPreset", "\\Server", "\\ServerPrefix")):
+                        lines.append(line)
+            elif kind == "systemd_unit_toggle":
+                unit = str(params.get("unit", ""))
+                if unit:
+                    for label, cmd in (
+                        ("is-enabled", ["systemctl", "is-enabled", unit]),
+                        ("is-active", ["systemctl", "is-active", unit]),
+                    ):
+                        r = subprocess.run(cmd, capture_output=True, text=True)
+                        lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+            elif kind == "user_service_mask":
+                services = params.get("services")
+                if isinstance(services, list):
+                    from audioknob_gui.worker.ops import resolve_user_services
+
+                    resolved = resolve_user_services([str(s) for s in services if s])
+                    if not resolved:
+                        lines.append("user units: [no matches]")
+                    for svc in resolved:
+                        lines.append(f"user unit: {svc}")
+                        for label, cmd in (
+                            ("user is-enabled", ["systemctl", "--user", "is-enabled", svc]),
+                            ("user is-active", ["systemctl", "--user", "is-active", svc]),
+                        ):
+                            r = subprocess.run(cmd, capture_output=True, text=True)
+                            lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                else:
+                    unit = str(params.get("unit", ""))
+                    if unit:
+                        for label, cmd in (
+                            ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
+                            ("user is-active", ["systemctl", "--user", "is-active", unit]),
+                        ):
+                            r = subprocess.run(cmd, capture_output=True, text=True)
+                            lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+            elif kind == "sysctl_conf":
+                path = str(params.get("path", ""))
+                if path:
+                    lines.extend(_read_file(path))
+            elif kind == "sysfs_glob_kv":
+                pattern = str(params.get("glob", ""))
+                if pattern:
+                    for p in sorted(glob.glob(pattern))[:8]:
+                        try:
+                            val = Path(p).read_text(encoding="utf-8").strip()
+                            lines.append(f"{p}: {val}")
+                        except Exception as e:
+                            lines.append(f"{p}: unreadable: {e}")
+            elif kind == "kernel_cmdline":
+                param = str(params.get("param", ""))
+                if param:
+                    try:
+                        running = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
+                        lines.append(f"/proc/cmdline: {running}")
+                        tokens = running.split()
+                        lines.append(f"/proc/cmdline has {param}: {_param_present(tokens, param)}")
+                    except Exception as e:
+                        lines.append(f"/proc/cmdline read error: {e}")
+                    try:
+                        from audioknob_gui.worker.ops import detect_distro
+                        import shlex
+                        distro = detect_distro()
+                        boot_path = distro.kernel_cmdline_file
+                        if boot_path:
+                            boot_text = Path(boot_path).read_text(encoding="utf-8")
+                            in_boot = False
+                            if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                                in_boot = _param_present(boot_text.split(), param)
+                            elif distro.boot_system == "grub2":
+                                for line in boot_text.splitlines():
+                                    if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                                        _, _, rhs = line.partition("=")
+                                        rhs = rhs.strip().strip('"')
+                                        try:
+                                            tokens = shlex.split(rhs)
+                                        except Exception:
+                                            tokens = rhs.split()
+                                        in_boot = _param_present(tokens, param)
+                                        break
+                            lines.append(f"{boot_path} has {param}: {in_boot}")
+                    except Exception as e:
+                        lines.append(f"boot config read error: {e}")
+            elif kind == "udev_rule":
+                path = str(params.get("path", ""))
+                if path:
+                    lines.extend(_read_file(path))
+            elif kind == "pipewire_conf":
+                path = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
+                lines.extend(_read_file(path))
+            elif kind == "group_membership":
+                r = subprocess.run(["id"], capture_output=True, text=True)
+                lines.append(f"id: {r.stdout.strip()}")
+            elif kind == "pam_limits_audio_group":
+                path = str(params.get("path", ""))
+                if path:
+                    lines.extend(_read_file(path))
+                try:
+                    import resource
+                    rt_soft, rt_hard = resource.getrlimit(resource.RLIMIT_RTPRIO)
+                    mem_soft, mem_hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+                    lines.append(f"rtprio: {rt_soft}/{rt_hard}")
+                    lines.append(f"memlock: {mem_soft}/{mem_hard}")
+                except Exception as e:
+                    lines.append(f"limits read error: {e}")
+            elif kind == "baloo_disable":
+                cmd = "balooctl6" if shutil.which("balooctl6") else "balooctl"
+                if shutil.which(cmd):
+                    r = subprocess.run([cmd, "status"], capture_output=True, text=True)
+                    lines.append(r.stdout.strip() or r.stderr.strip())
+                else:
+                    lines.append("balooctl not found")
+
+            return lines
+
         def _show_cli_status(self, knob_id: str) -> None:
             k = next((k for k in self.registry if k.id == knob_id), None)
             if not k:
@@ -2529,157 +2890,6 @@ def main() -> int:
                     return "not found"
                 except Exception as e:
                     return f"error: {e}"
-
-            def _read_file(path: str, *, max_lines: int = 40) -> list[str]:
-                p = Path(path).expanduser()
-                if not p.exists():
-                    return [f"{path}: missing"]
-                try:
-                    content = p.read_text(encoding="utf-8").splitlines()
-                except Exception as e:
-                    return [f"{path}: unreadable: {e}"]
-                if len(content) > max_lines:
-                    content = content[:max_lines] + ["... (truncated)"]
-                return [f"{path}:"] + content
-
-            def _param_present(tokens: list[str], param: str) -> bool:
-                if "=" in param:
-                    return param in tokens
-                for token in tokens:
-                    if token == param or token.startswith(param + "="):
-                        return True
-                return False
-
-            def _collect_live_checks() -> list[str]:
-                lines: list[str] = []
-                lines.append(f"knob_id: {k.id}")
-                lines.append(f"title: {k.title}")
-                lines.append(f"status: {self._knob_statuses.get(k.id, 'unknown')}")
-                lines.append("")
-
-                kind = k.impl.kind if k.impl else ""
-                params = dict(k.impl.params) if k.impl else {}
-                lines.append(f"kind: {kind}")
-
-                if kind == "qjackctl_server_prefix":
-                    path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
-                    lines.append("")
-                    lines.append("qjackctl_config:")
-                    for line in _read_file(path, max_lines=200):
-                        if any(key in line for key in ("DefPreset", "\\Server", "\\ServerPrefix")):
-                            lines.append(line)
-                elif kind == "systemd_unit_toggle":
-                    unit = str(params.get("unit", ""))
-                    if unit:
-                        for label, cmd in (
-                            ("is-enabled", ["systemctl", "is-enabled", unit]),
-                            ("is-active", ["systemctl", "is-active", unit]),
-                        ):
-                            r = subprocess.run(cmd, capture_output=True, text=True)
-                            lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-                elif kind == "user_service_mask":
-                    services = params.get("services")
-                    if isinstance(services, list):
-                        from audioknob_gui.worker.ops import resolve_user_services
-
-                        resolved = resolve_user_services([str(s) for s in services if s])
-                        if not resolved:
-                            lines.append("user units: [no matches]")
-                        for svc in resolved:
-                            lines.append(f"user unit: {svc}")
-                            for label, cmd in (
-                                ("user is-enabled", ["systemctl", "--user", "is-enabled", svc]),
-                                ("user is-active", ["systemctl", "--user", "is-active", svc]),
-                            ):
-                                r = subprocess.run(cmd, capture_output=True, text=True)
-                                lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-                    else:
-                        unit = str(params.get("unit", ""))
-                        if unit:
-                            for label, cmd in (
-                                ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
-                                ("user is-active", ["systemctl", "--user", "is-active", unit]),
-                            ):
-                                r = subprocess.run(cmd, capture_output=True, text=True)
-                                lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-                elif kind == "sysctl_conf":
-                    path = str(params.get("path", ""))
-                    if path:
-                        lines.extend(_read_file(path))
-                elif kind == "sysfs_glob_kv":
-                    pattern = str(params.get("glob", ""))
-                    if pattern:
-                        for p in sorted(glob.glob(pattern))[:8]:
-                            try:
-                                val = Path(p).read_text(encoding="utf-8").strip()
-                                lines.append(f"{p}: {val}")
-                            except Exception as e:
-                                lines.append(f"{p}: unreadable: {e}")
-                elif kind == "kernel_cmdline":
-                    param = str(params.get("param", ""))
-                    if param:
-                        try:
-                            running = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
-                            lines.append(f"/proc/cmdline: {running}")
-                            tokens = running.split()
-                            lines.append(f"/proc/cmdline has {param}: {_param_present(tokens, param)}")
-                        except Exception as e:
-                            lines.append(f"/proc/cmdline read error: {e}")
-                        try:
-                            from audioknob_gui.worker.ops import detect_distro
-                            import shlex
-                            distro = detect_distro()
-                            boot_path = distro.kernel_cmdline_file
-                            if boot_path:
-                                boot_text = Path(boot_path).read_text(encoding="utf-8")
-                                in_boot = False
-                                if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
-                                    in_boot = _param_present(boot_text.split(), param)
-                                elif distro.boot_system == "grub2":
-                                    for line in boot_text.splitlines():
-                                        if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
-                                            _, _, rhs = line.partition("=")
-                                            rhs = rhs.strip().strip('"')
-                                            try:
-                                                tokens = shlex.split(rhs)
-                                            except Exception:
-                                                tokens = rhs.split()
-                                            in_boot = _param_present(tokens, param)
-                                            break
-                                lines.append(f"{boot_path} has {param}: {in_boot}")
-                        except Exception as e:
-                            lines.append(f"boot config read error: {e}")
-                elif kind == "udev_rule":
-                    path = str(params.get("path", ""))
-                    if path:
-                        lines.extend(_read_file(path))
-                elif kind == "pipewire_conf":
-                    path = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
-                    lines.extend(_read_file(path))
-                elif kind == "group_membership":
-                    r = subprocess.run(["id"], capture_output=True, text=True)
-                    lines.append(f"id: {r.stdout.strip()}")
-                elif kind == "pam_limits_audio_group":
-                    path = str(params.get("path", ""))
-                    if path:
-                        lines.extend(_read_file(path))
-                    try:
-                        import resource
-                        rt_soft, rt_hard = resource.getrlimit(resource.RLIMIT_RTPRIO)
-                        mem_soft, mem_hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
-                        lines.append(f"rtprio: {rt_soft}/{rt_hard}")
-                        lines.append(f"memlock: {mem_soft}/{mem_hard}")
-                    except Exception as e:
-                        lines.append(f"limits read error: {e}")
-                elif kind == "baloo_disable":
-                    cmd = "balooctl6" if shutil.which("balooctl6") else "balooctl"
-                    if shutil.which(cmd):
-                        r = subprocess.run([cmd, "status"], capture_output=True, text=True)
-                        lines.append(r.stdout.strip() or r.stderr.strip())
-                    else:
-                        lines.append("balooctl not found")
-
-                return lines
 
             dialog = QDialog(self)
             dialog.setWindowTitle(f"{k.title} Status Check")
@@ -2716,6 +2926,12 @@ def main() -> int:
                 cli_status_label.setText(f"CLI status: {payload.get('cli_status', 'unknown')}")
 
                 checks = payload.get("live_checks") or []
+                baseline_checks = self.state.get("baseline_checks", {})
+                if isinstance(baseline_checks, dict) and baseline_checks.get(k.id):
+                    checks = list(checks)
+                    checks.append("")
+                    checks.append("initial state:")
+                    checks.extend(str(x) for x in baseline_checks[k.id])
                 text.setPlainText("\n".join(checks))
 
             def _run_checks() -> None:
@@ -2726,7 +2942,7 @@ def main() -> int:
                 def _task():
                     return True, {
                         "cli_status": _cli_status(),
-                        "live_checks": _collect_live_checks(),
+                        "live_checks": self._collect_live_checks(k),
                     }, ""
 
                 worker = QueueTaskWorker(_task, parent=dialog)
@@ -3457,6 +3673,20 @@ def main() -> int:
             queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
             if not queued:
                 return
+            reset_ids = [kid for kid, action in queued if action == "reset"]
+            if reset_ids:
+                dependents = self._confirm_dependency_reset(reset_ids)
+                if dependents is None:
+                    return
+                if dependents:
+                    for kid in dependents:
+                        self._queued_actions[kid] = "reset"
+                    self._save_queue()
+                    self._update_queue_ui()
+                    self._populate()
+                    queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
+                    if not queued:
+                        return
             titles = []
             for kid, action in queued:
                 verb = "Apply" if action == "apply" else "Reset"

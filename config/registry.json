@@ -46,6 +46,9 @@
           "path": "/etc/security/limits.d/99-audioknob-gui.conf"
         }
       },
+      "depends_on": [
+        "audio_group_membership"
+      ],
       "requires_commands": [],
       "requires_groups": [
         "audio",

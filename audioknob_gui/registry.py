@@ -47,6 +47,7 @@ class Knob:
     requires_reboot: bool
     requires_groups: tuple[str, ...]  # User must be in one of these groups
     requires_commands: tuple[str, ...]  # Commands that must be available
+    depends_on: tuple[str, ...]  # Other knob ids that this knob requires
     capabilities: Capabilities
     impl: Impl | None
 
@@ -107,6 +108,12 @@ def load_registry(path: str | Path) -> list[Knob]:
             rc_raw = []
         requires_commands = tuple(str(c) for c in rc_raw if c)
 
+        # Parse depends_on (list of knob ids required by this knob)
+        dep_raw = k.get("depends_on", [])
+        if not isinstance(dep_raw, list):
+            dep_raw = []
+        depends_on = tuple(str(d) for d in dep_raw if d)
+
         out.append(
             Knob(
                 id=kid,
@@ -118,6 +125,7 @@ def load_registry(path: str | Path) -> list[Knob]:
                 requires_reboot=bool(k.get("requires_reboot")),
                 requires_groups=requires_groups,
                 requires_commands=requires_commands,
+                depends_on=depends_on,
                 capabilities=caps,
                 impl=impl,
             )
