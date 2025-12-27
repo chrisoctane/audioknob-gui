@@ -1300,6 +1300,14 @@ def _find_transaction_for_knob(knob_id: str) -> tuple[str | None, dict | None, s
 
 
 def _restore_knob_once(knob_id: str) -> dict:
+    from audioknob_gui.core.paths import get_registry_path
+    knob = None
+    try:
+        reg = load_registry(get_registry_path())
+        knob = next((k for k in reg if k.id == knob_id), None)
+    except Exception:
+        knob = None
+
     txid, manifest, scope = _find_transaction_for_knob(knob_id)
     if not txid or not manifest:
         return {
@@ -1316,6 +1324,193 @@ def _restore_knob_once(knob_id: str) -> dict:
             "success": False,
             "knob_id": knob_id,
             "error": f"Knob {knob_id} was applied as root; run with pkexec to restore",
+        }
+
+    if knob and knob.impl and knob.impl.kind == "kernel_cmdline":
+        from audioknob_gui.worker.ops import detect_distro
+
+        param = str(knob.impl.params.get("param", ""))
+        if not param:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": "No kernel parameter specified",
+            }
+
+        distro = detect_distro()
+        if distro.boot_system == "unknown" or not distro.kernel_cmdline_file:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Unknown boot system for {distro.distro_id}; cannot reset kernel cmdline",
+            }
+
+        cmdline_path = distro.kernel_cmdline_file
+        meta = next((m for m in manifest.get("backups", []) if m.get("path") == cmdline_path), None)
+        if not meta:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": "Kernel cmdline backup not found for this knob",
+            }
+
+        paths = default_paths()
+        tx_root = Path(paths.var_lib_dir if scope == "root" else paths.user_state_dir) / "transactions" / txid
+        backup_key = meta.get("backup_key")
+        backup_path = tx_root / "backups" / backup_key if backup_key else None
+        if not backup_path or not backup_path.exists():
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": "Kernel cmdline backup file missing",
+            }
+
+        try:
+            backup_content = backup_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Failed to read kernel cmdline backup: {exc}",
+            }
+
+        try:
+            current_content = Path(cmdline_path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            current_content = ""
+        except Exception as exc:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Failed to read kernel cmdline file: {exc}",
+            }
+
+        def _tokens_for_content(content: str, boot_system: str) -> list[str]:
+            if boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                return content.strip().split()
+            if boot_system == "grub2":
+                for line in content.splitlines():
+                    if not line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                        continue
+                    _, _, rhs = line.partition("=")
+                    rhs = rhs.strip()
+                    if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                        rhs = rhs[1:-1]
+                    try:
+                        return shlex.split(rhs)
+                    except Exception:
+                        return rhs.split()
+                return []
+            return content.strip().split()
+
+        def _param_present(param_str: str, tokens: list[str]) -> bool:
+            if not param_str:
+                return False
+            if "=" in param_str:
+                return any(t == param_str for t in tokens)
+            return any(t == param_str or t.startswith(param_str + "=") for t in tokens)
+
+        want_present = _param_present(param, _tokens_for_content(backup_content, distro.boot_system))
+
+        def _apply_param(tokens: list[str], present: bool) -> list[str]:
+            if present:
+                if not _param_present(param, tokens):
+                    tokens.append(param)
+                return tokens
+            if "=" in param:
+                return [t for t in tokens if t != param]
+            return [t for t in tokens if t != param and not t.startswith(param + "=")]
+
+        updated = False
+        if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+            tokens = _tokens_for_content(current_content, distro.boot_system)
+            new_tokens = _apply_param(tokens, want_present)
+            new_line = " ".join(new_tokens).strip()
+            new_content = (new_line + "\n") if new_line else ""
+            if new_content != current_content:
+                updated = True
+                try:
+                    Path(cmdline_path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(cmdline_path).write_text(new_content, encoding="utf-8")
+                except Exception as exc:
+                    return {
+                        "schema": 1,
+                        "success": False,
+                        "knob_id": knob_id,
+                        "error": f"Failed to write kernel cmdline file: {exc}",
+                    }
+        elif distro.boot_system == "grub2":
+            lines = current_content.splitlines()
+            out_lines: list[str] = []
+            found = False
+            for line in lines:
+                if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                    tokens = _tokens_for_content(line, "grub2")
+                    new_tokens = _apply_param(tokens, want_present)
+                    new_rhs = " ".join(new_tokens)
+                    out_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{new_rhs}"')
+                    found = True
+                else:
+                    out_lines.append(line)
+            if not found:
+                if want_present:
+                    out_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{param}"')
+                    found = True
+                else:
+                    out_lines.append('GRUB_CMDLINE_LINUX_DEFAULT=""')
+                    found = True
+            new_content = "\n".join(out_lines)
+            if new_content and not new_content.endswith("\n"):
+                new_content += "\n"
+            if new_content != current_content:
+                updated = True
+                try:
+                    Path(cmdline_path).write_text(new_content, encoding="utf-8")
+                except Exception as exc:
+                    return {
+                        "schema": 1,
+                        "success": False,
+                        "knob_id": knob_id,
+                        "error": f"Failed to write kernel cmdline file: {exc}",
+                    }
+        else:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Unsupported boot system: {distro.boot_system}",
+            }
+
+        restored: list[str] = [cmdline_path]
+        errors: list[str] = []
+        if updated and distro.kernel_cmdline_update_cmd:
+            result = subprocess.run(distro.kernel_cmdline_update_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                cmd_str = " ".join(distro.kernel_cmdline_update_cmd)
+                detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                errors.append(
+                    "Bootloader update failed after reset.\n"
+                    f"Command: {cmd_str}\n"
+                    f"Error: {detail}\n"
+                    "Run the command manually and reboot."
+                )
+            else:
+                restored.append(f"(bootloader update: {' '.join(distro.kernel_cmdline_update_cmd)})")
+
+        return {
+            "schema": 1,
+            "success": len(errors) == 0,
+            "knob_id": knob_id,
+            "txid": txid,
+            "scope": scope,
+            "restored": restored,
+            "errors": errors,
         }
 
     paths = default_paths()
@@ -1412,20 +1607,6 @@ def _restore_knob_once(knob_id: str) -> dict:
                     )
         except Exception as ex:
             errors.append(f"Bootloader update check failed: {ex}")
-
-    # If a reset did not actually revert the kernel cmdline param, surface a force-reset hint.
-    try:
-        from audioknob_gui.core.paths import get_registry_path
-        reg = load_registry(get_registry_path())
-        knob = next((k for k in reg if k.id == knob_id), None)
-        if knob and knob.impl and knob.impl.kind == "kernel_cmdline":
-            status = check_knob_status(knob)
-            if status == "applied":
-                errors.append(
-                    "Reset did not remove the kernel parameter; use force reset to return to system defaults."
-                )
-    except Exception:
-        pass
 
     return {
         "schema": 1,
