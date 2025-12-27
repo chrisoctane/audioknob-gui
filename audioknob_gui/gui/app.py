@@ -1293,12 +1293,21 @@ def main() -> int:
             baseline = self.state.get("baseline_statuses")
             if not isinstance(baseline, dict) or not baseline:
                 return
+            baseline_ts = self._parse_baseline_timestamp()
+            tx_times, root_tx_unknown = self._collect_transaction_times()
             for knob in self.registry:
                 current = self._knob_statuses.get(knob.id)
                 if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable"):
                     continue
+                if root_tx_unknown and knob.requires_root:
+                    continue
                 base = baseline.get(knob.id)
                 if base is None:
+                    continue
+                tx_time = tx_times.get(knob.id)
+                if tx_time is not None and baseline_ts is not None and baseline_ts >= tx_time:
+                    continue
+                if tx_time is not None and baseline_ts is None:
                     continue
                 if current == base:
                     self._knob_statuses[knob.id] = "sys_default"
@@ -1306,6 +1315,58 @@ def main() -> int:
                 if current == "applied":
                     continue
                 self._knob_statuses[knob.id] = "deviated"
+
+        def _parse_baseline_timestamp(self) -> float | None:
+            raw = self.state.get("baseline_captured_at")
+            if not isinstance(raw, str) or not raw:
+                return None
+            try:
+                iso = raw.replace("Z", "+00:00")
+                return datetime.fromisoformat(iso).timestamp()
+            except Exception:
+                return None
+
+        def _collect_transaction_times(self) -> tuple[dict[str, float], bool]:
+            """Return earliest transaction time per knob id and root access flag."""
+            from audioknob_gui.core.paths import default_paths
+            from audioknob_gui.core.transaction import list_transactions
+
+            tx_times: dict[str, float] = {}
+            root_unknown = False
+            paths = default_paths()
+
+            for tx in list_transactions(paths.user_state_dir):
+                ts = tx.get("timestamp")
+                if not isinstance(ts, (int, float)):
+                    continue
+                for knob_id in tx.get("applied", []):
+                    if not isinstance(knob_id, str):
+                        continue
+                    prev = tx_times.get(knob_id)
+                    if prev is None or ts < prev:
+                        tx_times[knob_id] = float(ts)
+
+            try:
+                root_txs = list_transactions(paths.var_lib_dir)
+            except PermissionError:
+                root_unknown = True
+                return tx_times, root_unknown
+            except Exception:
+                root_unknown = True
+                return tx_times, root_unknown
+
+            for tx in root_txs:
+                ts = tx.get("timestamp")
+                if not isinstance(ts, (int, float)):
+                    continue
+                for knob_id in tx.get("applied", []):
+                    if not isinstance(knob_id, str):
+                        continue
+                    prev = tx_times.get(knob_id)
+                    if prev is None or ts < prev:
+                        tx_times[knob_id] = float(ts)
+
+            return tx_times, root_unknown
 
         def _rt_limits_active(self) -> bool:
             try:
