@@ -5,12 +5,15 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from audioknob_gui.core.paths import default_paths
+from audioknob_gui.core.audit import log_audit_event
 from audioknob_gui.core.transaction import (
     RESET_BACKUP,
     RESET_DELETE,
@@ -25,11 +28,12 @@ from audioknob_gui.core.transaction import (
 from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
 from audioknob_gui.worker.ops import (
+    apply_jackd_affinity,
     check_knob_status,
     preview,
     restore_sysfs,
     systemd_restore,
-    user_unit_exists,
+    resolve_user_services,
 )
 
 
@@ -50,6 +54,11 @@ def _setup_worker_logging() -> logging.Logger:
 
     logger.info("start euid=%s argv=%s", os.geteuid(), " ".join(sys.argv))
     return logger
+
+
+def _log_audit_event(action: str, payload: dict[str, Any]) -> None:
+    logger = logging.getLogger("audioknob.worker")
+    log_audit_event(logger, action, payload)
 
 
 def _require_root() -> None:
@@ -73,6 +82,22 @@ def _load_gui_state() -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _is_qjackctl_running() -> bool:
+    if shutil.which("pgrep"):
+        for name in ("qjackctl", "qjackctl6"):
+            r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True)
+            if r.returncode == 0:
+                return True
+    r = subprocess.run(["ps", "-eo", "comm"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    for line in r.stdout.splitlines():
+        cmd = line.strip()
+        if cmd in ("qjackctl", "qjackctl6"):
+            return True
+    return False
 
 
 def _qjackctl_cpu_cores_override(state: dict) -> str | None:
@@ -114,6 +139,15 @@ def _pipewire_sample_rate_override(state: dict) -> int | None:
     if v in (44100, 48000, 88200, 96000, 192000):
         return v
     return None
+
+
+def _backup_once(tx, backups: list[dict], path: str, *, we_created: bool = False) -> dict:
+    for meta in backups:
+        if meta.get("path") == path:
+            return meta
+    meta = backup_file(tx, path, we_created=we_created)
+    backups.append(meta)
+    return meta
 
 
 def cmd_detect(_: argparse.Namespace) -> int:
@@ -212,6 +246,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
     backups: list[dict] = []
     effects: list[dict] = []
     applied: list[str] = []
+    warnings: list[str] = []
 
     for kid in args.knob:
         logger.info("apply-user knob=%s", kid)
@@ -229,28 +264,92 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         params = k.impl.params
 
         if kind == "qjackctl_server_prefix":
+            if _is_qjackctl_running():
+                raise SystemExit(
+                    "QjackCtl is running. Quit QjackCtl before applying QjackCtl RT so changes persist."
+                )
             path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
             path = Path(path_str).expanduser()
-            backups.append(backup_file(tx, str(path)))
+            _backup_once(tx, backups, str(path))
 
-            from audioknob_gui.core.qjackctl import ensure_server_flags
+            from audioknob_gui.core.qjackctl import (
+                build_post_start_script,
+                default_post_start_script_path,
+                ensure_server_flags,
+                normalize_cpu_cores,
+                read_config,
+            )
 
             ensure_rt = bool(params.get("ensure_rt", True))
             ensure_priority = bool(params.get("ensure_priority", False))
             cpu_cores = qjackctl_override if qjackctl_override is not None else params.get("cpu_cores")
             if cpu_cores is not None:
                 cpu_cores = str(cpu_cores)
+            cpu_cores_norm = normalize_cpu_cores(cpu_cores) if cpu_cores is not None else None
+
+            post_startup_enabled = False
+            post_startup_shell = ""
+            post_script_path = default_post_start_script_path()
+            if cpu_cores_norm:
+                script_body = build_post_start_script(cpu_cores_norm)
+                _backup_once(tx, backups, str(post_script_path))
+                post_script_path.parent.mkdir(parents=True, exist_ok=True)
+                post_script_path.write_text(script_body, encoding="utf-8")
+                try:
+                    os.chmod(post_script_path, 0o700)
+                except Exception:
+                    pass
+                post_startup_enabled = True
+                post_startup_shell = str(post_script_path)
+            else:
+                if post_script_path.exists():
+                    _backup_once(tx, backups, str(post_script_path))
+                    try:
+                        post_script_path.unlink()
+                    except Exception:
+                        pass
+                post_startup_enabled = False
+                post_startup_shell = ""
+
+            try:
+                cfg = read_config(path)
+            except Exception:
+                cfg = None
+
+            if cfg is not None and cfg.server_config_enabled:
+                warnings.append(
+                    "QjackCtl ServerConfig was enabled and has been disabled so the GUI settings are used."
+                )
+                logger.info("qjackctl ServerConfig disabled path=%s", path)
 
             before, after = ensure_server_flags(
-                path, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores
+                path,
+                ensure_rt=ensure_rt,
+                ensure_priority=ensure_priority,
+                cpu_cores="",
+                mirror_unscoped=True,
+                server_config_enabled=False,
+                post_startup_enabled=post_startup_enabled,
+                post_startup_shell=post_startup_shell,
             )
+            if cpu_cores_norm:
+                try:
+                    result = apply_jackd_affinity(cpu_cores_norm)
+                    effects.append({"kind": "jackd_affinity", "result": result})
+                    if result.get("status") == "not_running":
+                        warnings.append("JACK is not running; CPU pinning will apply the next time you start it.")
+                    elif result.get("status") in ("partial", "invalid_cpu_list"):
+                        warnings.append("Failed to update running jackd CPU affinity; see logs for details.")
+                except Exception as e:
+                    effects.append({"kind": "jackd_affinity", "error": str(e)})
+                    warnings.append("Failed to update running jackd CPU affinity; see logs for details.")
 
         elif kind == "pipewire_conf":
             import subprocess
 
             path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
             path = Path(path_str).expanduser()
-            backups.append(backup_file(tx, str(path)))
+            _backup_once(tx, backups, str(path))
             
             # Build config content
             lines = ["# audioknob-gui PipeWire configuration"]
@@ -296,7 +395,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             if isinstance(services, str):
                 services = [services]
 
-            existing = [svc for svc in services if user_unit_exists(svc)]
+            existing = resolve_user_services(services)
             if not existing:
                 raise SystemExit("No matching user services found to mask")
 
@@ -369,10 +468,28 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         "backups": backups,
         "effects": effects,
     }
+    if warnings:
+        manifest["warnings"] = warnings
     write_manifest(tx, manifest)
+    audit_payload = {
+        "txid": tx.txid,
+        "applied": applied,
+        "backups": backups,
+        "effects": effects,
+        "manifest": str(tx.root / "manifest.json"),
+    }
+    if warnings:
+        audit_payload["warnings"] = warnings
+    _log_audit_event(
+        "apply-user",
+        audit_payload,
+    )
 
     logger.info("apply-user done txid=%s applied=%s", tx.txid, ",".join(applied))
-    print(json.dumps({"schema": 1, "txid": tx.txid, "applied": applied}, indent=2))
+    result = {"schema": 1, "txid": tx.txid, "applied": applied}
+    if warnings:
+        result["warnings"] = warnings
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -407,7 +524,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         if kind == "pam_limits_audio_group":
             path = str(params["path"])
-            backups.append(backup_file(tx, path))
+            _backup_once(tx, backups, path)
 
             want_lines = [str(x) for x in params.get("lines", [])]
             before = ""
@@ -426,7 +543,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         elif kind == "sysctl_conf":
             path = str(params["path"])
-            backups.append(backup_file(tx, path))
+            _backup_once(tx, backups, path)
 
             want_lines = [str(x) for x in params.get("lines", [])]
             before = ""
@@ -470,27 +587,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
             # Special case: persistent CPU governor requires additional config to survive reboot.
             if kid == "cpu_governor_performance_persistent":
-                from audioknob_gui.worker.ops import systemd_enable_now
+                from audioknob_gui.worker.ops import (
+                    read_os_release,
+                    resolve_cpupower_config_path,
+                    systemd_enable_now,
+                )
 
-                def _read_os_release_id() -> str:
-                    try:
-                        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
-                            if line.startswith("ID="):
-                                return line.split("=", 1)[1].strip().strip('"').strip("'")
-                    except Exception:
-                        pass
-                    return ""
+                distro_id = read_os_release().get("ID", "")
+                cfg_path = resolve_cpupower_config_path(distro_id)
+                key = "GOVERNOR"
 
-                distro_id = _read_os_release_id()
-                # Best-effort: openSUSE/Fedora use /etc/sysconfig/cpupower; Debian-family uses /etc/default/cpufrequtils.
-                if distro_id in ("debian", "ubuntu", "linuxmint", "pop"):
-                    cfg_path = "/etc/default/cpufrequtils"
-                    key = "GOVERNOR"
-                else:
-                    cfg_path = "/etc/sysconfig/cpupower"
-                    key = "GOVERNOR"
-
-                backups.append(backup_file(tx, cfg_path))
+                _backup_once(tx, backups, cfg_path)
 
                 before = ""
                 try:
@@ -523,7 +630,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         elif kind == "udev_rule":
             path = str(params["path"])
             content = str(params["content"])
-            backups.append(backup_file(tx, path))
+            _backup_once(tx, backups, path)
             
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(content.rstrip("\n") + "\n", encoding="utf-8")
@@ -545,7 +652,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 raise SystemExit(f"Unknown boot system for {distro.distro_id}; cannot modify kernel cmdline")
             
             cmdline_file = distro.kernel_cmdline_file
-            backups.append(backup_file(tx, cmdline_file))
+            _backup_once(tx, backups, cmdline_file)
             
             before = ""
             try:
@@ -665,6 +772,18 @@ def cmd_apply(args: argparse.Namespace) -> int:
         "effects": effects,
     }
     write_manifest(tx, manifest)
+    audit_payload = {
+        "txid": tx.txid,
+        "applied": applied,
+        "backups": backups,
+        "effects": effects,
+        "manifest": str(tx.root / "manifest.json"),
+    }
+    if warnings:
+        audit_payload["warnings"] = warnings
+    if followups:
+        audit_payload["followups"] = followups
+    _log_audit_event("apply", audit_payload)
 
     logger.info("apply done txid=%s applied=%s", tx.txid, ",".join(applied))
     result = {"schema": 1, "txid": tx.txid, "applied": applied}
@@ -718,30 +837,54 @@ def cmd_restore(args: argparse.Namespace) -> int:
         elif e.get("kind") == "baloo_disable":
             baloo_enable()
 
+    _log_audit_event(
+        "restore",
+        {
+            "txid": args.txid,
+            "was_root": is_root,
+            "backups": manifest.get("backups", []),
+            "effects": effects,
+            "manifest": str(manifest_path),
+        },
+    )
     print(json.dumps({"schema": 1, "restored": args.txid, "was_root": is_root}, indent=2))
     return 0
 
 
-def cmd_history(_: argparse.Namespace) -> int:
+def cmd_history(args: argparse.Namespace) -> int:
+    """List transactions for user/root scope."""
     paths = default_paths()
-    tx_dir = Path(paths.var_lib_dir) / "transactions"
+    scope = getattr(args, "scope", "all")
     items: list[dict] = []
+    root_unavailable = False
 
-    if tx_dir.exists():
-        for p in sorted(tx_dir.iterdir()):
-            if not p.is_dir():
-                continue
-            mp = p / "manifest.json"
-            if mp.exists():
-                try:
-                    m = json.loads(mp.read_text(encoding="utf-8"))
-                except Exception:
-                    m = {"schema": 0}
-                items.append({"txid": p.name, "manifest": m})
-            else:
-                items.append({"txid": p.name, "manifest": None})
+    if scope in ("root", "all"):
+        if os.geteuid() != 0:
+            if scope == "root":
+                raise SystemExit("history --scope root requires pkexec")
+            root_unavailable = True
+        else:
+            for tx in list_transactions(paths.var_lib_dir):
+                tx["scope"] = "root"
+                items.append(tx)
 
-    print(json.dumps({"schema": 1, "items": items}, indent=2))
+    if scope in ("user", "all"):
+        for tx in list_transactions(paths.user_state_dir):
+            tx["scope"] = "user"
+            items.append(tx)
+
+    items.sort(key=lambda item: float(item.get("timestamp") or 0), reverse=True)
+    print(
+        json.dumps(
+            {
+                "schema": 1,
+                "items": items,
+                "scope": scope,
+                "root_unavailable": root_unavailable,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -797,14 +940,14 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             # Pending effects: restorable effects
             for effect in tx_info.get("effects", []):
                 kind = effect.get("kind", "")
-                if kind in ("sysfs_write", "systemd_unit_toggle"):
+                if kind in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline"):
                     needs_root_reset = True
                     break
             if needs_root_reset:
                 break
 
     if not all_txs:
-        print(json.dumps({
+        payload = {
             "schema": 1,
             "message": "No transactions found - nothing to reset",
             "reset_count": 0,
@@ -812,12 +955,29 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             "errors": [],
             "scope": scope_filter,
             "needs_root_reset": needs_root_reset,
-        }, indent=2))
+            "needs_reboot": False,
+        }
+        _log_audit_event(
+            "reset-defaults",
+            {
+                "scope": scope_filter,
+                "reset_count": 0,
+                "results": [],
+                "errors": [],
+                "needs_root_reset": needs_root_reset,
+                "needs_reboot": False,
+            },
+        )
+        print(json.dumps(payload, indent=2))
         return 0
     
-    # Track which files we've already reset (avoid duplicate resets)
+    # Track files to reset (oldest backup wins for true baseline reset)
     reset_paths: set[str] = set()
+    file_targets: dict[str, dict[str, Any]] = {}
     needs_bootloader_update = False
+    kernel_params: set[str] = set()
+    kernel_cmdline_updated = False
+    needs_reboot = False
     
     # Process all transactions (newest first - they're already sorted)
     for tx_info in all_txs:
@@ -839,36 +999,25 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         from audioknob_gui.core.transaction import Transaction
         tx_root = Path(tx_info["root"])
         tx = Transaction(txid=txid, root=tx_root)
-        
+
+        # Record file backups (keep OLDEST entry per transaction; older tx overrides)
+        seen_paths: set[str] = set()
         for meta in backups:
             file_path = meta.get("path", "")
-            if not file_path or file_path in reset_paths:
+            if not file_path or file_path in seen_paths:
                 continue
-            
-            strategy = meta.get("reset_strategy", RESET_BACKUP)
-            
-            # Check if we need root for package restore
-            if strategy == RESET_PACKAGE and os.geteuid() != 0:
-                errors.append(f"Need root to restore {file_path} from package")
-                continue
-            
-            success, message = reset_file_to_default(meta, tx)
-            results.append({
-                "path": file_path,
-                "strategy": strategy,
-                "success": success,
-                "message": message,
-            })
-            
-            if success:
-                reset_paths.add(file_path)
-            else:
-                errors.append(message)
+            seen_paths.add(file_path)
+            file_targets[file_path] = {"tx": tx, "meta": meta}
         
         # Handle effects (sysfs, systemd, user services, etc.)
         effects = tx_info.get("effects", [])
-        if any(e.get("kind") == "kernel_cmdline" for e in effects):
+        for e in effects:
+            if e.get("kind") != "kernel_cmdline":
+                continue
             needs_bootloader_update = True
+            param = e.get("param")
+            if isinstance(param, str) and param:
+                kernel_params.add(param)
         
         if scope == "root" and effects and os.geteuid() == 0:
             sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
@@ -911,6 +1060,58 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                     "success": True,
                     "message": f"Restored {user_effects_restored} user effect(s)",
                 })
+
+    # Reset files using oldest backups (true baseline)
+    for file_path in sorted(file_targets.keys()):
+        entry = file_targets[file_path]
+        meta = entry["meta"]
+        tx = entry["tx"]
+        if file_path in reset_paths:
+            continue
+
+        strategy = meta.get("reset_strategy", RESET_BACKUP)
+        if strategy == RESET_PACKAGE and os.geteuid() != 0:
+            errors.append(f"Need root to restore {file_path} from package")
+            continue
+
+        success, message = reset_file_to_default(meta, tx)
+        results.append({
+            "path": file_path,
+            "strategy": strategy,
+            "success": success,
+            "message": message,
+        })
+
+        if success:
+            reset_paths.add(file_path)
+        else:
+            errors.append(message)
+
+    kernel_params_to_remove = set(kernel_params)
+    if kernel_params and scope_filter in ("root", "all") and os.geteuid() == 0:
+        try:
+            from audioknob_gui.worker.ops import detect_distro
+
+            distro = detect_distro()
+            cmdline_path = distro.kernel_cmdline_file
+            if cmdline_path and cmdline_path in file_targets:
+                entry = file_targets[cmdline_path]
+                meta = entry["meta"]
+                tx = entry["tx"]
+                backup_key = meta.get("backup_key")
+                if backup_key:
+                    backup_path = tx.root / "backups" / backup_key
+                    if backup_path.exists():
+                        baseline_text = backup_path.read_text(encoding="utf-8")
+                        tokens = _kernel_cmdline_tokens(baseline_text, distro.boot_system)
+                        baseline_params = {
+                            param
+                            for param in kernel_params
+                            if _kernel_cmdline_param_present(param, tokens)
+                        }
+                        kernel_params_to_remove = kernel_params - baseline_params
+        except Exception:
+            kernel_params_to_remove = set(kernel_params)
     
     # Check if there are pending root changes (for informing GUI)
     # Use list-pending semantics: only count files that still exist + restorable effects
@@ -928,14 +1129,46 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             # Check for restorable effects (sysfs, systemd - not pipewire_restart)
             for effect in tx_info.get("effects", []):
                 kind = effect.get("kind", "")
-                if kind in ("sysfs_write", "systemd_unit_toggle"):
+                if kind in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline"):
                     needs_root_reset = True
                     break
             if needs_root_reset:
                 break
-    
+
+    # Ensure kernel cmdline params are removed even if backups still contain them.
+    if scope_filter in ("root", "all") and os.geteuid() == 0 and kernel_params_to_remove:
+        success, message = _force_reset_kernel_cmdline_params(kernel_params_to_remove, run_update=True)
+        if success:
+            kernel_cmdline_updated = True
+            results.append({
+                "path": "(kernel cmdline)",
+                "strategy": "kernel_cmdline",
+                "success": True,
+                "message": message,
+            })
+        else:
+            errors.append(message)
+
+        try:
+            cmdline = Path("/proc/cmdline").read_text(encoding="utf-8")
+            running_tokens = cmdline.split()
+
+            def _param_in_tokens(p: str, tokens: list[str]) -> bool:
+                for token in tokens:
+                    if token == p:
+                        return True
+                    if "=" in p:
+                        param_key = p.split("=")[0]
+                        if token.startswith(param_key + "=") and token == p:
+                            return True
+                return False
+
+            needs_reboot = any(_param_in_tokens(p, running_tokens) for p in kernel_params_to_remove)
+        except Exception:
+            pass
+
     # If kernel cmdline was reset, update the bootloader so changes stick after reboot.
-    if scope_filter in ("root", "all") and os.geteuid() == 0:
+    if scope_filter in ("root", "all") and os.geteuid() == 0 and not kernel_cmdline_updated:
         try:
             from audioknob_gui.worker.ops import detect_distro
             distro = detect_distro()
@@ -977,6 +1210,17 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         except Exception as ex:
             errors.append(f"Bootloader update check failed: {ex}")
 
+    _log_audit_event(
+        "reset-defaults",
+        {
+            "scope": scope_filter,
+            "reset_count": len(reset_paths),
+            "results": results,
+            "errors": errors,
+            "needs_root_reset": needs_root_reset,
+            "needs_reboot": needs_reboot,
+        },
+    )
     print(json.dumps({
         "schema": 1,
         "message": f"Reset {len(reset_paths)} files to system defaults",
@@ -985,6 +1229,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         "errors": errors,
         "scope": scope_filter,
         "needs_root_reset": needs_root_reset,
+        "needs_reboot": needs_reboot,
     }, indent=2))
     
     return 1 if errors else 0
@@ -1063,11 +1308,14 @@ def cmd_list_pending(_: argparse.Namespace) -> int:
     for tx_info in root_txs + user_txs:
         scope = "root" if tx_info in root_txs else "user"
         
-        # Collect file backups - but only if file still exists (or we created it and it's there)
+        # Collect file backups - but only if file still exists (or we created it and it's there).
+        # Keep OLDEST entry per file (older transactions replace newer).
+        seen_paths: set[str] = set()
         for meta in tx_info.get("backups", []):
             file_path = meta.get("path", "")
-            if not file_path or file_path in pending_files:
+            if not file_path or file_path in seen_paths:
                 continue
+            seen_paths.add(file_path)
             
             # Check if file still exists (meaning we still need to reset it)
             from pathlib import Path
@@ -1236,6 +1484,14 @@ def _find_transaction_for_knob(knob_id: str) -> tuple[str | None, dict | None, s
 
 
 def _restore_knob_once(knob_id: str) -> dict:
+    from audioknob_gui.core.paths import get_registry_path
+    knob = None
+    try:
+        reg = load_registry(get_registry_path())
+        knob = next((k for k in reg if k.id == knob_id), None)
+    except Exception:
+        knob = None
+
     txid, manifest, scope = _find_transaction_for_knob(knob_id)
     if not txid or not manifest:
         return {
@@ -1254,6 +1510,203 @@ def _restore_knob_once(knob_id: str) -> dict:
             "error": f"Knob {knob_id} was applied as root; run with pkexec to restore",
         }
 
+    if knob and knob.impl and knob.impl.kind == "kernel_cmdline":
+        from audioknob_gui.worker.ops import detect_distro
+
+        param = str(knob.impl.params.get("param", ""))
+        if not param:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": "No kernel parameter specified",
+            }
+
+        distro = detect_distro()
+        if distro.boot_system == "unknown" or not distro.kernel_cmdline_file:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Unknown boot system for {distro.distro_id}; cannot reset kernel cmdline",
+            }
+
+        cmdline_path = distro.kernel_cmdline_file
+        meta = next((m for m in manifest.get("backups", []) if m.get("path") == cmdline_path), None)
+        if not meta:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": "Kernel cmdline backup not found for this knob",
+            }
+
+        paths = default_paths()
+        tx_root = Path(paths.var_lib_dir if scope == "root" else paths.user_state_dir) / "transactions" / txid
+        backup_key = meta.get("backup_key")
+        backup_path = tx_root / "backups" / backup_key if backup_key else None
+        if not backup_path or not backup_path.exists():
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": "Kernel cmdline backup file missing",
+            }
+
+        try:
+            backup_content = backup_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Failed to read kernel cmdline backup: {exc}",
+            }
+
+        try:
+            current_content = Path(cmdline_path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            current_content = ""
+        except Exception as exc:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Failed to read kernel cmdline file: {exc}",
+            }
+
+        def _tokens_for_content(content: str, boot_system: str) -> list[str]:
+            if boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                return content.strip().split()
+            if boot_system == "grub2":
+                for line in content.splitlines():
+                    if not line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                        continue
+                    _, _, rhs = line.partition("=")
+                    rhs = rhs.strip()
+                    if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                        rhs = rhs[1:-1]
+                    try:
+                        return shlex.split(rhs)
+                    except Exception:
+                        return rhs.split()
+                return []
+            return content.strip().split()
+
+        def _param_present(param_str: str, tokens: list[str]) -> bool:
+            if not param_str:
+                return False
+            if "=" in param_str:
+                return any(t == param_str for t in tokens)
+            return any(t == param_str or t.startswith(param_str + "=") for t in tokens)
+
+        want_present = _param_present(param, _tokens_for_content(backup_content, distro.boot_system))
+
+        def _apply_param(tokens: list[str], present: bool) -> list[str]:
+            if present:
+                if not _param_present(param, tokens):
+                    tokens.append(param)
+                return tokens
+            if "=" in param:
+                return [t for t in tokens if t != param]
+            return [t for t in tokens if t != param and not t.startswith(param + "=")]
+
+        updated = False
+        current_tokens = _tokens_for_content(current_content, distro.boot_system)
+        param_in_current = _param_present(param, current_tokens)
+        if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+            tokens = _tokens_for_content(current_content, distro.boot_system)
+            new_tokens = _apply_param(tokens, want_present)
+            new_line = " ".join(new_tokens).strip()
+            new_content = (new_line + "\n") if new_line else ""
+            if new_content != current_content:
+                updated = True
+                try:
+                    Path(cmdline_path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(cmdline_path).write_text(new_content, encoding="utf-8")
+                except Exception as exc:
+                    return {
+                        "schema": 1,
+                        "success": False,
+                        "knob_id": knob_id,
+                        "error": f"Failed to write kernel cmdline file: {exc}",
+                    }
+        elif distro.boot_system == "grub2":
+            lines = current_content.splitlines()
+            out_lines: list[str] = []
+            found = False
+            for line in lines:
+                if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                    tokens = _tokens_for_content(line, "grub2")
+                    new_tokens = _apply_param(tokens, want_present)
+                    new_rhs = " ".join(new_tokens)
+                    out_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{new_rhs}"')
+                    found = True
+                else:
+                    out_lines.append(line)
+            if not found:
+                if want_present:
+                    out_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{param}"')
+                    found = True
+                else:
+                    out_lines.append('GRUB_CMDLINE_LINUX_DEFAULT=""')
+                    found = True
+            new_content = "\n".join(out_lines)
+            if new_content and not new_content.endswith("\n"):
+                new_content += "\n"
+            if new_content != current_content:
+                updated = True
+                try:
+                    Path(cmdline_path).write_text(new_content, encoding="utf-8")
+                except Exception as exc:
+                    return {
+                        "schema": 1,
+                        "success": False,
+                        "knob_id": knob_id,
+                        "error": f"Failed to write kernel cmdline file: {exc}",
+                    }
+        else:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Unsupported boot system: {distro.boot_system}",
+            }
+
+        if not updated and want_present and param_in_current:
+            return {
+                "schema": 1,
+                "success": False,
+                "knob_id": knob_id,
+                "error": f"Force reset available: reset did not remove {param} from {cmdline_path}",
+            }
+
+        restored: list[str] = [cmdline_path]
+        errors: list[str] = []
+        if updated and distro.kernel_cmdline_update_cmd:
+            result = subprocess.run(distro.kernel_cmdline_update_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                cmd_str = " ".join(distro.kernel_cmdline_update_cmd)
+                detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                errors.append(
+                    "Bootloader update failed after reset.\n"
+                    f"Command: {cmd_str}\n"
+                    f"Error: {detail}\n"
+                    "Run the command manually and reboot."
+                )
+            else:
+                restored.append(f"(bootloader update: {' '.join(distro.kernel_cmdline_update_cmd)})")
+
+        return {
+            "schema": 1,
+            "success": len(errors) == 0,
+            "knob_id": knob_id,
+            "txid": txid,
+            "scope": scope,
+            "restored": restored,
+            "errors": errors,
+        }
+
     paths = default_paths()
     tx_root = Path(paths.var_lib_dir if scope == "root" else paths.user_state_dir) / "transactions" / txid
 
@@ -1264,10 +1717,15 @@ def _restore_knob_once(knob_id: str) -> dict:
     # Restore only the backups from this knob's transaction
     restored = []
     errors = []
+    seen_paths: set[str] = set()
     for meta in manifest.get("backups", []):
+        file_path = meta.get("path", "")
+        if not file_path or file_path in seen_paths:
+            continue
+        seen_paths.add(file_path)
         success, message = reset_file_to_default(meta, tx)
         if success:
-            restored.append(meta["path"])
+            restored.append(file_path)
         else:
             errors.append(message)
 
@@ -1358,6 +1816,7 @@ def _restore_knob_once(knob_id: str) -> dict:
 def cmd_restore_knob(args: argparse.Namespace) -> int:
     """Restore a specific knob to its original state."""
     result = _restore_knob_once(args.knob_id)
+    _log_audit_event("restore-knob", result)
     print(json.dumps(result, indent=2))
     return 0 if result.get("success") else 1
 
@@ -1383,13 +1842,15 @@ def cmd_restore_many(args: argparse.Namespace) -> int:
             errors.append(f"{knob_id}: restore failed")
 
     success = len(errors) == 0
-    print(json.dumps({
+    payload = {
         "schema": 1,
         "success": success,
         "restored": restored,
         "results": results,
         "errors": errors,
-    }, indent=2))
+    }
+    _log_audit_event("restore-many", payload)
+    print(json.dumps(payload, indent=2))
     return 0 if success else 1
 
 
@@ -1403,6 +1864,269 @@ def _force_reset_systemd(unit: str, action: str) -> tuple[bool, str]:
         systemd_disable_now(unit)
         return True, f"Disabled {unit}"
     return False, f"Unsupported systemd action: {action}"
+
+
+def _force_reset_remove_lines(path_str: str, remove_lines: list[str]) -> tuple[bool, str]:
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    wanted = [str(x) for x in remove_lines if str(x).strip() != ""]
+    if not wanted:
+        return False, "No reset lines provided"
+
+    new_lines = [line for line in lines if line not in wanted]
+    removed = len(lines) - len(new_lines)
+    if removed == 0:
+        return True, f"No matching lines in {path}"
+
+    if not any(line.strip() for line in new_lines):
+        try:
+            path.unlink()
+        except Exception as e:
+            return False, f"Failed to delete {path}: {e}"
+        return True, f"Deleted {path}"
+
+    try:
+        path.write_text("\n".join(new_lines).rstrip("\n") + "\n", encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to write {path}: {e}"
+
+    return True, f"Removed {removed} line(s) from {path}"
+
+
+def _force_reset_udev_rule(path_str: str, content: str) -> tuple[bool, str]:
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        current = path.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    expected = str(content).strip()
+    if current != expected:
+        return False, f"{path} does not match expected audioknob rule"
+
+    try:
+        path.unlink()
+    except Exception as e:
+        return False, f"Failed to delete {path}: {e}"
+
+    try:
+        subprocess.run(["udevadm", "control", "--reload-rules"], check=False, capture_output=True)
+        subprocess.run(["udevadm", "trigger"], check=False, capture_output=True)
+    except Exception:
+        pass
+
+    return True, f"Deleted {path}"
+
+
+def _force_reset_pipewire_conf(path_str: str) -> tuple[bool, str]:
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    if "# audioknob-gui PipeWire configuration" not in content.splitlines()[:3]:
+        return False, f"{path} does not appear to be an audioknob config"
+
+    try:
+        path.unlink()
+    except Exception as e:
+        return False, f"Failed to delete {path}: {e}"
+
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "restart", "pipewire.service", "pipewire-pulse.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception:
+        pass
+
+    return True, f"Deleted {path}"
+
+
+def _force_reset_user_services(services: list[str]) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import resolve_user_services, user_service_unmask
+
+    resolved = resolve_user_services(services)
+    if not resolved:
+        return True, "No matching user services found"
+
+    user_service_unmask(resolved)
+    return True, f"Unmasked {len(resolved)} user service(s)"
+
+
+def _force_reset_baloo_disable() -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import baloo_enable
+
+    try:
+        baloo_enable()
+    except Exception as e:
+        return False, f"Failed to enable Baloo: {e}"
+    return True, "Enabled Baloo"
+
+
+def _force_reset_sysfs_glob(glob_spec: str | list[str]) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import _expand_sysfs_globs
+
+    targets = _expand_sysfs_globs(glob_spec)
+    if not targets:
+        return False, f"No sysfs entries found for: {glob_spec}"
+
+    errors: list[str] = []
+    updated = 0
+    for path_str in targets:
+        path = Path(path_str)
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            errors.append(f"{path_str}: {e}")
+            continue
+        if not raw:
+            errors.append(f"{path_str}: empty sysfs value")
+            continue
+        tokens = raw.split()
+        bracketed = [t for t in tokens if t.startswith("[") and t.endswith("]")]
+        if not bracketed:
+            errors.append(f"{path_str}: unable to infer default from '{raw}'")
+            continue
+        default = bracketed[0].strip("[]")
+        try:
+            path.write_text(default + "\n", encoding="utf-8")
+            updated += 1
+        except Exception as e:
+            errors.append(f"{path_str}: {e}")
+
+    if errors:
+        return False, "; ".join(errors)
+    suffix = "entry" if updated == 1 else "entries"
+    return True, f"Reset {updated} sysfs {suffix}"
+
+
+def _kernel_cmdline_tokens(text: str, boot_system: str) -> list[str]:
+    if boot_system in ("grub2-bls", "bls", "systemd-boot"):
+        return text.strip().split()
+    if boot_system == "grub2":
+        for line in text.splitlines():
+            if not line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                continue
+            _, _, rhs = line.partition("=")
+            rhs = rhs.strip()
+            if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                rhs = rhs[1:-1]
+            try:
+                return shlex.split(rhs)
+            except Exception:
+                return rhs.split()
+        return []
+    return text.strip().split()
+
+
+def _kernel_cmdline_param_present(param: str, tokens: list[str]) -> bool:
+    if not param:
+        return False
+    if "=" in param:
+        return any(t == param for t in tokens)
+    return any(t == param or t.startswith(param + "=") for t in tokens)
+
+
+def _force_reset_kernel_cmdline_params(params: set[str], *, run_update: bool = True) -> tuple[bool, str]:
+    from audioknob_gui.worker.ops import detect_distro
+
+    params = {p for p in params if p}
+    if not params:
+        return True, "No kernel params to remove"
+
+    distro = detect_distro()
+    if distro.boot_system == "unknown" or not distro.kernel_cmdline_file:
+        return False, "No kernel cmdline file detected"
+
+    path = Path(distro.kernel_cmdline_file)
+    try:
+        before = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    def _remove_params(tokens: list[str]) -> list[str]:
+        out: list[str] = []
+        for token in tokens:
+            keep = True
+            for param in params:
+                if "=" in param:
+                    if token == param:
+                        keep = False
+                        break
+                else:
+                    if token == param or token.startswith(param + "="):
+                        keep = False
+                        break
+            if keep:
+                out.append(token)
+        return out
+
+    after = before
+    if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+        tokens = before.strip().split()
+        new_tokens = _remove_params(tokens)
+        after = " ".join(new_tokens).strip() + ("\n" if before.endswith("\n") or new_tokens else "")
+    elif distro.boot_system == "grub2":
+        lines = before.splitlines()
+        out_lines: list[str] = []
+        updated = False
+        for line in lines:
+            if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                _, _, rhs = line.partition("=")
+                rhs = rhs.strip()
+                if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                    inner = rhs[1:-1]
+                else:
+                    inner = rhs
+                try:
+                    tokens = shlex.split(inner)
+                except Exception:
+                    tokens = inner.split()
+                new_tokens = _remove_params(tokens)
+                new_rhs = " ".join(new_tokens)
+                out_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{new_rhs}"')
+                updated = True
+            else:
+                out_lines.append(line)
+        if not updated:
+            return False, "GRUB_CMDLINE_LINUX_DEFAULT not found"
+        after = "\n".join(out_lines)
+        if after and not after.endswith("\n"):
+            after += "\n"
+    else:
+        return False, f"Unsupported boot system: {distro.boot_system}"
+
+    try:
+        path.write_text(after, encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to write {path}: {e}"
+
+    if run_update and distro.kernel_cmdline_update_cmd:
+        try:
+            subprocess.run(distro.kernel_cmdline_update_cmd, check=False, capture_output=True, text=True)
+        except Exception:
+            pass
+
+    removed = ", ".join(sorted(params))
+    return True, f"Removed {removed} from {path}"
 
 
 def _force_reset_kernel_cmdline(param: str) -> tuple[bool, str]:
@@ -1480,19 +2204,26 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     by_id = {k.id: k for k in reg}
     k = by_id.get(knob_id)
     if k is None:
-        print(json.dumps({"schema": 1, "success": False, "error": f"Unknown knob id: {knob_id}"}, indent=2))
+        payload = {"schema": 1, "success": False, "error": f"Unknown knob id: {knob_id}", "knob_id": knob_id}
+        _log_audit_event("force-reset-knob", payload)
+        print(json.dumps(payload, indent=2))
         return 1
 
     if k.requires_root and os.geteuid() != 0:
-        print(json.dumps({
+        payload = {
             "schema": 1,
             "success": False,
             "error": f"Knob {knob_id} requires root; run with pkexec",
-        }, indent=2))
+            "knob_id": knob_id,
+        }
+        _log_audit_event("force-reset-knob", payload)
+        print(json.dumps(payload, indent=2))
         return 1
 
     if not k.impl:
-        print(json.dumps({"schema": 1, "success": False, "error": "Knob not implemented"}, indent=2))
+        payload = {"schema": 1, "success": False, "error": "Knob not implemented", "knob_id": knob_id}
+        _log_audit_event("force-reset-knob", payload)
+        print(json.dumps(payload, indent=2))
         return 1
 
     kind = k.impl.kind
@@ -1504,18 +2235,45 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
         unit = str(params.get("unit", ""))
         action = str(params.get("action", ""))
         success, message = _force_reset_systemd(unit, action)
+    elif kind == "pam_limits_audio_group":
+        path = str(params.get("path", ""))
+        lines = params.get("lines", [])
+        success, message = _force_reset_remove_lines(path, lines)
+    elif kind == "sysctl_conf":
+        path = str(params.get("path", ""))
+        lines = params.get("lines", [])
+        success, message = _force_reset_remove_lines(path, lines)
+    elif kind == "udev_rule":
+        path = str(params.get("path", ""))
+        content = str(params.get("content", ""))
+        success, message = _force_reset_udev_rule(path, content)
+    elif kind == "sysfs_glob_kv":
+        glob_spec = params.get("glob", "")
+        success, message = _force_reset_sysfs_glob(glob_spec)
     elif kind == "kernel_cmdline":
         param = str(params.get("param", ""))
         success, message = _force_reset_kernel_cmdline(param)
+    elif kind == "pipewire_conf":
+        path = str(params.get("path", ""))
+        success, message = _force_reset_pipewire_conf(path)
+    elif kind == "user_service_mask":
+        services = params.get("services", [])
+        if isinstance(services, str):
+            services = [services]
+        success, message = _force_reset_user_services([str(s) for s in services])
+    elif kind == "baloo_disable":
+        success, message = _force_reset_baloo_disable()
     else:
         message = f"Force reset not supported for kind: {kind}"
 
-    print(json.dumps({
+    payload = {
         "schema": 1,
         "success": success,
         "knob_id": knob_id,
         "message": message,
-    }, indent=2))
+    }
+    _log_audit_event("force-reset-knob", payload)
+    print(json.dumps(payload, indent=2))
     return 0 if success else 1
 
 
@@ -1547,6 +2305,12 @@ def main(argv: list[str] | None = None) -> int:
     sr.set_defaults(func=cmd_restore)
 
     sh = sub.add_parser("history", help="List transactions")
+    sh.add_argument(
+        "--scope",
+        choices=["user", "root", "all"],
+        default="all",
+        help="Which transactions to list (default: all; root requires pkexec)",
+    )
     sh.set_defaults(func=cmd_history)
 
     srd = sub.add_parser("reset-defaults", help="Reset ALL changes to system defaults")

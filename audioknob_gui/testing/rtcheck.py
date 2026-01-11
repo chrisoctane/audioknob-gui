@@ -510,8 +510,9 @@ def check_nohz() -> CheckResult:
 
 def check_irqbalance() -> CheckResult:
     """Check if irqbalance is running."""
-    rc, _ = _run_cmd(["systemctl", "is-active", "irqbalance.service"])
-    if rc == 0:
+    rc, out = _run_cmd(["systemctl", "is-active", "irqbalance.service"])
+    status = out.strip().lower()
+    if status == "active":
         return CheckResult(
             id="irqbalance",
             name="IRQ balancing",
@@ -520,11 +521,58 @@ def check_irqbalance() -> CheckResult:
             detail="Can cause IRQ thread migration during playback",
             fix_knob="irqbalance_disable"
         )
+    if status in ("inactive", "failed", "deactivating"):
+        return CheckResult(
+            id="irqbalance",
+            name="IRQ balancing",
+            status=CheckStatus.PASS,
+            message="irqbalance not running"
+        )
+    if status in ("not-found", "unknown"):
+        return CheckResult(
+            id="irqbalance",
+            name="IRQ balancing",
+            status=CheckStatus.PASS,
+            message="irqbalance not installed"
+        )
+
+    # Fallback when systemctl is unavailable or unhelpful.
+    rc_proc, _ = _run_cmd(["pgrep", "-x", "irqbalance"])
+    if rc_proc == 0:
+        return CheckResult(
+            id="irqbalance",
+            name="IRQ balancing",
+            status=CheckStatus.WARN,
+            message="irqbalance is running",
+            detail="Detected irqbalance process (systemctl unavailable)",
+            fix_knob="irqbalance_disable"
+        )
+
+    binary_paths = [
+        "/usr/sbin/irqbalance",
+        "/usr/bin/irqbalance",
+        "/usr/local/sbin/irqbalance",
+        "/usr/local/bin/irqbalance",
+    ]
+    service_paths = [
+        "/lib/systemd/system/irqbalance.service",
+        "/usr/lib/systemd/system/irqbalance.service",
+    ]
+    installed = any(Path(p).exists() for p in binary_paths + service_paths)
+    if installed:
+        return CheckResult(
+            id="irqbalance",
+            name="IRQ balancing",
+            status=CheckStatus.PASS,
+            message="irqbalance process not detected (inferred)",
+            detail="systemctl unavailable; no irqbalance process found"
+        )
+
     return CheckResult(
         id="irqbalance",
         name="IRQ balancing",
         status=CheckStatus.PASS,
-        message="irqbalance not running"
+        message="irqbalance not installed"
     )
 
 

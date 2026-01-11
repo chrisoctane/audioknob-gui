@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.5.1)
+### Install on openSUSE Tumbleweed (RPM, v0.3.6)
 
-For v0.3.5.1 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.3.6 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -79,11 +79,37 @@ python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 ```
 
+### QjackCtl RT behavior
+
+- Applying **QjackCtl RT** updates the QjackCtl config (active preset if set, plus unscoped mirror), sets **Realtime=true** and **Priority=90**, preserves existing presets, disables **ServerConfig**, and configures a **PostStartupScript** so JACK is re-pinned on each start. It also attempts to pin any running `jackd` process immediately. If JACK is not running, the CPU pinning takes effect the next time you start it.
+- **Important:** Quit QjackCtl before applying this knob; QjackCtl rewrites its config on exit.
+
 ### Logs (what the app did and where it failed)
 
 - GUI: `~/.local/state/audioknob-gui/logs/gui.log`
 - Worker (user scope): `~/.local/state/audioknob-gui/logs/worker.log`
 - Worker (root scope): `/var/lib/audioknob-gui/logs/worker.log`
+- Worker logs include JSON audit entries (prefixed `audit`) with txid, files
+  changed, effects, and command output/errors. GUI-only actions (group changes,
+  package installs) also emit audit entries into the user-scope worker log.
+- The header includes **Logs** (view + copy) and **Clear Logs** (clears GUI +
+  user worker logs) to keep test runs clean.
+
+### Startup system profile scan (first run)
+
+On first GUI launch, the app records the detected distro, package commands, and
+per-knob locations in `~/.local/state/audioknob-gui/state.json`. This confirms
+distro-specific paths (e.g., kernel cmdline handling on Tumbleweed vs
+Ubuntu/Fedora) and ensures each knob has a resolved location entry. If the file
+is removed, the schema changes, or the distro/boot system changes, the scan runs again.
+
+### Baseline state capture (first run)
+
+On first launch, the app captures an **initial system state** (baseline) using
+pkexec so root-only knobs are included. This baseline is used to label knobs as
+**Sys Default** when the current state matches the initial state. A **Re-check State**
+button in the header re-runs current status checks for development/testing. Apply/reset
+actions are disabled until baseline capture completes.
 
 ---
 
@@ -147,6 +173,7 @@ Both files must be committed together. See "Registry Sync Policy" below.
 **New fields:**
 - `requires_groups`: User must be in ONE of these groups (e.g., `["audio", "realtime"]`)
 - `requires_commands`: Commands that must be available (e.g., `["cyclictest"]`)
+- `depends_on`: Other knob ids that must remain enabled for this knob
 
 ### Step 2: Choose implementation kind
 
@@ -190,7 +217,7 @@ In `gui/app.py` → `_populate()`:
 
 **Sorting**: Click any column header to sort
 
-**Header row**: Font size control on the left, queue status + Apply/Apply & Reboot + Reset All on the right
+**Header row**: Font size control on the left, queue status + Apply/Apply & Reboot + Re-check State + Logs + Reset All on the right
 
 ---
 
@@ -209,9 +236,9 @@ self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 ```
 
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
-Apply and Reset now queue the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot.
+Apply and Reset now queue the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot. "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 Group join/leave actions remain immediate because they require explicit confirmation.
-If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (supported for `systemd_unit_toggle` and `kernel_cmdline` knobs).
+If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (for both single and queued resets). Force reset is supported where defaults can be inferred or safely removed: `systemd_unit_toggle`, `kernel_cmdline`, `sysfs_glob_kv` (only when sysfs exposes a bracketed default), `pam_limits_audio_group`, `sysctl_conf`, `udev_rule` (only if file matches audioknob content), `pipewire_conf` (only if file has audioknob header), `user_service_mask`, and `baloo_disable`.
 Reboot-required knobs are disabled until the user enables the "Enable reboot-required changes" toggle.
 Knobs requiring audio groups stay locked while group membership is pending reboot.
 
@@ -231,7 +258,12 @@ self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 
 The jitter test also stores the most recent per-thread results in the knob info dialog.
 The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
-Use the "Status" button in the Check column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. Read-only test rows show N/A in this column.
+Use the "Status" button in the Check column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. It also shows the initial baseline snapshot for that knob. Read-only test rows show N/A in this column.
+The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) to make mixed logs easy to read.
+The GUI log also records high-level action start/finish entries (apply queue, reset all) so successes are visible in-app.
+Force-reset prompts and outcomes are also logged in the GUI log.
+If a reset would disable a dependency, the GUI prompts and adds dependent knobs to the reset queue when accepted.
+Status uses the initial baseline: if current matches baseline it shows “Sys Default”; if current matches neither baseline nor tweak it shows “Deviated.”
 
 ### With config dialog (via info popup)
 ```python
@@ -242,7 +274,7 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Applying PipeWire knobs restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying PipeWire knobs restarts PipeWire services automatically.
 
 ---
 

@@ -22,6 +22,9 @@
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Reset All** - reverts all changes to system defaults
+- **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
+- **Re-check State** - header button refreshes current status for dev/testing
+- **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
@@ -35,8 +38,10 @@ Notes:
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
-- QjackCtl defaults to taskset cores 0,1 and adds -R and -P90 when applied.
+- QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
+- Header row includes a Re-check State button to refresh current status.
+- Main window title includes app version and git short SHA when available.
 ```
 
 ### Bugs Fixed (Prevent Regression)
@@ -46,11 +51,18 @@ Notes:
 - Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
 - Kernel cmdline knobs now show “Reboot required” when removed from boot config but still active.
 - User-service masking only targets existing units; Baloo status detection recognizes disabled/not running and surfaces failures.
-- QjackCtl config applies even if DefPreset is missing (uses unscoped Server/ServerPrefix without creating presets).
-- QjackCtl ServerPrefix now shows taskset pinning in the GUI (prefix is written separately from jackd flags).
+- QjackCtl config applies even if DefPreset is missing (updates unscoped settings and mirrors them when a preset is active).
+- QjackCtl RT disables ServerConfig so GUI settings are used and removes taskset from Server/ServerPrefix.
+- QjackCtl RT configures a PostStartupScript to enforce CPU pinning on JACK start.
+- QjackCtl RT status includes live jackd command/affinity/RT thread info and validates the post-start script when JACK is not running.
+- QjackCtl RT apply updates running jackd CPU affinity immediately and warns if it cannot.
+- QjackCtl RT uses QjackCtl Realtime/Priority settings instead of embedding -R/-P90 in Server.
+- QjackCtl ServerConfig detection reads the Options section (where QjackCtl stores it).
+- QjackCtl info popup now reports the active preset explicitly and suppresses default/preserved preset noise when none are active.
 - RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - KDE Indexer status now handles balooctl output from stderr (balooctl6 on Tumbleweed).
+- Baseline comparisons ignore unknown/not-applicable baselines; Huge Pages status no longer forces sys_default.
 - KDE Indexer apply now times out and errors if balooctl hangs or still reports running.
 - KDE Indexer reset triggers balooctl enable in the background to avoid UI hangs.
 - Apply/Reset run in the background with a visible “Updating” status.
@@ -58,13 +70,18 @@ Notes:
 - Reset errors now surface detailed messages instead of a generic "Unknown error".
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
-- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt.
-- QjackCtl RT now warns to restart QjackCtl when it is running; RT Limits shows a reboot/log-out prompt when session limits are inactive.
+- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt when defaults can be inferred or safely removed: systemd_unit_toggle, kernel_cmdline, sysfs_glob_kv (bracketed default only), pam_limits_audio_group, sysctl_conf, udev_rule (only if file matches audioknob content), pipewire_conf (audioknob header), user_service_mask, baloo_disable.
+- Queued resets now group "no transaction" knobs and offer a force-reset prompt instead of failing the whole queue.
+- QjackCtl RT blocks apply while QjackCtl is running to avoid config overwrite; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
 - Kernel cmdline apply can prompt to run the bootloader update command via pkexec.
 - Reboot-required knobs are gated behind a header toggle; group-required knobs stay locked while group changes are pending reboot.
 - Reboot-required toggle preserves scroll position instead of jumping the table.
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
+- "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
+- Resetting a knob that others depend on now prompts and cascades dependent resets when accepted.
+- Baseline-aware status now labels knobs as “Sys Default” when current matches the initial scan.
+- System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
@@ -75,6 +92,15 @@ Notes:
 - GUI: `~/.local/state/audioknob-gui/logs/gui.log`
 - Worker (user scope): `~/.local/state/audioknob-gui/logs/worker.log`
 - Worker (root scope): `/var/lib/audioknob-gui/logs/worker.log`
+- Worker logs include JSON audit entries (prefixed `audit`) with txid, file
+  changes, effects, and command output/errors.
+- GUI-only actions (group changes, package installs) also emit audit entries
+- Log viewer stamps each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) for clarity.
+- GUI log includes action start/finish markers for queued apply/reset and Reset All.
+- GUI log includes force-reset prompt/decision and force-reset run results.
+  into the user-scope worker log for a unified audit trail.
+- The GUI header includes **Logs** (view + copy) and **Clear Logs** (clears GUI
+  and user worker logs).
 
 ### Future Enhancements (P2)
 
@@ -354,7 +380,7 @@ audioknob-gui/
 2. GUI calls worker with restore-knob command
 3. Worker:
    a. Finds transaction that applied this knob
-   b. Reads backup metadata from manifest
+   b. Reads backup metadata from manifest (uses the oldest entry per file path)
    c. Based on reset_strategy:
       - "delete": Remove the file we created
       - "backup": Copy backup file back to original location
@@ -556,7 +582,7 @@ else:
 | `sysctl_conf` | Appends lines to sysctl.d file | Check if all lines present |
 | `sysfs_glob_kv` | Writes value to /sys paths matching glob | Read current values |
 | `systemd_unit_toggle` | Enable/disable a systemd unit | Check is-enabled |
-| `qjackctl_server_prefix` | Modify QjackCtl Server command | Parse config, check -R flag |
+| `qjackctl_server_prefix` | Modify QjackCtl Server command + unscoped settings + post-start script | Parse config, check flags/pinning (use runtime info when available) |
 | `udev_rule` | Create a udev rule file | Check if file exists with content |
 | `kernel_cmdline` | Add parameter to kernel cmdline (distro-aware) | Check /proc/cmdline |
 | `pipewire_conf` | Create PipeWire user config | Check if config file has settings |
@@ -581,7 +607,30 @@ else:
   "font_size": 11,
   "qjackctl_cpu_cores": [2, 3],
   "pipewire_quantum": 256,
-  "pipewire_sample_rate": 48000
+  "pipewire_sample_rate": 48000,
+  "system_profile": {
+    "schema": 1,
+    "distro_id": "opensuse-tumbleweed",
+    "boot_system": "grub2-bls",
+    "paths": {
+      "kernel_cmdline_file": "/etc/kernel/cmdline",
+      "cpupower_config": "/etc/sysconfig/cpupower"
+    },
+    "commands": {
+      "package_install": ["zypper", "--non-interactive", "install"],
+      "kernel_cmdline_update": ["sdbootutil", "update-all-entries"]
+    },
+    "knob_paths": {
+      "rt_limits_audio_group": {
+        "kind": "pam_limits_audio_group",
+        "targets": [{"type": "path", "value": "/etc/security/limits.d/99-audioknob-gui.conf"}]
+      },
+      "kernel_threadirqs": {
+        "kind": "kernel_cmdline",
+        "targets": [{"type": "kernel_cmdline_file", "value": "/etc/kernel/cmdline"}]
+      }
+    }
+  }
 }
 ```
 
@@ -604,6 +653,12 @@ else:
 - Sample rate selection is a GUI-level preference (44100/48000/88200/96000/192000)
 - Applied via override in the worker for the `pipewire_sample_rate` knob
 - Applying either PipeWire knob restarts PipeWire services automatically (best-effort)
+
+**Why store system_profile?**
+- Records detected distro and resolved path map on first startup
+- Used to confirm distro-specific paths (e.g., kernel cmdline handling)
+- Rescanned if schema changes or distro/boot system changes
+- Includes a per-knob location entry (file path, glob, unit, or command)
 
 ### Status Refresh Flow
 
@@ -741,9 +796,9 @@ Each implementation kind has specific logic in `check_knob_status()`:
 **qjackctl_server_prefix:**
 ```python
 # Read QjackCtl config
-# Parse Server line
-# Check if "-R" flag present
-# Present → "applied", else "not_applied"
+# Parse Server and options
+# Check Realtime/Priority settings and post-start pinning script
+# If jackd is running, use live RT thread/affinity info when available
 ```
 
 **read_only:**
@@ -1264,6 +1319,9 @@ fi
 We currently detect:
 - Package manager (rpm/dpkg/pacman) in `platform/packages.py`
 - Audio stack (PipeWire/JACK) in `platform/detect.py`
+- System profile on first GUI startup (distro + key paths) for Ubuntu/Fedora/Tumbleweed,
+  stored in `state.json` and used to confirm distro-specific paths (kernel cmdline,
+  cpupower, rtirq). Rescans on schema/distro/boot system changes.
 
 #### Phase 2: Needed Detection
 
@@ -1391,8 +1449,8 @@ cat /etc/sysctl.d/99-audioknob-gui.conf
 # Check irqbalance
 systemctl is-enabled irqbalance
 
-# Check QjackCtl (look for Server line with -R)
-grep -A1 "\\\\Server" ~/.config/rncbc.org/QjackCtl.conf
+# Check QjackCtl (Realtime/Priority + post-start script)
+rg -n "Realtime=|Priority=|PostStartupScript" ~/.config/rncbc.org/QjackCtl.conf
 
 # Check transactions
 ls -la /var/lib/audioknob-gui/transactions/
@@ -1426,8 +1484,8 @@ python3 -m audioknob_gui.worker.cli list-pending
 
 # Notes:
 # - `list-changes` is historical audit (all transactions ever).
-# - `list-pending` is current-state (what still needs reset). For effects, it deduplicates by kind+path and keeps
-#   the OLDEST entry so restore returns to the original baseline state.
+# - `list-pending` is current-state (what still needs reset). For files and effects, it keeps the OLDEST entry
+#   so restore returns to the original baseline state.
 
 # Reset defaults in two phases (what GUI does for “Reset All”):
 python3 -m audioknob_gui.worker.cli reset-defaults --scope user

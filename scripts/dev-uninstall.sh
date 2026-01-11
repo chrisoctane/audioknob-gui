@@ -7,7 +7,7 @@ dev-uninstall.sh [--yes] [--keep-deps]
 
 Dev-only uninstall helper:
   - Resets audioknob-gui changes (user + root)
-  - Forces default resets for systemd/kernel knobs when no transactions exist
+  - Forces default resets for supported knobs when no transactions exist (baseline-aware)
   - Removes app-created user config files
   - Optionally removes audioknob-gui and its optional dependencies
 
@@ -55,28 +55,71 @@ else
   echo "!! sudo not found; skipping root reset"
 fi
 
-echo "==> Forcing defaults for root knobs without transactions"
+echo "==> Forcing defaults for knobs without transactions (best-effort)"
 force_knobs="$("$PYTHON" - <<'PY'
+import json
+from pathlib import Path
+
+from audioknob_gui.core.paths import default_paths, get_registry_path
 from audioknob_gui.registry import load_registry
-from audioknob_gui.core.paths import get_registry_path
+from audioknob_gui.worker.ops import check_knob_status
 
 reg = load_registry(get_registry_path())
+
+baseline_statuses = {}
+try:
+    state_path = Path(default_paths().user_state_dir) / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            baseline = data.get("baseline_statuses")
+            if isinstance(baseline, dict):
+                baseline_statuses = baseline
+except Exception:
+    baseline_statuses = {}
+
+force_kinds = {
+    "systemd_unit_toggle",
+    "pam_limits_audio_group",
+    "sysctl_conf",
+    "udev_rule",
+    "sysfs_glob_kv",
+    "kernel_cmdline",
+    "pipewire_conf",
+    "user_service_mask",
+    "baloo_disable",
+}
+skip_baseline = {"applied", "sys_default"}
+
 for k in reg:
     if not k.impl:
         continue
-    if k.impl.kind in ("systemd_unit_toggle", "kernel_cmdline"):
-        print(k.id)
+    if k.impl.kind not in force_kinds:
+        continue
+    status = check_knob_status(k)
+    if status in ("not_applicable", "not_applied", "unknown", "read_only", "sys_default"):
+        continue
+    base = baseline_statuses.get(k.id)
+    if isinstance(base, str) and base in skip_baseline:
+        continue
+    if status in ("applied", "partial", "pending_reboot"):
+        scope = "root" if k.requires_root else "user"
+        print(f"{k.id}\t{scope}")
 PY
 )"
 if [[ -n "$force_knobs" ]]; then
-  if command -v sudo >/dev/null 2>&1; then
-    while IFS= read -r kid; do
-      [[ -z "$kid" ]] && continue
-      sudo -E env PYTHONPATH="$REPO_ROOT" "$PYTHON" -m audioknob_gui.worker.cli force-reset-knob "$kid" || true
-    done <<< "$force_knobs"
-  else
-    echo "!! sudo not found; skipping force reset"
-  fi
+  while IFS=$'\t' read -r kid scope; do
+    [[ -z "$kid" ]] && continue
+    if [[ "$scope" == "root" ]]; then
+      if command -v sudo >/dev/null 2>&1; then
+        sudo -E env PYTHONPATH="$REPO_ROOT" "$PYTHON" -m audioknob_gui.worker.cli force-reset-knob "$kid" || true
+      else
+        echo "!! sudo not found; skipping force reset for $kid"
+      fi
+    else
+      "$PYTHON" -m audioknob_gui.worker.cli force-reset-knob "$kid" || true
+    fi
+  done <<< "$force_knobs"
 fi
 
 echo "==> Restoring user service defaults (best-effort)"

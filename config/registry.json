@@ -46,6 +46,9 @@
           "path": "/etc/security/limits.d/99-audioknob-gui.conf"
         }
       },
+      "depends_on": [
+        "audio_group_membership"
+      ],
       "requires_commands": [],
       "requires_groups": [
         "audio",
@@ -373,7 +376,7 @@
         "restore": true
       },
       "category": "stack",
-      "description": "Ensures QjackCtl Server command includes taskset pinning (default cores 0,1), -R, and -P90. Optional: change cores via Config. File: ~/.config/rncbc.org/QjackCtl.conf",
+      "description": "Ensures QjackCtl RT (Realtime=true, Priority=90) and CPU pinning (default cores 0,1). Updates the active preset (if any) and mirrors unscoped settings while preserving user presets, disables ServerConfig so GUI settings are used, and configures a QjackCtl PostStartupScript to re-pin JACK on start. Optional: change cores via Config. If JACK is running, CPU affinity is updated immediately; status checks also use live JACK RT threads when available.",
       "id": "qjackctl_server_prefix_rt",
       "impl": {
         "kind": "qjackctl_server_prefix",
@@ -458,7 +461,20 @@
             "tracker-miner-fs-3.service",
             "tracker-miner-fs.service",
             "tracker-extract-3.service",
-            "tracker-extract.service"
+            "tracker-extract.service",
+            "tracker-miner-rss-3.service",
+            "tracker-miner-rss.service",
+            "tracker-writeback-3.service",
+            "tracker-writeback.service",
+            "tracker-store.service",
+            "tracker-miner-apps-3.service",
+            "tracker-miner-apps.service",
+            "tracker3-miner-fs-3.service",
+            "tracker3-miner-fs.service",
+            "tracker3-miner-rss-3.service",
+            "tracker3-miner-rss.service",
+            "localsearch*.service",
+            "org.gnome.Localsearch*.service"
           ]
         }
       },

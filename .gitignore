@@ -28,3 +28,7 @@ Thumbs.db
 
 # Project specific
 *.log
+.cache/
+.home/
+.rpmbuild/
+.tmp/

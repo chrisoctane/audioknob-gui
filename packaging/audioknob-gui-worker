@@ -18,8 +18,17 @@ from pathlib import Path
 # For development: add repo root to path so we can import audioknob_gui
 # Set AUDIOKNOB_DEV_REPO=/path/to/repo for dev mode
 _DEV_REPO_PATH = os.environ.get("AUDIOKNOB_DEV_REPO", "")
-if _DEV_REPO_PATH and Path(_DEV_REPO_PATH).exists():
-    sys.path.insert(0, _DEV_REPO_PATH)
+if not _DEV_REPO_PATH:
+    dev_conf = Path("/etc/audioknob-gui/dev.conf")
+    if dev_conf.exists():
+        try:
+            _DEV_REPO_PATH = dev_conf.read_text().splitlines()[0].strip()
+        except OSError:
+            _DEV_REPO_PATH = ""
+if _DEV_REPO_PATH:
+    dev_repo = Path(_DEV_REPO_PATH)
+    if dev_repo.exists():
+        sys.path.insert(0, str(dev_repo))
 
 
 def main() -> int:

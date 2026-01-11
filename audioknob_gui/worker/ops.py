@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 import glob
+import os
 import subprocess
 import shlex
 from dataclasses import dataclass
+import fnmatch
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from audioknob_gui.core.diffutil import unified_diff
-from audioknob_gui.core.qjackctl import ensure_server_flags, read_config
+from audioknob_gui.core.paths import get_registry_path
+from audioknob_gui.core.qjackctl import (
+    build_post_start_script,
+    default_post_start_script_path,
+    normalize_cpu_cores,
+    read_config,
+)
 from audioknob_gui.core.runner import run
+from audioknob_gui.registry import Knob, load_registry
 
 
 # ============================================================================
@@ -25,20 +35,47 @@ class DistroInfo:
     kernel_cmdline_update_cmd: list[str]
 
 
+def read_os_release() -> dict[str, str]:
+    os_release: dict[str, str] = {}
+    try:
+        content = Path("/etc/os-release").read_text(encoding="utf-8")
+        for line in content.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                os_release[key] = value.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return os_release
+
+
+def resolve_cpupower_config_path(distro_id: str) -> str:
+    deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
+    primary = "/etc/default/cpufrequtils" if deb_like else "/etc/sysconfig/cpupower"
+    secondary = "/etc/sysconfig/cpupower" if deb_like else "/etc/default/cpufrequtils"
+    if Path(primary).exists():
+        return primary
+    if Path(secondary).exists():
+        return secondary
+    return primary
+
+
+def resolve_rtirq_config_path(distro_id: str) -> str:
+    deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
+    primary = "/etc/default/rtirq" if deb_like else "/etc/sysconfig/rtirq"
+    secondary = "/etc/sysconfig/rtirq" if deb_like else "/etc/default/rtirq"
+    if Path(primary).exists():
+        return primary
+    if Path(secondary).exists():
+        return secondary
+    return primary
+
+
 def detect_distro() -> DistroInfo:
     """Detect distribution and boot system configuration."""
     from audioknob_gui.platform.packages import which_command
     
     # Parse /etc/os-release
-    os_release = {}
-    try:
-        content = Path("/etc/os-release").read_text()
-        for line in content.splitlines():
-            if "=" in line:
-                key, _, value = line.partition("=")
-                os_release[key] = value.strip('"\'')
-    except Exception:
-        pass
+    os_release = read_os_release()
     
     distro_id = os_release.get("ID", "unknown")
     version_id = os_release.get("VERSION_ID", "")
@@ -135,6 +172,163 @@ def detect_distro() -> DistroInfo:
     )
 
 
+def _expand_path(path: str) -> str:
+    return str(Path(path).expanduser())
+
+
+def build_knob_paths(
+    *,
+    paths: dict[str, str],
+    distro: DistroInfo,
+    knobs: list[Knob] | None = None,
+) -> dict[str, dict[str, Any]]:
+    if knobs is None:
+        knobs = load_registry(get_registry_path())
+
+    out: dict[str, dict[str, Any]] = {}
+
+    for knob in knobs:
+        targets: list[dict[str, Any]] = []
+        kind = knob.impl.kind if knob.impl is not None else "none"
+        params = knob.impl.params if knob.impl is not None else {}
+
+        if kind in ("pam_limits_audio_group", "sysctl_conf", "udev_rule", "pipewire_conf", "qjackctl_server_prefix"):
+            path = str(params.get("path", ""))
+            targets.append({"type": "path", "value": _expand_path(path) if path else ""})
+            if kind == "qjackctl_server_prefix":
+                targets.append({"type": "path", "value": str(default_post_start_script_path())})
+        elif kind == "sysfs_glob_kv":
+            glob_pat = str(params.get("glob", ""))
+            if glob_pat:
+                targets.append({"type": "sysfs_glob", "value": glob_pat})
+        elif kind == "kernel_cmdline":
+            cmdline_path = paths.get("kernel_cmdline_file", "")
+            targets.append({"type": "kernel_cmdline_file", "value": cmdline_path})
+            param = str(params.get("param", ""))
+            if param:
+                targets.append({"type": "kernel_cmdline_param", "value": param})
+            if distro.kernel_cmdline_update_cmd:
+                targets.append({"type": "kernel_cmdline_update_cmd", "value": distro.kernel_cmdline_update_cmd})
+        elif kind == "systemd_unit_toggle":
+            unit = str(params.get("unit", ""))
+            targets.append({"type": "systemd_unit", "value": unit})
+        elif kind == "user_service_mask":
+            services = params.get("services")
+            if isinstance(services, list):
+                targets.append(
+                    {"type": "user_services", "value": [str(s) for s in services if s]}
+                )
+            else:
+                unit = str(params.get("unit", ""))
+                targets.append({"type": "user_service", "value": unit})
+        elif kind == "group_membership":
+            groups = params.get("groups")
+            if isinstance(groups, list):
+                targets.append({"type": "groups", "value": [str(g) for g in groups if g]})
+            elif knob.requires_groups:
+                targets.append({"type": "groups", "value": list(knob.requires_groups)})
+        elif kind == "baloo_disable":
+            targets.append({"type": "command", "value": "balooctl"})
+        elif kind == "read_only":
+            what = str(params.get("what", ""))
+            if what:
+                targets.append({"type": "read_only", "value": what})
+
+        if knob.id == "cpu_governor_performance_persistent":
+            cfg_path = paths.get("cpupower_config", "")
+            if cfg_path:
+                targets.append({"type": "path", "value": cfg_path})
+            targets.append({"type": "systemd_unit", "value": "cpupower.service"})
+
+        out[knob.id] = {"kind": kind, "targets": targets}
+
+    return out
+
+
+def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
+    """Build a distro-aware path profile for knob operations."""
+    distro = detect_distro()
+    os_release = read_os_release()
+    pretty_name = os_release.get("PRETTY_NAME", "")
+    version_id = os_release.get("VERSION_ID", "")
+
+    paths: dict[str, str] = {
+        "kernel_cmdline_file": distro.kernel_cmdline_file,
+        "cpupower_config": resolve_cpupower_config_path(distro.distro_id),
+        "rtirq_config": resolve_rtirq_config_path(distro.distro_id),
+        "pipewire_user_conf_dir": str(Path("~/.config/pipewire/pipewire.conf.d").expanduser()),
+        "pipewire_system_conf_dir": "/etc/pipewire/pipewire.conf.d",
+        "qjackctl_config": str(Path("~/.config/rncbc.org/QjackCtl.conf").expanduser()),
+        "limits_dir": "/etc/security/limits.d",
+        "sysctl_dir": "/etc/sysctl.d",
+        "udev_rules_dir": "/etc/udev/rules.d",
+    }
+
+    commands: dict[str, list[str]] = {
+        "kernel_cmdline_update": distro.kernel_cmdline_update_cmd,
+    }
+
+    try:
+        from audioknob_gui.platform.packages import resolve_package_commands
+        pkg_cmds = resolve_package_commands()
+        commands.update(
+            {
+                "package_install": pkg_cmds.get("install", []),
+                "package_remove": pkg_cmds.get("remove", []),
+                "package_reinstall": pkg_cmds.get("reinstall", []),
+                "package_query_owner": pkg_cmds.get("query_owner", []),
+            }
+        )
+    except Exception:
+        pass
+
+    def _check_path(path: str, *, expect_dir: bool) -> bool:
+        if not path:
+            return False
+        p = Path(path).expanduser()
+        return p.is_dir() if expect_dir else p.exists()
+
+    checks: dict[str, bool] = {
+        "kernel_cmdline_file": _check_path(paths["kernel_cmdline_file"], expect_dir=False),
+        "cpupower_config": _check_path(paths["cpupower_config"], expect_dir=False),
+        "rtirq_config": _check_path(paths["rtirq_config"], expect_dir=False),
+        "pipewire_user_conf_dir": _check_path(paths["pipewire_user_conf_dir"], expect_dir=True),
+        "pipewire_system_conf_dir": _check_path(paths["pipewire_system_conf_dir"], expect_dir=True),
+        "qjackctl_config": _check_path(paths["qjackctl_config"], expect_dir=False),
+        "limits_dir": _check_path(paths["limits_dir"], expect_dir=True),
+        "sysctl_dir": _check_path(paths["sysctl_dir"], expect_dir=True),
+        "udev_rules_dir": _check_path(paths["udev_rules_dir"], expect_dir=True),
+    }
+
+    notes: list[str] = []
+    if not paths["kernel_cmdline_file"]:
+        notes.append("No kernel cmdline file detected; kernel cmdline knobs may be unavailable.")
+    elif not checks["kernel_cmdline_file"]:
+        notes.append(f"Kernel cmdline file not found: {paths['kernel_cmdline_file']}")
+    if not checks["limits_dir"]:
+        notes.append(f"Limits.d directory missing: {paths['limits_dir']}")
+    if not checks["sysctl_dir"]:
+        notes.append(f"sysctl.d directory missing: {paths['sysctl_dir']}")
+    if not checks["udev_rules_dir"]:
+        notes.append(f"udev rules directory missing: {paths['udev_rules_dir']}")
+
+    knob_paths = build_knob_paths(paths=paths, distro=distro, knobs=knobs)
+
+    return {
+        "schema": 1,
+        "scanned_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "distro_id": distro.distro_id,
+        "version_id": version_id,
+        "pretty_name": pretty_name,
+        "boot_system": distro.boot_system,
+        "paths": paths,
+        "commands": commands,
+        "checks": checks,
+        "knob_paths": knob_paths,
+        "notes": notes,
+    }
+
+
 @dataclass(frozen=True)
 class FileChange:
     path: str
@@ -162,6 +356,161 @@ def _read_text(path: str) -> str:
         return Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""
+
+
+def _parse_cpu_list(spec: str) -> set[int]:
+    out: set[int] = set()
+    for part in str(spec).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start, _, end = part.partition("-")
+            try:
+                s = int(start)
+                e = int(end)
+            except ValueError:
+                continue
+            if e < s:
+                s, e = e, s
+            out.update(range(s, e + 1))
+        else:
+            try:
+                out.add(int(part))
+            except ValueError:
+                continue
+    return out
+
+
+def _find_pids_by_comm(name: str) -> list[int]:
+    pids: list[int] = []
+    proc = Path("/proc")
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            comm = (entry / "comm").read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        if comm == name:
+            pids.append(int(entry.name))
+    return pids
+
+
+def _read_proc_cpu_allowed_list(pid: int) -> str | None:
+    try:
+        text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+    except Exception:
+        return None
+    for line in text.splitlines():
+        if line.startswith("Cpus_allowed_list:"):
+            _, _, value = line.partition(":")
+            return value.strip()
+    return None
+
+
+def _list_task_ids(pid: int) -> list[int]:
+    tids: list[int] = []
+    task_dir = Path(f"/proc/{pid}/task")
+    try:
+        for entry in task_dir.iterdir():
+            if entry.name.isdigit():
+                tids.append(int(entry.name))
+    except Exception:
+        return []
+    return tids
+
+
+def _jackd_affinity_matches(expected_list: str) -> bool | None:
+    expected = _parse_cpu_list(expected_list)
+    if not expected:
+        return None
+    pids = _find_pids_by_comm("jackd")
+    if not pids:
+        return None
+    saw = False
+    for pid in pids:
+        allowed = _read_proc_cpu_allowed_list(pid)
+        if not allowed:
+            continue
+        allowed_set = _parse_cpu_list(allowed)
+        if not allowed_set:
+            continue
+        saw = True
+        if allowed_set == expected:
+            return True
+    if saw:
+        return False
+    return None
+
+
+def _jackd_rt_summary() -> dict[str, Any] | None:
+    pids = _find_pids_by_comm("jackd")
+    if not pids:
+        return None
+    total_threads = 0
+    rt_threads = 0
+    rt_priorities: list[int] = []
+    errors: list[str] = []
+    for pid in pids:
+        tids = _list_task_ids(pid)
+        if not tids:
+            tids = [pid]
+        total_threads += len(tids)
+        for tid in tids:
+            try:
+                policy = os.sched_getscheduler(tid)
+            except Exception as e:
+                errors.append(f"pid {pid} tid {tid}: {e}")
+                continue
+            if policy in (os.SCHED_FIFO, os.SCHED_RR):
+                rt_threads += 1
+                try:
+                    prio = os.sched_getparam(tid).sched_priority
+                except Exception:
+                    prio = None
+                if prio is not None:
+                    rt_priorities.append(prio)
+    return {
+        "pids": pids,
+        "total_threads": total_threads,
+        "rt_threads": rt_threads,
+        "rt_priorities": sorted(set(rt_priorities)),
+        "errors": errors,
+    }
+
+
+def apply_jackd_affinity(cpu_list: str) -> dict[str, Any]:
+    expected = _parse_cpu_list(cpu_list)
+    if not expected:
+        return {"status": "invalid_cpu_list", "expected": cpu_list}
+    pids = _find_pids_by_comm("jackd")
+    if not pids:
+        return {"status": "not_running", "expected": cpu_list}
+    errors: list[str] = []
+    task_counts: dict[int, int] = {}
+    for pid in pids:
+        tids = _list_task_ids(pid)
+        if not tids:
+            tids = [pid]
+        task_counts[pid] = len(tids)
+        for tid in tids:
+            try:
+                os.sched_setaffinity(tid, expected)
+            except Exception as e:
+                errors.append(f"pid {pid} tid {tid}: {e}")
+    runtime_ok = _jackd_affinity_matches(cpu_list)
+    status = "applied"
+    if runtime_ok is False or errors:
+        status = "partial"
+    return {
+        "status": status,
+        "expected": cpu_list,
+        "pids": pids,
+        "task_counts": task_counts,
+        "runtime_ok": runtime_ok,
+        "errors": errors,
+    }
 
 
 def _pam_limits_preview(params: dict[str, Any]) -> list[FileChange]:
@@ -223,7 +572,17 @@ def _sysfs_glob_preview(params: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
-    from audioknob_gui.core.qjackctl import ensure_server_has_flags, ensure_server_prefix
+    from audioknob_gui.core.qjackctl import (
+        build_post_start_script,
+        default_post_start_script_path,
+        ensure_server_has_flags,
+        ensure_server_prefix,
+        normalize_cpu_cores,
+        read_config,
+        update_config,
+    )
+    import configparser
+    import io
 
     path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
     path = Path(path_str).expanduser()
@@ -232,64 +591,85 @@ def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
     cpu_cores = params.get("cpu_cores")
     if cpu_cores is not None:
         cpu_cores = str(cpu_cores)
+    cpu_cores_norm = normalize_cpu_cores(cpu_cores) if cpu_cores is not None else None
 
+    post_startup_enabled = False
+    post_startup_shell = ""
+    post_script_path = default_post_start_script_path()
+    if cpu_cores_norm:
+        post_startup_enabled = True
+        post_startup_shell = str(post_script_path)
+
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    if path.exists():
+        cp.read(path, encoding="utf-8")
+    cfg = None
     try:
         cfg = read_config(path)
-        before_cmd = cfg.server_cmd or ""
-        before_prefix = cfg.server_prefix or ""
-        preset = cfg.def_preset or ""
     except Exception:
-        before_cmd = ""
-        before_prefix = ""
-        preset = "default"
-
+        cfg = None
+    before_cmd = (cfg.server_cmd if cfg is not None else None) or ""
+    before_prefix = (cfg.server_prefix if cfg is not None else None) or ""
     # Compute what the after command would be (without modifying file)
     after_cmd = ensure_server_has_flags(
         before_cmd or "jackd",
-        ensure_rt=ensure_rt,
-        ensure_priority=ensure_priority,
-        cpu_cores="" if cpu_cores is not None else None,
+        ensure_rt=False,
+        ensure_priority=False,
+        cpu_cores="",
     )
-    after_prefix = ensure_server_prefix(before_prefix, cpu_cores=cpu_cores)
+    after_prefix = ensure_server_prefix(before_prefix, cpu_cores="")
+    target_preset = None
+    if cfg is not None and cfg.def_preset:
+        target_preset = cfg.def_preset
 
     before = _read_text(str(path))
-    # Generate a realistic diff by finding and replacing the Server line
-    after_lines = before.splitlines() if before else []
-    server_key = f"{preset}\\Server=" if preset else "Server="
-    prefix_key = f"{preset}\\ServerPrefix=" if preset else "ServerPrefix="
-    found = False
-    prefix_found = False
-    for i, line in enumerate(after_lines):
-        if line.startswith(server_key):
-            after_lines[i] = f"{server_key}{after_cmd}"
-            found = True
-        if line.startswith(prefix_key):
-            after_lines[i] = f"{prefix_key}{after_prefix}"
-            prefix_found = True
-    if not found and preset:
-        # Add the line if missing
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{server_key}{after_cmd}")
-    if not prefix_found and preset:
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{prefix_key}{after_prefix}")
-    if not found and not preset:
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{server_key}{after_cmd}")
-    if not prefix_found and not preset:
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{prefix_key}{after_prefix}")
+    update_config(
+        cp,
+        preset=target_preset,
+        new_server_cmd=after_cmd,
+        server_prefix=after_prefix,
+        realtime=True if ensure_rt else None,
+        priority=90 if ensure_priority else None,
+        mirror_unscoped=True,
+        server_config_enabled=False,
+        post_startup_enabled=post_startup_enabled,
+        post_startup_shell=post_startup_shell,
+    )
 
-    after = "\n".join(after_lines)
-    if after and not after.endswith("\n"):
-        after += "\n"
+    out = io.StringIO()
+    cp.write(out, space_around_delimiters=False)
+    after = out.getvalue()
 
+    changes: list[FileChange] = []
     action = "modify" if path.exists() else "create"
-    return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after))]
+    if before != after:
+        changes.append(FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after)))
+
+    if cpu_cores_norm:
+        script_body = build_post_start_script(cpu_cores_norm)
+        script_before = _read_text(str(post_script_path))
+        if script_before != script_body:
+            script_action = "modify" if post_script_path.exists() else "create"
+            changes.append(
+                FileChange(
+                    path=str(post_script_path),
+                    action=script_action,
+                    diff=unified_diff(str(post_script_path), script_before, script_body),
+                )
+            )
+    else:
+        if post_script_path.exists():
+            script_before = _read_text(str(post_script_path))
+            changes.append(
+                FileChange(
+                    path=str(post_script_path),
+                    action="delete",
+                    diff=unified_diff(str(post_script_path), script_before, ""),
+                )
+            )
+
+    return changes
 
 
 def _udev_rule_preview(params: dict[str, Any]) -> list[FileChange]:
@@ -458,6 +838,7 @@ def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]],
     services = params.get("services", [])
     if isinstance(services, str):
         services = [services]
+    services = resolve_user_services(services)
     
     would_run: list[list[str]] = []
     notes: list[str] = []
@@ -473,24 +854,77 @@ def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]],
     return would_run, notes
 
 
-def user_unit_exists(unit: str) -> bool:
-    """Return True if a user systemd unit file exists."""
+def _list_user_units() -> set[str]:
+    units: set[str] = set()
+    user_paths = [
+        Path("~/.config/systemd/user").expanduser(),
+        Path("~/.local/share/systemd/user").expanduser(),
+        Path("/etc/systemd/user"),
+        Path("/usr/lib/systemd/user"),
+        Path("/lib/systemd/user"),
+    ]
+    for base in user_paths:
+        try:
+            if not base.exists():
+                continue
+            for p in base.glob("*.service"):
+                units.add(p.name)
+        except Exception:
+            continue
+
     try:
-        result = run(["systemctl", "--user", "list-unit-files", unit])
+        result = run(["systemctl", "--user", "list-unit-files", "--no-legend", "--no-pager"])
     except Exception:
-        return False
+        result = None
 
-    if result.returncode != 0:
-        return False
+    if result and result.returncode == 0:
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if parts:
+                units.add(parts[0])
 
-    for line in result.stdout.splitlines():
+    try:
+        live = run(["systemctl", "--user", "list-units", "--all", "--no-legend", "--no-pager"])
+    except Exception:
+        return units
+
+    if live.returncode != 0:
+        return units
+
+    for line in live.stdout.splitlines():
         line = line.strip()
-        if not line or line.startswith("UNIT FILE"):
+        if not line:
             continue
         parts = line.split()
-        if parts and parts[0] == unit:
-            return True
-    return False
+        if parts:
+            units.add(parts[0])
+    return units
+
+
+def resolve_user_services(services: list[str]) -> list[str]:
+    units = _list_user_units()
+    resolved: list[str] = []
+    for svc in services:
+        svc = str(svc).strip()
+        if not svc:
+            continue
+        if any(ch in svc for ch in ("*", "?", "[")):
+            matches = sorted(u for u in units if fnmatch.fnmatch(u, svc))
+            resolved.extend(matches)
+        elif svc in units:
+            resolved.append(svc)
+    return list(dict.fromkeys(resolved))
+
+
+def user_unit_exists(unit: str) -> bool:
+    """Return True if a user systemd unit file exists."""
+    unit = unit.strip()
+    if not unit:
+        return False
+    return unit in _list_user_units()
 
 
 def _baloo_disable_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
@@ -550,6 +984,19 @@ def preview(knob: Any, action: str) -> PreviewItem:
             would_write.extend(_sysfs_glob_preview(params))
         elif kind == "qjackctl_server_prefix":
             file_changes.extend(_qjackctl_server_prefix_preview(params))
+            notes.append("Quit QjackCtl before applying; it rewrites its config on exit.")
+            try:
+                path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
+                cfg = read_config(Path(path_str).expanduser())
+                if cfg.server_config_enabled:
+                    notes.append("QjackCtl ServerConfig is enabled; it will be disabled so GUI settings are used.")
+            except Exception:
+                pass
+            cpu_cores = params.get("cpu_cores")
+            if cpu_cores is not None:
+                cpu_cores = normalize_cpu_cores(str(cpu_cores))
+                if cpu_cores:
+                    notes.append(f"If JACK is running, its CPU affinity will be updated to {cpu_cores}.")
         elif kind == "udev_rule":
             file_changes.extend(_udev_rule_preview(params))
             notes.append("Requires udev reload: udevadm control --reload-rules && udevadm trigger")
@@ -851,6 +1298,7 @@ def check_knob_status(knob: Any) -> str:
         if not matches:
             return "not_applicable"
         applied_count = 0
+        saw_selector = False
         for p in matches:
             try:
                 content = Path(p).read_text(encoding="utf-8").strip()
@@ -863,6 +1311,7 @@ def check_knob_status(knob: Any) -> str:
                     match = re.search(r'\[([^\]]+)\]', content)
                     if match:
                         current = match.group(1)
+                        saw_selector = True
                 else:
                     # Plain value (no selector format)
                     current = content
@@ -883,17 +1332,9 @@ def check_knob_status(knob: Any) -> str:
             if base != "applied":
                 return base
 
-            def _read_os_release_id() -> str:
-                try:
-                    for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
-                        if line.startswith("ID="):
-                            return line.split("=", 1)[1].strip().strip('"').strip("'")
-                except Exception:
-                    pass
-                return ""
-
-            distro_id = _read_os_release_id()
-            cfg_path = "/etc/default/cpufrequtils" if distro_id in ("debian", "ubuntu", "linuxmint", "pop") else "/etc/sysconfig/cpupower"
+            os_release = read_os_release()
+            distro_id = os_release.get("ID", "")
+            cfg_path = resolve_cpupower_config_path(distro_id)
             cfg_ok = False
             try:
                 text = Path(cfg_path).read_text(encoding="utf-8")
@@ -922,41 +1363,72 @@ def check_knob_status(knob: Any) -> str:
             return "not_applied"
         try:
             cfg = read_config(path)
-            if not cfg.server_cmd:
-                return "not_applied"
             cmd = cfg.server_cmd or ""
-            prefix = cfg.server_prefix or ""
+            rt_cfg = cfg.realtime
+            prio_cfg = cfg.priority
+            if not cmd:
+                return "not_applied"
             tokens = cmd.split()
-            prefix_tokens = prefix.split()
             ensure_rt = bool(params.get("ensure_rt", True))
             ensure_prio = bool(params.get("ensure_priority", False))
             cpu_cores = params.get("cpu_cores")
             if cpu_cores is not None:
-                cpu_cores = str(cpu_cores)
+                cpu_cores = normalize_cpu_cores(str(cpu_cores))
+
+            rt_summary = _jackd_rt_summary()
+            runtime_rt = None
+            runtime_prio = None
+            expected_prio = 90 if ensure_prio else None
+            if rt_summary is not None:
+                runtime_rt = rt_summary["rt_threads"] > 0
+                if ensure_prio:
+                    if rt_summary["rt_priorities"]:
+                        runtime_prio = expected_prio in rt_summary["rt_priorities"]
+                    else:
+                        runtime_prio = False
 
             rt_ok = True
             if ensure_rt:
-                rt_ok = any(t in ("-R", "--realtime") or t.startswith("--realtime") for t in tokens)
+                if runtime_rt is not None:
+                    rt_ok = runtime_rt
+                else:
+                    rt_ok = (
+                        any(t in ("-R", "--realtime") or t.startswith("--realtime") for t in tokens)
+                        or rt_cfg is True
+                    )
 
             prio_ok = True
             if ensure_prio:
-                prio_ok = any(t.startswith("-P") for t in tokens)
+                if runtime_prio is not None:
+                    prio_ok = runtime_prio
+                else:
+                    prio_ok = any(t.startswith("-P") for t in tokens) or prio_cfg == expected_prio
 
             pin_ok = True
             if cpu_cores is not None:
+                config_pin_ok = True
                 if cpu_cores == "":
-                    pin_ok = "taskset" not in tokens and "taskset" not in prefix_tokens
+                    config_pin_ok = not cfg.post_startup_enabled and not cfg.post_startup_shell
                 else:
+                    expected_script = build_post_start_script(cpu_cores)
+                    expected_path = str(default_post_start_script_path())
+                    config_pin_ok = cfg.post_startup_enabled and cfg.post_startup_shell == expected_path
+                    if config_pin_ok:
+                        try:
+                            script_text = Path(expected_path).read_text(encoding="utf-8")
+                            config_pin_ok = script_text == expected_script
+                        except Exception:
+                            config_pin_ok = False
+                runtime_ok = None
+                if cpu_cores:
+                    runtime_ok = _jackd_affinity_matches(cpu_cores)
+                pin_ok = config_pin_ok
+                if runtime_ok is False:
                     pin_ok = False
-                    for parts in (prefix_tokens, tokens):
-                        for i, tok in enumerate(parts):
-                            if tok == "taskset" and i + 2 < len(parts) and parts[i + 1] == "-c":
-                                pin_ok = parts[i + 2] == cpu_cores
-                                break
-                        if pin_ok:
-                            break
 
             if rt_ok and prio_ok and pin_ok:
+                if cfg.server_config_enabled:
+                    return "partial"
                 return "applied"
             if rt_ok or prio_ok or pin_ok:
                 return "partial"
@@ -1077,7 +1549,7 @@ def check_knob_status(knob: Any) -> str:
         if not services:
             return "unknown"
 
-        existing = [svc for svc in services if user_unit_exists(svc)]
+        existing = resolve_user_services(services)
         if not existing:
             return "not_applicable"
 
