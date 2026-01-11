@@ -376,7 +376,7 @@
         "restore": true
       },
       "category": "stack",
-      "description": "Ensures QjackCtl Server command includes taskset pinning (default cores 0,1), -R, and -P90. Optional: change cores via Config. File: ~/.config/rncbc.org/QjackCtl.conf",
+      "description": "Ensures QjackCtl RT (Realtime=true, Priority=90) and CPU pinning (default cores 0,1). Updates the active preset (if any) and mirrors unscoped settings while preserving user presets, disables ServerConfig so GUI settings are used, and configures a QjackCtl PostStartupScript to re-pin JACK on start. Optional: change cores via Config. If JACK is running, CPU affinity is updated immediately; status checks also use live JACK RT threads when available.",
       "id": "qjackctl_server_prefix_rt",
       "impl": {
         "kind": "qjackctl_server_prefix",

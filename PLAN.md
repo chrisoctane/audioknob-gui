@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.5.1)
+### Install on openSUSE Tumbleweed (RPM, v0.3.6)
 
-For v0.3.5.1 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.3.6 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -79,6 +79,11 @@ python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 ```
 
+### QjackCtl RT behavior
+
+- Applying **QjackCtl RT** updates the QjackCtl config (active preset if set, plus unscoped mirror), sets **Realtime=true** and **Priority=90**, preserves existing presets, disables **ServerConfig**, and configures a **PostStartupScript** so JACK is re-pinned on each start. It also attempts to pin any running `jackd` process immediately. If JACK is not running, the CPU pinning takes effect the next time you start it.
+- **Important:** Quit QjackCtl before applying this knob; QjackCtl rewrites its config on exit.
+
 ### Logs (what the app did and where it failed)
 
 - GUI: `~/.local/state/audioknob-gui/logs/gui.log`
@@ -96,7 +101,7 @@ On first GUI launch, the app records the detected distro, package commands, and
 per-knob locations in `~/.local/state/audioknob-gui/state.json`. This confirms
 distro-specific paths (e.g., kernel cmdline handling on Tumbleweed vs
 Ubuntu/Fedora) and ensures each knob has a resolved location entry. If the file
-is removed, the schema changes, or the distro changes, the scan runs again.
+is removed, the schema changes, or the distro/boot system changes, the scan runs again.
 
 ### Baseline state capture (first run)
 
@@ -269,7 +274,7 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Applying PipeWire knobs restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying PipeWire knobs restarts PipeWire services automatically.
 
 ---
 

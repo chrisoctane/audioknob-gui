@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import os
 import subprocess
 import shlex
 from dataclasses import dataclass
@@ -11,7 +12,12 @@ from typing import Any
 
 from audioknob_gui.core.diffutil import unified_diff
 from audioknob_gui.core.paths import get_registry_path
-from audioknob_gui.core.qjackctl import ensure_server_flags, read_config
+from audioknob_gui.core.qjackctl import (
+    build_post_start_script,
+    default_post_start_script_path,
+    normalize_cpu_cores,
+    read_config,
+)
 from audioknob_gui.core.runner import run
 from audioknob_gui.registry import Knob, load_registry
 
@@ -189,6 +195,8 @@ def build_knob_paths(
         if kind in ("pam_limits_audio_group", "sysctl_conf", "udev_rule", "pipewire_conf", "qjackctl_server_prefix"):
             path = str(params.get("path", ""))
             targets.append({"type": "path", "value": _expand_path(path) if path else ""})
+            if kind == "qjackctl_server_prefix":
+                targets.append({"type": "path", "value": str(default_post_start_script_path())})
         elif kind == "sysfs_glob_kv":
             glob_pat = str(params.get("glob", ""))
             if glob_pat:
@@ -350,6 +358,161 @@ def _read_text(path: str) -> str:
         return ""
 
 
+def _parse_cpu_list(spec: str) -> set[int]:
+    out: set[int] = set()
+    for part in str(spec).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start, _, end = part.partition("-")
+            try:
+                s = int(start)
+                e = int(end)
+            except ValueError:
+                continue
+            if e < s:
+                s, e = e, s
+            out.update(range(s, e + 1))
+        else:
+            try:
+                out.add(int(part))
+            except ValueError:
+                continue
+    return out
+
+
+def _find_pids_by_comm(name: str) -> list[int]:
+    pids: list[int] = []
+    proc = Path("/proc")
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            comm = (entry / "comm").read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        if comm == name:
+            pids.append(int(entry.name))
+    return pids
+
+
+def _read_proc_cpu_allowed_list(pid: int) -> str | None:
+    try:
+        text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+    except Exception:
+        return None
+    for line in text.splitlines():
+        if line.startswith("Cpus_allowed_list:"):
+            _, _, value = line.partition(":")
+            return value.strip()
+    return None
+
+
+def _list_task_ids(pid: int) -> list[int]:
+    tids: list[int] = []
+    task_dir = Path(f"/proc/{pid}/task")
+    try:
+        for entry in task_dir.iterdir():
+            if entry.name.isdigit():
+                tids.append(int(entry.name))
+    except Exception:
+        return []
+    return tids
+
+
+def _jackd_affinity_matches(expected_list: str) -> bool | None:
+    expected = _parse_cpu_list(expected_list)
+    if not expected:
+        return None
+    pids = _find_pids_by_comm("jackd")
+    if not pids:
+        return None
+    saw = False
+    for pid in pids:
+        allowed = _read_proc_cpu_allowed_list(pid)
+        if not allowed:
+            continue
+        allowed_set = _parse_cpu_list(allowed)
+        if not allowed_set:
+            continue
+        saw = True
+        if allowed_set == expected:
+            return True
+    if saw:
+        return False
+    return None
+
+
+def _jackd_rt_summary() -> dict[str, Any] | None:
+    pids = _find_pids_by_comm("jackd")
+    if not pids:
+        return None
+    total_threads = 0
+    rt_threads = 0
+    rt_priorities: list[int] = []
+    errors: list[str] = []
+    for pid in pids:
+        tids = _list_task_ids(pid)
+        if not tids:
+            tids = [pid]
+        total_threads += len(tids)
+        for tid in tids:
+            try:
+                policy = os.sched_getscheduler(tid)
+            except Exception as e:
+                errors.append(f"pid {pid} tid {tid}: {e}")
+                continue
+            if policy in (os.SCHED_FIFO, os.SCHED_RR):
+                rt_threads += 1
+                try:
+                    prio = os.sched_getparam(tid).sched_priority
+                except Exception:
+                    prio = None
+                if prio is not None:
+                    rt_priorities.append(prio)
+    return {
+        "pids": pids,
+        "total_threads": total_threads,
+        "rt_threads": rt_threads,
+        "rt_priorities": sorted(set(rt_priorities)),
+        "errors": errors,
+    }
+
+
+def apply_jackd_affinity(cpu_list: str) -> dict[str, Any]:
+    expected = _parse_cpu_list(cpu_list)
+    if not expected:
+        return {"status": "invalid_cpu_list", "expected": cpu_list}
+    pids = _find_pids_by_comm("jackd")
+    if not pids:
+        return {"status": "not_running", "expected": cpu_list}
+    errors: list[str] = []
+    task_counts: dict[int, int] = {}
+    for pid in pids:
+        tids = _list_task_ids(pid)
+        if not tids:
+            tids = [pid]
+        task_counts[pid] = len(tids)
+        for tid in tids:
+            try:
+                os.sched_setaffinity(tid, expected)
+            except Exception as e:
+                errors.append(f"pid {pid} tid {tid}: {e}")
+    runtime_ok = _jackd_affinity_matches(cpu_list)
+    status = "applied"
+    if runtime_ok is False or errors:
+        status = "partial"
+    return {
+        "status": status,
+        "expected": cpu_list,
+        "pids": pids,
+        "task_counts": task_counts,
+        "runtime_ok": runtime_ok,
+        "errors": errors,
+    }
+
+
 def _pam_limits_preview(params: dict[str, Any]) -> list[FileChange]:
     path = str(params["path"])
     wanted_lines = [str(x) for x in params.get("lines", [])]
@@ -409,7 +572,17 @@ def _sysfs_glob_preview(params: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
-    from audioknob_gui.core.qjackctl import ensure_server_has_flags, ensure_server_prefix
+    from audioknob_gui.core.qjackctl import (
+        build_post_start_script,
+        default_post_start_script_path,
+        ensure_server_has_flags,
+        ensure_server_prefix,
+        normalize_cpu_cores,
+        read_config,
+        update_config,
+    )
+    import configparser
+    import io
 
     path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
     path = Path(path_str).expanduser()
@@ -418,64 +591,85 @@ def _qjackctl_server_prefix_preview(params: dict[str, Any]) -> list[FileChange]:
     cpu_cores = params.get("cpu_cores")
     if cpu_cores is not None:
         cpu_cores = str(cpu_cores)
+    cpu_cores_norm = normalize_cpu_cores(cpu_cores) if cpu_cores is not None else None
 
+    post_startup_enabled = False
+    post_startup_shell = ""
+    post_script_path = default_post_start_script_path()
+    if cpu_cores_norm:
+        post_startup_enabled = True
+        post_startup_shell = str(post_script_path)
+
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    if path.exists():
+        cp.read(path, encoding="utf-8")
+    cfg = None
     try:
         cfg = read_config(path)
-        before_cmd = cfg.server_cmd or ""
-        before_prefix = cfg.server_prefix or ""
-        preset = cfg.def_preset or ""
     except Exception:
-        before_cmd = ""
-        before_prefix = ""
-        preset = "default"
-
+        cfg = None
+    before_cmd = (cfg.server_cmd if cfg is not None else None) or ""
+    before_prefix = (cfg.server_prefix if cfg is not None else None) or ""
     # Compute what the after command would be (without modifying file)
     after_cmd = ensure_server_has_flags(
         before_cmd or "jackd",
-        ensure_rt=ensure_rt,
-        ensure_priority=ensure_priority,
-        cpu_cores="" if cpu_cores is not None else None,
+        ensure_rt=False,
+        ensure_priority=False,
+        cpu_cores="",
     )
-    after_prefix = ensure_server_prefix(before_prefix, cpu_cores=cpu_cores)
+    after_prefix = ensure_server_prefix(before_prefix, cpu_cores="")
+    target_preset = None
+    if cfg is not None and cfg.def_preset:
+        target_preset = cfg.def_preset
 
     before = _read_text(str(path))
-    # Generate a realistic diff by finding and replacing the Server line
-    after_lines = before.splitlines() if before else []
-    server_key = f"{preset}\\Server=" if preset else "Server="
-    prefix_key = f"{preset}\\ServerPrefix=" if preset else "ServerPrefix="
-    found = False
-    prefix_found = False
-    for i, line in enumerate(after_lines):
-        if line.startswith(server_key):
-            after_lines[i] = f"{server_key}{after_cmd}"
-            found = True
-        if line.startswith(prefix_key):
-            after_lines[i] = f"{prefix_key}{after_prefix}"
-            prefix_found = True
-    if not found and preset:
-        # Add the line if missing
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{server_key}{after_cmd}")
-    if not prefix_found and preset:
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{prefix_key}{after_prefix}")
-    if not found and not preset:
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{server_key}{after_cmd}")
-    if not prefix_found and not preset:
-        if "[Settings]" not in after_lines:
-            after_lines.append("[Settings]")
-        after_lines.append(f"{prefix_key}{after_prefix}")
+    update_config(
+        cp,
+        preset=target_preset,
+        new_server_cmd=after_cmd,
+        server_prefix=after_prefix,
+        realtime=True if ensure_rt else None,
+        priority=90 if ensure_priority else None,
+        mirror_unscoped=True,
+        server_config_enabled=False,
+        post_startup_enabled=post_startup_enabled,
+        post_startup_shell=post_startup_shell,
+    )
 
-    after = "\n".join(after_lines)
-    if after and not after.endswith("\n"):
-        after += "\n"
+    out = io.StringIO()
+    cp.write(out, space_around_delimiters=False)
+    after = out.getvalue()
 
+    changes: list[FileChange] = []
     action = "modify" if path.exists() else "create"
-    return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after))]
+    if before != after:
+        changes.append(FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after)))
+
+    if cpu_cores_norm:
+        script_body = build_post_start_script(cpu_cores_norm)
+        script_before = _read_text(str(post_script_path))
+        if script_before != script_body:
+            script_action = "modify" if post_script_path.exists() else "create"
+            changes.append(
+                FileChange(
+                    path=str(post_script_path),
+                    action=script_action,
+                    diff=unified_diff(str(post_script_path), script_before, script_body),
+                )
+            )
+    else:
+        if post_script_path.exists():
+            script_before = _read_text(str(post_script_path))
+            changes.append(
+                FileChange(
+                    path=str(post_script_path),
+                    action="delete",
+                    diff=unified_diff(str(post_script_path), script_before, ""),
+                )
+            )
+
+    return changes
 
 
 def _udev_rule_preview(params: dict[str, Any]) -> list[FileChange]:
@@ -790,6 +984,19 @@ def preview(knob: Any, action: str) -> PreviewItem:
             would_write.extend(_sysfs_glob_preview(params))
         elif kind == "qjackctl_server_prefix":
             file_changes.extend(_qjackctl_server_prefix_preview(params))
+            notes.append("Quit QjackCtl before applying; it rewrites its config on exit.")
+            try:
+                path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
+                cfg = read_config(Path(path_str).expanduser())
+                if cfg.server_config_enabled:
+                    notes.append("QjackCtl ServerConfig is enabled; it will be disabled so GUI settings are used.")
+            except Exception:
+                pass
+            cpu_cores = params.get("cpu_cores")
+            if cpu_cores is not None:
+                cpu_cores = normalize_cpu_cores(str(cpu_cores))
+                if cpu_cores:
+                    notes.append(f"If JACK is running, its CPU affinity will be updated to {cpu_cores}.")
         elif kind == "udev_rule":
             file_changes.extend(_udev_rule_preview(params))
             notes.append("Requires udev reload: udevadm control --reload-rules && udevadm trigger")
@@ -1120,9 +1327,6 @@ def check_knob_status(knob: Any) -> str:
         else:
             base = "not_applied"
 
-        if base == "applied" and knob.id == "thp_mode_madvise" and saw_selector:
-            return "sys_default"
-
         # Special case: persistent CPU governor should also be persisted in cpupower config + service.
         if knob.id == "cpu_governor_performance_persistent":
             if base != "applied":
@@ -1159,41 +1363,72 @@ def check_knob_status(knob: Any) -> str:
             return "not_applied"
         try:
             cfg = read_config(path)
-            if not cfg.server_cmd:
-                return "not_applied"
             cmd = cfg.server_cmd or ""
-            prefix = cfg.server_prefix or ""
+            rt_cfg = cfg.realtime
+            prio_cfg = cfg.priority
+            if not cmd:
+                return "not_applied"
             tokens = cmd.split()
-            prefix_tokens = prefix.split()
             ensure_rt = bool(params.get("ensure_rt", True))
             ensure_prio = bool(params.get("ensure_priority", False))
             cpu_cores = params.get("cpu_cores")
             if cpu_cores is not None:
-                cpu_cores = str(cpu_cores)
+                cpu_cores = normalize_cpu_cores(str(cpu_cores))
+
+            rt_summary = _jackd_rt_summary()
+            runtime_rt = None
+            runtime_prio = None
+            expected_prio = 90 if ensure_prio else None
+            if rt_summary is not None:
+                runtime_rt = rt_summary["rt_threads"] > 0
+                if ensure_prio:
+                    if rt_summary["rt_priorities"]:
+                        runtime_prio = expected_prio in rt_summary["rt_priorities"]
+                    else:
+                        runtime_prio = False
 
             rt_ok = True
             if ensure_rt:
-                rt_ok = any(t in ("-R", "--realtime") or t.startswith("--realtime") for t in tokens)
+                if runtime_rt is not None:
+                    rt_ok = runtime_rt
+                else:
+                    rt_ok = (
+                        any(t in ("-R", "--realtime") or t.startswith("--realtime") for t in tokens)
+                        or rt_cfg is True
+                    )
 
             prio_ok = True
             if ensure_prio:
-                prio_ok = any(t.startswith("-P") for t in tokens)
+                if runtime_prio is not None:
+                    prio_ok = runtime_prio
+                else:
+                    prio_ok = any(t.startswith("-P") for t in tokens) or prio_cfg == expected_prio
 
             pin_ok = True
             if cpu_cores is not None:
+                config_pin_ok = True
                 if cpu_cores == "":
-                    pin_ok = "taskset" not in tokens and "taskset" not in prefix_tokens
+                    config_pin_ok = not cfg.post_startup_enabled and not cfg.post_startup_shell
                 else:
+                    expected_script = build_post_start_script(cpu_cores)
+                    expected_path = str(default_post_start_script_path())
+                    config_pin_ok = cfg.post_startup_enabled and cfg.post_startup_shell == expected_path
+                    if config_pin_ok:
+                        try:
+                            script_text = Path(expected_path).read_text(encoding="utf-8")
+                            config_pin_ok = script_text == expected_script
+                        except Exception:
+                            config_pin_ok = False
+                runtime_ok = None
+                if cpu_cores:
+                    runtime_ok = _jackd_affinity_matches(cpu_cores)
+                pin_ok = config_pin_ok
+                if runtime_ok is False:
                     pin_ok = False
-                    for parts in (prefix_tokens, tokens):
-                        for i, tok in enumerate(parts):
-                            if tok == "taskset" and i + 2 < len(parts) and parts[i + 1] == "-c":
-                                pin_ok = parts[i + 2] == cpu_cores
-                                break
-                        if pin_ok:
-                            break
 
             if rt_ok and prio_ok and pin_ok:
+                if cfg.server_config_enabled:
+                    return "partial"
                 return "applied"
             if rt_ok or prio_ok or pin_ok:
                 return "partial"

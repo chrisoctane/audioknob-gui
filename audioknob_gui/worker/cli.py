@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -27,6 +28,7 @@ from audioknob_gui.core.transaction import (
 from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
 from audioknob_gui.worker.ops import (
+    apply_jackd_affinity,
     check_knob_status,
     preview,
     restore_sysfs,
@@ -80,6 +82,22 @@ def _load_gui_state() -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _is_qjackctl_running() -> bool:
+    if shutil.which("pgrep"):
+        for name in ("qjackctl", "qjackctl6"):
+            r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True)
+            if r.returncode == 0:
+                return True
+    r = subprocess.run(["ps", "-eo", "comm"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    for line in r.stdout.splitlines():
+        cmd = line.strip()
+        if cmd in ("qjackctl", "qjackctl6"):
+            return True
+    return False
 
 
 def _qjackctl_cpu_cores_override(state: dict) -> str | None:
@@ -228,6 +246,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
     backups: list[dict] = []
     effects: list[dict] = []
     applied: list[str] = []
+    warnings: list[str] = []
 
     for kid in args.knob:
         logger.info("apply-user knob=%s", kid)
@@ -245,21 +264,85 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         params = k.impl.params
 
         if kind == "qjackctl_server_prefix":
+            if _is_qjackctl_running():
+                raise SystemExit(
+                    "QjackCtl is running. Quit QjackCtl before applying QjackCtl RT so changes persist."
+                )
             path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
             path = Path(path_str).expanduser()
             _backup_once(tx, backups, str(path))
 
-            from audioknob_gui.core.qjackctl import ensure_server_flags
+            from audioknob_gui.core.qjackctl import (
+                build_post_start_script,
+                default_post_start_script_path,
+                ensure_server_flags,
+                normalize_cpu_cores,
+                read_config,
+            )
 
             ensure_rt = bool(params.get("ensure_rt", True))
             ensure_priority = bool(params.get("ensure_priority", False))
             cpu_cores = qjackctl_override if qjackctl_override is not None else params.get("cpu_cores")
             if cpu_cores is not None:
                 cpu_cores = str(cpu_cores)
+            cpu_cores_norm = normalize_cpu_cores(cpu_cores) if cpu_cores is not None else None
+
+            post_startup_enabled = False
+            post_startup_shell = ""
+            post_script_path = default_post_start_script_path()
+            if cpu_cores_norm:
+                script_body = build_post_start_script(cpu_cores_norm)
+                _backup_once(tx, backups, str(post_script_path))
+                post_script_path.parent.mkdir(parents=True, exist_ok=True)
+                post_script_path.write_text(script_body, encoding="utf-8")
+                try:
+                    os.chmod(post_script_path, 0o700)
+                except Exception:
+                    pass
+                post_startup_enabled = True
+                post_startup_shell = str(post_script_path)
+            else:
+                if post_script_path.exists():
+                    _backup_once(tx, backups, str(post_script_path))
+                    try:
+                        post_script_path.unlink()
+                    except Exception:
+                        pass
+                post_startup_enabled = False
+                post_startup_shell = ""
+
+            try:
+                cfg = read_config(path)
+            except Exception:
+                cfg = None
+
+            if cfg is not None and cfg.server_config_enabled:
+                warnings.append(
+                    "QjackCtl ServerConfig was enabled and has been disabled so the GUI settings are used."
+                )
+                logger.info("qjackctl ServerConfig disabled path=%s", path)
 
             before, after = ensure_server_flags(
-                path, ensure_rt=ensure_rt, ensure_priority=ensure_priority, cpu_cores=cpu_cores
+                path,
+                ensure_rt=ensure_rt,
+                ensure_priority=ensure_priority,
+                cpu_cores="",
+                mirror_unscoped=True,
+                server_config_enabled=False,
+                post_startup_enabled=post_startup_enabled,
+                post_startup_shell=post_startup_shell,
             )
+            if cpu_cores_norm:
+                try:
+                    result = apply_jackd_affinity(cpu_cores_norm)
+                    effects.append({"kind": "jackd_affinity", "result": result})
+                    if result.get("status") == "not_running":
+                        warnings.append("JACK is not running; CPU pinning will apply the next time you start it.")
+                    elif result.get("status") in ("partial", "invalid_cpu_list"):
+                        warnings.append("Failed to update running jackd CPU affinity; see logs for details.")
+                except Exception as e:
+                    effects.append({"kind": "jackd_affinity", "error": str(e)})
+                    warnings.append("Failed to update running jackd CPU affinity; see logs for details.")
 
         elif kind == "pipewire_conf":
             import subprocess
@@ -385,20 +468,28 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         "backups": backups,
         "effects": effects,
     }
+    if warnings:
+        manifest["warnings"] = warnings
     write_manifest(tx, manifest)
+    audit_payload = {
+        "txid": tx.txid,
+        "applied": applied,
+        "backups": backups,
+        "effects": effects,
+        "manifest": str(tx.root / "manifest.json"),
+    }
+    if warnings:
+        audit_payload["warnings"] = warnings
     _log_audit_event(
         "apply-user",
-        {
-            "txid": tx.txid,
-            "applied": applied,
-            "backups": backups,
-            "effects": effects,
-            "manifest": str(tx.root / "manifest.json"),
-        },
+        audit_payload,
     )
 
     logger.info("apply-user done txid=%s applied=%s", tx.txid, ",".join(applied))
-    print(json.dumps({"schema": 1, "txid": tx.txid, "applied": applied}, indent=2))
+    result = {"schema": 1, "txid": tx.txid, "applied": applied}
+    if warnings:
+        result["warnings"] = warnings
+    print(json.dumps(result, indent=2))
     return 0
 
 

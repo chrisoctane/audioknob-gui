@@ -1341,6 +1341,8 @@ def main() -> int:
             dialog.exec()
 
         def _ensure_system_profile(self) -> None:
+            if not self._system_profile_needs_scan():
+                return
             try:
                 from audioknob_gui.worker.ops import scan_system_profile
                 profile = scan_system_profile(self.registry)
@@ -1353,6 +1355,26 @@ def main() -> int:
                 )
             except Exception as exc:
                 _get_gui_logger().warning("System profile scan failed: %s", exc)
+
+        def _system_profile_needs_scan(self) -> bool:
+            profile = self.state.get("system_profile")
+            if not isinstance(profile, dict) or not profile:
+                return True
+            if profile.get("schema") != 1:
+                return True
+            try:
+                from audioknob_gui.worker.ops import detect_distro
+            except Exception:
+                return True
+            try:
+                distro = detect_distro()
+            except Exception:
+                return True
+            if profile.get("distro_id") != distro.distro_id:
+                return True
+            if profile.get("boot_system") != distro.boot_system:
+                return True
+            return False
 
         def _build_dependency_index(self) -> dict[str, list[str]]:
             index: dict[str, list[str]] = {}
@@ -1668,6 +1690,8 @@ def main() -> int:
                 base = baseline.get(knob.id)
                 if base is None:
                     continue
+                if base in ("unknown", "not_applicable"):
+                    continue
                 tx_time = tx_times.get(knob.id)
                 if tx_time is not None and baseline_ts is not None and baseline_ts >= tx_time:
                     continue
@@ -1799,71 +1823,12 @@ def main() -> int:
                     return True
             return False
 
-        def _qjackctl_has_preset(self, path: Path) -> bool:
-            from audioknob_gui.core.qjackctl import read_config
-
-            if not path.exists():
-                return False
-            try:
-                cfg = read_config(path)
-            except Exception:
-                return False
-            return bool(cfg.def_preset)
-
         def _prime_qjackctl_preset(self) -> None:
             logger = _get_gui_logger()
             path = Path("~/.config/rncbc.org/QjackCtl.conf").expanduser()
-            if self._qjackctl_has_preset(path):
+            if path.exists():
                 return
-
-            exe = shutil.which("qjackctl") or shutil.which("qjackctl6")
-            if exe:
-                env = os.environ.copy()
-                if "QT_QPA_PLATFORM" not in env:
-                    env["QT_QPA_PLATFORM"] = "minimal"
-                cmd = [exe, "-s"]
-                try:
-                    p = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        env=env,
-                    )
-                except Exception as e:
-                    logger.info("qjackctl launch failed error=%s", e)
-                else:
-                    try:
-                        deadline = time.monotonic() + 5.0
-                        while time.monotonic() < deadline:
-                            if self._qjackctl_has_preset(path):
-                                return
-                            time.sleep(0.2)
-                    finally:
-                        try:
-                            p.terminate()
-                        except Exception:
-                            pass
-                        try:
-                            p.wait(timeout=2)
-                        except Exception:
-                            try:
-                                p.kill()
-                            except Exception:
-                                pass
-
-                if self._qjackctl_has_preset(path):
-                    return
-
-            try:
-                from audioknob_gui.core.qjackctl import read_config, write_config_with_server_update
-
-                cfg = read_config(path)
-                server_cmd = cfg.server_cmd or "jackd"
-                server_prefix = cfg.server_prefix or ""
-                write_config_with_server_update(path, "default", server_cmd, server_prefix=server_prefix)
-                logger.info("created default qjackctl preset")
-            except Exception as e:
-                logger.info("failed to create default qjackctl preset error=%s", e)
+            logger.info("qjackctl config missing; will be created on apply")
 
         def _update_reboot_banner(self) -> None:
             needs_reboot = any(v == "pending_reboot" for v in self._knob_statuses.values())
@@ -2302,7 +2267,7 @@ def main() -> int:
 
                     # Config column: CPU core selection
                     cfg_btn = self._make_action_button("Cores")
-                    cfg_btn.setToolTip("Configure CPU cores for taskset")
+                    cfg_btn.setToolTip("Configure CPU cores for pinning")
                     cfg_btn.setFocusPolicy(Qt.NoFocus)
                     cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
                     self._install_hover_tracking(cfg_btn, r)
@@ -3113,8 +3078,8 @@ def main() -> int:
                     extra_html += "<hr/><p><b>Last jitter test:</b> not run yet.</p>"
             if k.id == "qjackctl_server_prefix_rt" and self._is_process_running(["qjackctl", "qjackctl6"]):
                 extra_html += (
-                    "<hr/><p><b>Note:</b> QjackCtl reads its config on launch. "
-                    "Quit and reopen QjackCtl to refresh the ServerPrefix in the UI.</p>"
+                    "<hr/><p><b>Note:</b> Quit QjackCtl before applying this knob. "
+                    "QjackCtl rewrites its config on exit.</p>"
                 )
 
             html = f"""
@@ -3187,6 +3152,67 @@ def main() -> int:
                         return True
                 return False
 
+            def _find_pids_by_comm(name: str) -> list[int]:
+                pids: list[int] = []
+                proc = Path("/proc")
+                for entry in proc.iterdir():
+                    if not entry.name.isdigit():
+                        continue
+                    try:
+                        comm = (entry / "comm").read_text(encoding="utf-8").strip()
+                    except Exception:
+                        continue
+                    if comm == name:
+                        pids.append(int(entry.name))
+                return pids
+
+            def _read_proc_cmdline(pid: int) -> str:
+                try:
+                    raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+                except Exception:
+                    return ""
+                return " ".join(x for x in raw.decode("utf-8", errors="replace").split("\0") if x)
+
+            def _read_proc_cpu_allowed_list(pid: int) -> str | None:
+                try:
+                    text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+                except Exception:
+                    return None
+                for line in text.splitlines():
+                    if line.startswith("Cpus_allowed_list:"):
+                        _, _, value = line.partition(":")
+                        return value.strip()
+                return None
+
+            def _read_jackd_rt_summary(pids: list[int]) -> tuple[int, int, list[int]]:
+                total_threads = 0
+                rt_threads = 0
+                rt_priorities: list[int] = []
+                for pid in pids:
+                    task_dir = Path(f"/proc/{pid}/task")
+                    try:
+                        entries = list(task_dir.iterdir())
+                    except Exception:
+                        continue
+                    for entry in entries:
+                        if not entry.name.isdigit():
+                            continue
+                        total_threads += 1
+                        tid = int(entry.name)
+                        try:
+                            policy = os.sched_getscheduler(tid)
+                        except Exception:
+                            continue
+                        if policy in (os.SCHED_FIFO, os.SCHED_RR):
+                            rt_threads += 1
+                            try:
+                                prio = os.sched_getparam(tid).sched_priority
+                            except Exception:
+                                prio = None
+                            if prio is not None:
+                                rt_priorities.append(prio)
+                return total_threads, rt_threads, sorted(set(rt_priorities))
+
             lines: list[str] = []
             lines.append(f"knob_id: {knob.id}")
             lines.append(f"title: {knob.title}")
@@ -3202,9 +3228,66 @@ def main() -> int:
                 path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
                 lines.append("")
                 lines.append("qjackctl_config:")
+                cfg = None
+                try:
+                    from audioknob_gui.core.qjackctl import read_config, resolve_server_config_path
+
+                    cfg = read_config(Path(path).expanduser())
+                except Exception:
+                    cfg = None
+                if cfg is not None:
+                    active_preset = cfg.def_preset if cfg.def_preset else "(default)"
+                    lines.append(f"active_preset: {active_preset}")
+                include_preset_lines = cfg is not None and bool(cfg.def_preset)
+                base_keys = (
+                    "ServerConfig",
+                    "ServerConfigName",
+                    "PostStartupScript",
+                    "PostStartupScriptShell",
+                    "\\Server",
+                    "\\ServerPrefix",
+                    "Realtime",
+                    "Priority",
+                )
+                if include_preset_lines:
+                    keys = ("Preset", "DefPreset", *base_keys)
+                else:
+                    keys = base_keys
                 for line in _read_file(path, max_lines=200):
-                    if any(key in line for key in ("DefPreset", "\\Server", "\\ServerPrefix")):
+                    if line.strip().startswith("OldPreset"):
+                        continue
+                    if any(key in line for key in keys):
                         lines.append(line)
+                if cfg is not None and cfg.server_config_enabled:
+                    lines.append("")
+                    if cfg.server_config_name:
+                        lines.append(f"server_config: {cfg.server_config_name}")
+                        server_path = resolve_server_config_path(cfg.server_config_name)
+                        if server_path is None:
+                            lines.append("server_config_path: unknown")
+                        else:
+                            lines.extend(_read_file(str(server_path), max_lines=40))
+                    else:
+                        lines.append("server_config: enabled (missing ServerConfigName)")
+                lines.append("")
+                pids = _find_pids_by_comm("jackd")
+                if not pids:
+                    lines.append("jackd: not running")
+                else:
+                    lines.append(f"jackd_pids: {', '.join(str(p) for p in pids)}")
+                    for pid in pids:
+                        cmdline = _read_proc_cmdline(pid)
+                        if cmdline:
+                            lines.append(f"jackd_cmd[{pid}]: {cmdline}")
+                        allowed = _read_proc_cpu_allowed_list(pid)
+                        if allowed:
+                            lines.append(f"jackd_cpus_allowed_list[{pid}]: {allowed}")
+                    total_threads, rt_threads, rt_priorities = _read_jackd_rt_summary(pids)
+                    if total_threads:
+                        lines.append(f"jackd_threads: {total_threads}")
+                        lines.append(f"jackd_rt_threads: {rt_threads}")
+                        if rt_priorities:
+                            lines.append(f"jackd_rt_priorities: {', '.join(str(p) for p in rt_priorities)}")
             elif kind == "systemd_unit_toggle":
                 unit = str(params.get("unit", ""))
                 if unit:
@@ -4095,8 +4178,18 @@ def main() -> int:
             k = next((k for k in self.registry if k.id == knob_id), None)
             if not k:
                 return
+            if knob_id == "qjackctl_server_prefix_rt" and self._is_process_running(["qjackctl", "qjackctl6"]):
+                QMessageBox.information(
+                    self,
+                    "Close QjackCtl First",
+                    "Quit QjackCtl before applying QjackCtl RT.\n\n"
+                    "QjackCtl rewrites its config on exit, which can undo changes.",
+                )
+                return
 
             def _task():
+                if knob_id == "qjackctl_server_prefix_rt":
+                    self._prime_qjackctl_preset()
                 if k.requires_root:
                     result = _run_worker_apply_pkexec([knob_id])
                     return True, {"result": result, "requires_root": True}, ""
@@ -4129,6 +4222,16 @@ def main() -> int:
             by_id = {k.id: k for k in self.registry}
             queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
             if not queued:
+                return
+            if any(kid == "qjackctl_server_prefix_rt" for kid, _ in queued) and self._is_process_running(
+                ["qjackctl", "qjackctl6"]
+            ):
+                QMessageBox.information(
+                    self,
+                    "Close QjackCtl First",
+                    "Quit QjackCtl before applying QjackCtl RT.\n\n"
+                    "QjackCtl rewrites its config on exit, which can undo changes.",
+                )
                 return
             reset_ids = [kid for kid, action in queued if action == "reset"]
             if reset_ids:
@@ -4185,6 +4288,8 @@ def main() -> int:
                 errors: list[str] = []
                 if apply_user_ids:
                     try:
+                        if "qjackctl_server_prefix_rt" in apply_user_ids:
+                            self._prime_qjackctl_preset()
                         payload["apply_user"] = _run_worker_apply_user(apply_user_ids)
                     except Exception as e:
                         errors.append(str(e))
@@ -4313,13 +4418,6 @@ def main() -> int:
                         save_state(self.state)
                 except Exception:
                     pass
-                if knob_id == "qjackctl_server_prefix_rt" and self._is_process_running(["qjackctl", "qjackctl6"]):
-                    QMessageBox.information(
-                        self,
-                        "QjackCtl Restart Needed",
-                        "QjackCtl reads its config on launch.\n\n"
-                        "Quit and reopen QjackCtl to refresh the ServerPrefix in the UI.",
-                    )
                 if isinstance(payload, dict):
                     self._handle_apply_followups(payload.get("result", {}))
 
@@ -4462,14 +4560,6 @@ def main() -> int:
                     "apply queue done applied=%s restored=%s",
                     ",".join(sorted(applied_ids)) or "-",
                     ",".join(sorted(restored_ids)) or "-",
-                )
-
-            if "qjackctl_server_prefix_rt" in applied_ids and self._is_process_running(["qjackctl", "qjackctl6"]):
-                QMessageBox.information(
-                    self,
-                    "QjackCtl Restart Needed",
-                    "QjackCtl reads its config on launch.\n\n"
-                    "Quit and reopen QjackCtl to refresh the ServerPrefix in the UI.",
                 )
 
             queue_reboot = self._queue_needs_reboot
