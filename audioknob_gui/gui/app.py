@@ -4636,6 +4636,7 @@ def main() -> int:
                 "sysctl_conf",
                 "udev_rule",
                 "pipewire_conf",
+                "rtirq_config",
                 "user_service_mask",
                 "baloo_disable",
             )

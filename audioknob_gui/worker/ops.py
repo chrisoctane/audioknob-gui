@@ -197,6 +197,11 @@ def build_knob_paths(
             targets.append({"type": "path", "value": _expand_path(path) if path else ""})
             if kind == "qjackctl_server_prefix":
                 targets.append({"type": "path", "value": str(default_post_start_script_path())})
+        elif kind == "rtirq_config":
+            cfg_path = paths.get("rtirq_config", "")
+            targets.append({"type": "path", "value": cfg_path})
+            unit = str(params.get("unit", "rtirq.service"))
+            targets.append({"type": "systemd_unit", "value": unit})
         elif kind == "sysfs_glob_kv":
             glob_pat = str(params.get("glob", ""))
             if glob_pat:
@@ -562,6 +567,37 @@ def _systemd_unit_preview(params: dict[str, Any]) -> tuple[list[list[str]], list
     elif action == "disable":
         return [["systemctl", "disable", unit]], []
     return [], [f"Unsupported systemd action: {action}"]
+
+
+def _rtirq_config_preview(params: dict[str, Any]) -> tuple[list[FileChange], list[list[str]]]:
+    from audioknob_gui.core.rtirq import apply_rtirq_block, normalize_rtirq_list
+
+    distro_id = read_os_release().get("ID", "")
+    cfg_path = resolve_rtirq_config_path(distro_id)
+    path = Path(cfg_path)
+
+    name_list = normalize_rtirq_list(params.get("name_list", ["snd", "usb"]))
+    high_list = normalize_rtirq_list(params.get("high_list", name_list))
+    prio_high = int(params.get("prio_high", 90))
+    prio_decr = int(params.get("prio_decr", 5))
+
+    before = _read_text(str(path))
+    after = apply_rtirq_block(
+        before,
+        name_list=name_list,
+        high_list=high_list,
+        prio_high=prio_high,
+        prio_decr=prio_decr,
+    )
+
+    changes: list[FileChange] = []
+    action = "modify" if path.exists() else "create"
+    if before != after:
+        changes.append(FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after)))
+
+    unit = str(params.get("unit", "rtirq.service"))
+    cmds = [["systemctl", "enable", "--now", unit]]
+    return changes, cmds
 
 
 def _sysfs_glob_preview(params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -980,6 +1016,11 @@ def preview(knob: Any, action: str) -> PreviewItem:
             cmds, more_notes = _systemd_unit_preview(params)
             would_run.extend(cmds)
             notes.extend(more_notes)
+        elif kind == "rtirq_config":
+            changes, cmds = _rtirq_config_preview(params)
+            file_changes.extend(changes)
+            would_run.extend(cmds)
+            notes.append("Writes rtirq config and enables the rtirq service.")
         elif kind == "sysfs_glob_kv":
             would_write.extend(_sysfs_glob_preview(params))
         elif kind == "qjackctl_server_prefix":
@@ -1250,6 +1291,58 @@ def check_knob_status(knob: Any) -> str:
         if found == len(wanted_lines):
             return "applied"
         elif found > 0:
+            return "partial"
+        return "not_applied"
+
+    if kind == "rtirq_config":
+        from audioknob_gui.core.rtirq import normalize_rtirq_list, rtirq_block_present
+
+        distro_id = read_os_release().get("ID", "")
+        cfg_path = resolve_rtirq_config_path(distro_id)
+        path = Path(cfg_path)
+
+        name_list = normalize_rtirq_list(params.get("name_list", ["snd", "usb"]))
+        high_list = normalize_rtirq_list(params.get("high_list", name_list))
+        prio_high = int(params.get("prio_high", 90))
+        prio_decr = int(params.get("prio_decr", 5))
+
+        cfg_ok = False
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8")
+                cfg_ok = rtirq_block_present(
+                    content,
+                    name_list=name_list,
+                    high_list=high_list,
+                    prio_high=prio_high,
+                    prio_decr=prio_decr,
+                )
+            except Exception:
+                cfg_ok = False
+
+        unit = str(params.get("unit", "rtirq.service"))
+        service_ok = False
+        service_partial = False
+        try:
+            enabled_result = run(["systemctl", "is-enabled", unit])
+            enabled_msg = (enabled_result.stderr or enabled_result.stdout or "").strip()
+            enabled = enabled_result.stdout.strip() or enabled_msg
+            if "not-found" in enabled_msg.lower() or "not found" in enabled_msg.lower():
+                return "not_applicable"
+            active = run(["systemctl", "is-active", unit]).stdout.strip()
+            if enabled in ("enabled", "static", "indirect"):
+                service_ok = active == "active"
+                service_partial = active not in ("", "active")
+            elif enabled in ("disabled", "masked"):
+                service_ok = False
+            else:
+                service_partial = True
+        except Exception:
+            service_partial = True
+
+        if cfg_ok and service_ok:
+            return "applied"
+        if cfg_ok or service_ok or service_partial:
             return "partial"
         return "not_applied"
     

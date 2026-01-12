@@ -61,6 +61,7 @@ Notes:
 - QjackCtl info popup now reports the active preset explicitly and suppresses default/preserved preset noise when none are active.
 - RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
+- RTIRQ knob now writes an audioknob config block (name/high lists + priorities) and enables the rtirq service.
 - KDE Indexer status now handles balooctl output from stderr (balooctl6 on Tumbleweed).
 - Baseline comparisons ignore unknown/not-applicable baselines; Huge Pages status no longer forces sys_default.
 - KDE Indexer apply now times out and errors if balooctl hangs or still reports running.

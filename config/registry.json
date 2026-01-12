@@ -89,12 +89,21 @@
         "restore": true
       },
       "category": "irq",
-      "description": "Enables rtirq service which sets high realtime priorities for audio-related IRQ threads. Requires rtirq package. File: /etc/sysconfig/rtirq or /etc/rtirq.conf.",
+      "description": "Configures rtirq priorities for audio IRQ threads and enables the rtirq service. Writes an audioknob block to /etc/sysconfig/rtirq (or /etc/default/rtirq on Debian/Ubuntu) with RTIRQ_NAME_LIST/HIGH_LIST and priority settings.",
       "id": "rtirq_enable",
       "impl": {
-        "kind": "systemd_unit_toggle",
+        "kind": "rtirq_config",
         "params": {
-          "action": "enable_now",
+          "high_list": [
+            "snd",
+            "usb"
+          ],
+          "name_list": [
+            "snd",
+            "usb"
+          ],
+          "prio_decr": 5,
+          "prio_high": 90,
           "unit": "rtirq.service"
         }
       },

@@ -95,6 +95,7 @@
                     "sysfs_glob_kv",
                     "qjackctl_server_prefix",
                     "udev_rule",
+                    "rtirq_config",
                     "kernel_cmdline",
                     "pipewire_conf",
                     "user_service_mask",

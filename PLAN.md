@@ -182,7 +182,8 @@ Both files must be committed together. See "Registry Sync Policy" below.
 | `pam_limits_audio_group` | PAM limits file | rt_limits |
 | `sysctl_conf` | Sysctl.d drop-in | swappiness, inotify |
 | `sysfs_glob_kv` | Write to /sys | cpu_governor, thp |
-| `systemd_unit_toggle` | Enable/disable service | irqbalance, rtirq |
+| `systemd_unit_toggle` | Enable/disable service | irqbalance |
+| `rtirq_config` | Configure rtirq priorities + enable service | rtirq |
 | `qjackctl_server_prefix` | QjackCtl config | jackd flags |
 | `udev_rule` | Create udev rule | cpu_dma_latency, usb_autosuspend |
 | `kernel_cmdline` | Kernel cmdline param (distro-aware) | threadirqs, audit=0 |
@@ -292,7 +293,7 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 | Knob | Kind | Status |
 |------|------|--------|
 | Disable irqbalance | systemd_unit_toggle | ✓ |
-| Enable rtirq service | systemd_unit_toggle | ✓ |
+| RTIRQ priorities + service | rtirq_config | ✓ |
 
 ### CPU
 | Knob | Kind | Status |
@@ -454,7 +455,7 @@ Verify:
 ### Root knobs (manual, last)
 
 Only after non-root testing is stable:
-- systemd toggles (irqbalance/rtirq)
+- systemd toggles (irqbalance) + rtirq config/service
 - sysfs knobs (CPU governor, THP)
 - udev rule knobs
 - kernel cmdline knobs (require reboot; do last)

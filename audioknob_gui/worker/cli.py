@@ -576,6 +576,47 @@ def cmd_apply(args: argparse.Namespace) -> int:
             else:
                 raise SystemExit(f"Unsupported systemd action: {action}")
 
+        elif kind == "rtirq_config":
+            import subprocess
+
+            from audioknob_gui.core.rtirq import apply_rtirq_block, normalize_rtirq_list
+            from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path, systemd_enable_now
+
+            distro_id = read_os_release().get("ID", "")
+            cfg_path = resolve_rtirq_config_path(distro_id)
+            path = Path(cfg_path)
+
+            name_list = normalize_rtirq_list(params.get("name_list", ["snd", "usb"]))
+            high_list = normalize_rtirq_list(params.get("high_list", name_list))
+            prio_high = int(params.get("prio_high", 90))
+            prio_decr = int(params.get("prio_decr", 5))
+
+            before = ""
+            try:
+                before = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                before = ""
+            after = apply_rtirq_block(
+                before,
+                name_list=name_list,
+                high_list=high_list,
+                prio_high=prio_high,
+                prio_decr=prio_decr,
+            )
+            if before != after:
+                _backup_once(tx, backups, str(path), we_created=not path.exists())
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(after, encoding="utf-8")
+
+            unit = str(params.get("unit", "rtirq.service"))
+            effect = systemd_enable_now(unit)
+            effects.append(effect)
+            if effect.get("pre", {}).get("active") == "active":
+                try:
+                    subprocess.run(["systemctl", "restart", unit], check=False, capture_output=True, text=True)
+                except Exception:
+                    pass
+
         elif kind == "sysfs_glob_kv":
             from audioknob_gui.worker.ops import write_sysfs_values
 
@@ -1707,6 +1748,55 @@ def _restore_knob_once(knob_id: str) -> dict:
             "errors": errors,
         }
 
+    if knob and knob.impl and knob.impl.kind == "rtirq_config":
+        from audioknob_gui.core.rtirq import strip_rtirq_block
+        from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path, systemd_restore
+
+        distro_id = read_os_release().get("ID", "")
+        cfg_path = resolve_rtirq_config_path(distro_id)
+        meta = next((m for m in manifest.get("backups", []) if m.get("path") == cfg_path), None)
+        we_created = bool(meta.get("we_created")) if isinstance(meta, dict) else False
+
+        restored: list[str] = []
+        errors: list[str] = []
+
+        try:
+            current = ""
+            try:
+                current = Path(cfg_path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                current = ""
+            updated = strip_rtirq_block(current)
+            if updated != current:
+                if not updated.strip() and we_created and Path(cfg_path).exists():
+                    Path(cfg_path).unlink()
+                else:
+                    Path(cfg_path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(cfg_path).write_text(updated, encoding="utf-8")
+                restored.append(cfg_path)
+        except Exception as exc:
+            errors.append(f"Failed to update rtirq config: {exc}")
+
+        effects = manifest.get("effects", [])
+        try:
+            for e in effects:
+                if e.get("kind") == "systemd_unit_toggle":
+                    systemd_restore(e)
+            if any(e.get("kind") == "systemd_unit_toggle" for e in effects):
+                restored.append("(systemd effects)")
+        except Exception as exc:
+            errors.append(f"Failed to restore systemd effects: {exc}")
+
+        return {
+            "schema": 1,
+            "success": len(errors) == 0,
+            "knob_id": knob_id,
+            "txid": txid,
+            "scope": scope,
+            "restored": restored,
+            "errors": errors,
+        }
+
     paths = default_paths()
     tx_root = Path(paths.var_lib_dir if scope == "root" else paths.user_state_dir) / "transactions" / txid
 
@@ -1958,6 +2048,39 @@ def _force_reset_pipewire_conf(path_str: str) -> tuple[bool, str]:
         pass
 
     return True, f"Deleted {path}"
+
+
+def _force_reset_rtirq_config(params: dict) -> tuple[bool, str]:
+    from audioknob_gui.core.rtirq import strip_rtirq_block
+    from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path, systemd_disable_now
+
+    distro_id = read_os_release().get("ID", "")
+    cfg_path = resolve_rtirq_config_path(distro_id)
+    path = Path(cfg_path)
+
+    try:
+        before = path.read_text(encoding="utf-8") if path.exists() else ""
+    except Exception as exc:
+        return False, f"Failed to read rtirq config: {exc}"
+
+    after = strip_rtirq_block(before)
+    try:
+        if after != before:
+            if not after.strip() and path.exists():
+                path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(after, encoding="utf-8")
+    except Exception as exc:
+        return False, f"Failed to update rtirq config: {exc}"
+
+    unit = str(params.get("unit", "rtirq.service"))
+    try:
+        systemd_disable_now(unit)
+    except Exception:
+        pass
+
+    return True, "Removed rtirq config block and disabled rtirq service"
 
 
 def _force_reset_user_services(services: list[str]) -> tuple[bool, str]:
@@ -2256,6 +2379,8 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     elif kind == "pipewire_conf":
         path = str(params.get("path", ""))
         success, message = _force_reset_pipewire_conf(path)
+    elif kind == "rtirq_config":
+        success, message = _force_reset_rtirq_config(params)
     elif kind == "user_service_mask":
         services = params.get("services", [])
         if isinstance(services, str):
