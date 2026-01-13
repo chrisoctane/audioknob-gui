@@ -88,7 +88,7 @@ Notes:
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
 - "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 - Resetting a knob that others depend on now prompts and cascades dependent resets when accepted.
-- Baseline-aware status now labels knobs as “Sys Default” when current matches the initial scan.
+- Baseline-aware status labels knobs as “Sys Default” when current matches the initial scan (runtime-only knobs like sysfs/IRQ pinning skip this overlay so live status is visible).
 - System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
 - Main window can be resized up to the screen size (no max-height clamp to content).
 - Separator rows no longer show stale info buttons after table refresh.

@@ -271,7 +271,7 @@ The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORK
 The GUI log also records high-level action start/finish entries (apply queue, reset all) so successes are visible in-app.
 Force-reset prompts and outcomes are also logged in the GUI log.
 If a reset would disable a dependency, the GUI prompts and adds dependent knobs to the reset queue when accepted.
-Status uses the initial baseline: if current matches baseline it shows “Sys Default”; if current matches neither baseline nor tweak it shows “Deviated.”
+Status uses the initial baseline: if current matches baseline it shows “Sys Default” (runtime-only knobs like sysfs/IRQ pinning skip this overlay so live status is visible); if current matches neither baseline nor tweak it shows “Deviated.”
 
 ### With config dialog (via info popup)
 ```python

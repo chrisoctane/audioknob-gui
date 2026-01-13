@@ -2000,6 +2000,9 @@ def main() -> int:
                 current = self._knob_statuses.get(knob.id)
                 if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable"):
                     continue
+                if knob.impl and knob.impl.kind in ("irq_affinity", "sysfs_glob_kv", "sysfs_write"):
+                    # Runtime-only knobs should reflect live status after reboot.
+                    continue
                 if root_tx_unknown and knob.requires_root:
                     continue
                 base = baseline.get(knob.id)
