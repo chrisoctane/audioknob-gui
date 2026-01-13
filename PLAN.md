@@ -215,11 +215,15 @@ In `gui/app.py` → `_populate()`:
 | Read-only test | — | "Test"/"Scan" button | "i" button |
 | Group join knob | — | "Join/Leave" button (immediate) | "i" button |
 
-**Columns**: Info | Knob | Action | Config | Status | Check | Category | Risk
+**Columns**: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | Sys
 
-**Tabs**: Main | Audio Session (advanced, performance tradeoffs; global toggle disables advanced knobs)
+**Advanced mode**: Single table; advanced knobs are gated by the "Enable advanced knobs" checkbox.
 
 **Sorting**: Click any column header to sort
+
+**Requirements column**: Shows Adv/Rbt/Grp markers for advanced, reboot-required, and group-required knobs.
+
+**Sys column**: Shows the target command/file/parameter shorthand for each knob.
 
 **Header row**: Font size control on the left, queue status + Apply/Apply & Reboot + Re-check State + Logs + Reset All on the right
 

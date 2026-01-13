@@ -17,7 +17,7 @@
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
 - **Info popup** - Info column with "i" button shows details + config options
-- **Audio Session tab** - advanced, performance-impacting knobs with a global on/off toggle
+- **Advanced mode toggle** - gates performance-impacting knobs on the main table
 - **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
 - **Info popup status check** - Run a live per-knob diagnostic snapshot
 - **Transaction system** - backups + smart restore
@@ -33,15 +33,16 @@
 
 ### GUI Layout
 ```
-Columns: Info | Knob | Action | Config | Status | Check | Category | Risk
-         (0)  (1)    (2)      (3)      (4)     (5)    (6)       (7)
+Columns: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | Sys
+         (0)  (1)    (2)      (3)      (4)           (5)     (6)    (7)       (8)    (9)
 
 Notes:
-- Tabs: Main (default knobs) and Audio Session (advanced knobs with session toggle).
+- Single table with category headers; advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
-- Audio Session toggle disables advanced knobs while preserving their configuration.
+- "Requirements" shows Adv/Rbt/Grp markers for advanced, reboot-required, and group-required knobs.
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
+- "Sys" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
 - IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
@@ -91,7 +92,7 @@ Notes:
 - System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
 - Main window can be resized up to the screen size (no max-height clamp to content).
 - Separator rows no longer show stale info buttons after table refresh.
-- Audio Session warning text now refers to "intensive workloads" (no games mention).
+- Advanced settings warning text now refers to "intensive workloads" (no games mention).
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
@@ -929,7 +930,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 8 columns (Info, Knob, Action, Config, Status, Check, Category, Risk). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
+**Note:** Current UI has 10 columns (Info, Knob, Action, Config, Requirements, Status, Check, Category, Risk, Sys). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
 
 **Detection needed:**
 ```python

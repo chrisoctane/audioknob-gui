@@ -441,8 +441,7 @@ def load_state() -> dict:
         "kernel_irqaffinity_cores": None,  # list[int] or None
         "irq_pinning_devices": [],  # list[str]
         "irq_pinning_cpu_cores": None,  # list[int] or None
-        "audio_session_enabled": False,  # bool
-        "audio_session_knobs": [],  # list[str]
+        "advanced_mode_enabled": False,  # bool
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
         "jitter_test_last": None,  # dict payload from last run or None
@@ -477,10 +476,10 @@ def load_state() -> dict:
             data["irq_pinning_devices"] = []
         if "irq_pinning_cpu_cores" not in data:
             data["irq_pinning_cpu_cores"] = None
-        if "audio_session_enabled" not in data:
-            data["audio_session_enabled"] = False
-        if "audio_session_knobs" not in data:
-            data["audio_session_knobs"] = []
+        if "advanced_mode_enabled" not in data:
+            data["advanced_mode_enabled"] = bool(data.get("audio_session_enabled", False))
+        data.pop("audio_session_enabled", None)
+        data.pop("audio_session_knobs", None)
         if "pipewire_quantum" not in data:
             data["pipewire_quantum"] = None
         if "pipewire_sample_rate" not in data:
@@ -552,14 +551,8 @@ def load_state() -> dict:
                     data[key] = cores
                 else:
                     data[key] = None
-        if data.get("audio_session_enabled") is not None and not isinstance(data.get("audio_session_enabled"), bool):
-            data["audio_session_enabled"] = False
-        if data.get("audio_session_knobs") is not None and not isinstance(data.get("audio_session_knobs"), list):
-            data["audio_session_knobs"] = []
-        else:
-            data["audio_session_knobs"] = [
-                str(x) for x in data.get("audio_session_knobs", []) if isinstance(x, str) and x.strip()
-            ]
+        if data.get("advanced_mode_enabled") is not None and not isinstance(data.get("advanced_mode_enabled"), bool):
+            data["advanced_mode_enabled"] = False
         if data.get("system_profile") is not None and not isinstance(data.get("system_profile"), dict):
             data["system_profile"] = None
         if data.get("baseline_statuses") is not None and not isinstance(data.get("baseline_statuses"), dict):
@@ -616,7 +609,6 @@ def main() -> int:
             QSizePolicy,
             QSlider,
             QSpinBox,
-            QTabWidget,
             QTableWidget,
             QTableWidgetItem,
             QTextEdit,
@@ -895,7 +887,6 @@ def main() -> int:
             self._queue_busy = False
             self._queue_needs_reboot = False
             self._queue_inflight: list[tuple[str, str]] = []
-            self._audio_session_toggle_inflight = False
             
             # Apply saved font size
             self._apply_font_size(self.state.get("font_size", 11))
@@ -932,6 +923,13 @@ def main() -> int:
             self.reboot_toggle.setChecked(bool(self.state.get("enable_reboot_knobs", False)))
             self.reboot_toggle.setToolTip("Unlock knobs that require a reboot/log-out to take effect")
             self.reboot_toggle.toggled.connect(self._on_reboot_toggle)
+            top.addWidget(self.reboot_toggle)
+
+            self.advanced_toggle = QCheckBox("Enable advanced knobs")
+            self.advanced_toggle.setChecked(bool(self.state.get("advanced_mode_enabled", False)))
+            self.advanced_toggle.setToolTip("Unlock advanced knobs that can impact system performance")
+            self.advanced_toggle.toggled.connect(self._on_advanced_mode_toggle)
+            top.addWidget(self.advanced_toggle)
 
             self.queue_label = QLabel("")
             self.queue_label.setToolTip("Queued changes waiting to apply")
@@ -981,52 +979,17 @@ def main() -> int:
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
-            self.tabs = QTabWidget()
-            self.main_tab = QWidget()
-            self.session_tab = QWidget()
-            self.tabs.addTab(self.main_tab, "Main")
-            self.tabs.addTab(self.session_tab, "Audio Session")
-            root.addWidget(self.tabs)
-
-            self._main_tab_layout = QVBoxLayout(self.main_tab)
-            self._main_tab_layout.setContentsMargins(0, 0, 0, 0)
-            self._main_tab_layout.setSpacing(8)
-
-            self._session_tab_layout = QVBoxLayout(self.session_tab)
-            self._session_tab_layout.setContentsMargins(0, 0, 0, 0)
-            self._session_tab_layout.setSpacing(8)
-
-            session_header = QWidget()
-            session_header_layout = QHBoxLayout(session_header)
-            session_header_layout.setContentsMargins(8, 2, 8, 2)
-            session_header_layout.setSpacing(8)
-            self.session_toggle = QCheckBox("Audio Session Mode")
-            self.session_toggle.setChecked(bool(self.state.get("audio_session_enabled", False)))
-            self.session_toggle.setToolTip("Enable advanced audio session tweaks (may impact general performance)")
-            self.session_toggle.toggled.connect(self._on_audio_session_toggle)
-            session_header_layout.addWidget(self.session_toggle)
-            session_header_layout.addStretch(1)
-            self._session_tab_layout.addWidget(session_header)
-
-            session_note = QLabel(
-                "Advanced settings can reduce performance in other system intensive workloads. "
-                "Toggle off to restore defaults; reboot may be required."
+            advanced_note = QLabel(
+                "Advanced settings can reduce performance in intensive workloads. "
+                "Enable advanced knobs to make changes; reboot may be required."
             )
-            session_note.setWordWrap(True)
-            self._session_tab_layout.addWidget(session_note)
+            advanced_note.setWordWrap(True)
+            root.addWidget(advanced_note)
 
-            self._main_table_container = QWidget()
-            self._main_table_layout = QVBoxLayout(self._main_table_container)
-            self._main_table_layout.setContentsMargins(0, 0, 0, 0)
-            self._main_tab_layout.addWidget(self._main_table_container)
-
-            self._session_table_container = QWidget()
-            self._session_table_layout = QVBoxLayout(self._session_table_container)
-            self._session_table_layout.setContentsMargins(0, 0, 0, 0)
-            self._session_tab_layout.addWidget(self._session_table_container)
-
-            self.table = QTableWidget(0, 8)
-            self.table.setHorizontalHeaderLabels(["Info", "Knob", "Action", "Config", "Status", "Check", "Category", "Risk"])
+            self.table = QTableWidget(0, 10)
+            self.table.setHorizontalHeaderLabels(
+                ["Info", "Knob", "Action", "Config", "Requirements", "Status", "Check", "Category", "Risk", "Sys"]
+            )
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(False)
             self.table.setAlternatingRowColors(True)
@@ -1047,7 +1010,7 @@ def main() -> int:
             # Make every column user-resizable (Interactive). We also set reasonable defaults.
             # NOTE: ResizeToContents does NOT reliably account for cell widgets (buttons/combos),
             # which causes text clipping like "Apply" -> "Annlv".
-            for c in range(8):
+            for c in range(self.table.columnCount()):
                 header.setSectionResizeMode(c, QHeaderView.Interactive)
             self._sort_column: int | None = None
             self._sort_descending = False
@@ -1056,9 +1019,7 @@ def main() -> int:
             header.sectionResized.connect(self._on_section_resized)
             self._min_column_widths: dict[int, int] = {}
             self._apply_default_column_widths()
-            self._active_view = "main"
-            self._attach_table(self._main_table_layout)
-            self.tabs.currentChanged.connect(self._on_tab_changed)
+            root.addWidget(self.table)
 
             self._knob_statuses: dict[str, str] = {}
             self._busy_knobs: set[str] = set()
@@ -1079,26 +1040,7 @@ def main() -> int:
             self.table.installEventFilter(self)
             self.installEventFilter(self)
 
-        def _attach_table(self, layout: QVBoxLayout) -> None:
-            parent = self.table.parentWidget()
-            if parent is not None:
-                current_layout = parent.layout()
-                if current_layout is not None:
-                    current_layout.removeWidget(self.table)
-            self.table.setParent(layout.parentWidget())
-            layout.addWidget(self.table)
-
-        def _on_tab_changed(self, index: int) -> None:
-            view = "session" if index == 1 else "main"
-            if view == self._active_view:
-                return
-            self._active_view = view
-            target_layout = self._session_table_layout if view == "session" else self._main_table_layout
-            self._attach_table(target_layout)
-            self._populate()
-            self._apply_window_constraints()
-
-        def _audio_session_knob_ids(self) -> set[str]:
+        def _advanced_knob_ids(self) -> set[str]:
             return set(
                 [
                     "irqbalance_disable",
@@ -1116,24 +1058,102 @@ def main() -> int:
                 ]
             )
 
-        def _audio_session_selected(self) -> set[str]:
-            raw = self.state.get("audio_session_knobs")
-            if not isinstance(raw, list):
-                return set()
-            allowed = self._audio_session_knob_ids()
-            return {str(x) for x in raw if isinstance(x, str) and x in allowed}
+        def _requirements_label(self, k, advanced_knobs: set[str]) -> str:
+            parts: list[str] = []
+            if k.id in advanced_knobs:
+                parts.append("Adv")
+            if k.requires_reboot:
+                parts.append("Rbt")
+            if k.requires_groups:
+                parts.append("Grp")
+            if not parts:
+                return "—"
+            return " ".join(parts)
 
-        def _set_audio_session_selected(self, selected: set[str]) -> None:
-            allowed = self._audio_session_knob_ids()
-            cleaned = sorted(k for k in selected if k in allowed)
-            self.state["audio_session_knobs"] = cleaned
-            save_state(self.state)
+        def _sys_label_for_knob(self, k) -> str:
+            if k.impl is None:
+                return "—"
+            kind = k.impl.kind
+            params = k.impl.params or {}
+
+            if kind == "kernel_cmdline":
+                param = self._kernel_cmdline_param_for_state(k.id)
+                if not param:
+                    param = str(params.get("param", "")).strip()
+                if param:
+                    return param.split("=", 1)[0].strip() or param
+                return "cmdline"
+
+            if kind == "sysctl_conf":
+                lines = params.get("lines") or []
+                keys: list[str] = []
+                for line in lines:
+                    raw = str(line).strip()
+                    if not raw or raw.startswith("#") or "=" not in raw:
+                        continue
+                    key = raw.split("=", 1)[0].strip()
+                    if key and key not in keys:
+                        keys.append(key)
+                return ",".join(keys) if keys else "sysctl"
+
+            if kind == "sysfs_glob_kv":
+                glob = str(params.get("glob", "")).strip()
+                return Path(glob).name if glob else "sysfs"
+
+            if kind == "udev_rule":
+                path = str(params.get("path", "")).strip()
+                return Path(path).name if path else "udev"
+
+            if kind == "pam_limits_audio_group":
+                path = str(params.get("path", "")).strip()
+                return Path(path).name if path else "limits"
+
+            if kind == "qjackctl_server_prefix":
+                return "QjackCtl.conf"
+
+            if kind == "pipewire_conf":
+                return "pipewire.conf.d"
+
+            if kind == "systemd_unit_toggle":
+                unit = str(params.get("unit", "")).strip()
+                return unit or "systemd"
+
+            if kind == "rtirq_config":
+                profile = self.state.get("system_profile")
+                if isinstance(profile, dict):
+                    paths = profile.get("paths")
+                    if isinstance(paths, dict):
+                        rtirq_path = str(paths.get("rtirq_config") or "")
+                        if rtirq_path:
+                            return Path(rtirq_path).name
+                return "rtirq.conf"
+
+            if kind == "irq_affinity":
+                return "/proc/irq"
+
+            if kind == "group_membership":
+                return "groups"
+
+            if kind == "user_service_mask":
+                services = params.get("services")
+                if isinstance(services, list):
+                    items = [str(s) for s in services if s]
+                    if items:
+                        return ",".join(items)
+                unit = str(params.get("unit", "")).strip()
+                return unit or "user service"
+
+            if kind == "baloo_disable":
+                return "balooctl"
+
+            if kind == "read_only":
+                what = str(params.get("what", "")).strip()
+                return what or "read_only"
+
+            return kind
 
         def _visible_knobs(self) -> list:
-            session_knobs = self._audio_session_knob_ids()
-            if self._active_view == "session":
-                return [k for k in self.registry if k.id in session_knobs]
-            return [k for k in self.registry if k.id not in session_knobs]
+            return list(self.registry)
 
         def _refresh_user_groups(self) -> None:
             """Get current user's group memberships."""
@@ -2128,8 +2148,8 @@ def main() -> int:
         def _update_reboot_banner(self) -> None:
             needs_reboot = any(v == "pending_reboot" for v in self._knob_statuses.values())
             self._needs_reboot = needs_reboot
-            # Banner text is now shown in the separator row, not the top bar.
-            self.reboot_banner.setVisible(False)
+            self.reboot_banner.setText("Reboot required for pending changes." if needs_reboot else "")
+            self.reboot_banner.setVisible(needs_reboot)
             self.reboot_button.setVisible(needs_reboot)
             self.reboot_button.setEnabled(needs_reboot)
 
@@ -2172,6 +2192,7 @@ def main() -> int:
             btn.setEnabled(False)
             btn.setToolTip("Initial state scan pending. Finish baseline scan before changes.")
 
+
         def _install_hover_tracking(self, widget: QWidget, row: int) -> None:
             widget.setProperty("hover_row", row)
             widget.setMouseTracking(True)
@@ -2197,7 +2218,6 @@ def main() -> int:
                 "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
                 "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
-                "session_saved": ("⏸ Saved", "#7a7a7a"),  # Gray saved (session off)
                 "read_only": ("—", "#9e9e9e"),            # Gray dash
                 "unknown": ("—", "#9e9e9e"),              # Gray dash
                 "running": ("⏳ Updating", "#1976d2"),    # Blue spinner
@@ -2211,14 +2231,11 @@ def main() -> int:
             self.table.setSortingEnabled(False)
             self.table.clearSpans()
             reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
+            advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
             group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
             desktop_kind = self._detect_desktop()
-            session_enabled = bool(self.state.get("audio_session_enabled", False))
-            session_locked = self._active_view == "session" and not session_enabled
+            advanced_knobs = self._advanced_knob_ids()
             visible_knobs = self._visible_knobs()
-
-            reboot_knobs = [k for k in visible_knobs if k.requires_reboot]
-            other_knobs = [k for k in visible_knobs if not k.requires_reboot]
             ordered: list[object] = []
 
             def _sort_key(k, col: int) -> tuple:
@@ -2236,63 +2253,97 @@ def main() -> int:
                 risk_order = {"low": 0, "medium": 1, "high": 2}
 
                 if col == 4:
+                    req = self._requirements_label(k, advanced_knobs).lower()
+                    return (req, k.title.lower())
+                if col == 5:
                     return (status_order.get(status, 99), k.title.lower())
-                if col == 6:
-                    return (str(k.category).lower(), k.title.lower())
                 if col == 7:
+                    return (str(k.category).lower(), k.title.lower())
+                if col == 8:
                     return (risk_order.get(str(k.risk_level), 99), k.title.lower())
-                if col in (0, 1, 2, 3, 5):
+                if col == 9:
+                    sys_label = self._sys_label_for_knob(k).lower()
+                    return (sys_label, k.title.lower())
+                if col in (0, 1, 2, 3, 6):
                     return (k.title.lower(),)
                 return (status_order.get(status, 99), k.title.lower())
 
-            if self._sort_column is not None:
+            category_order = [
+                ("cpu", "CPU"),
+                ("irq", "IRQ"),
+                ("kernel", "Kernel"),
+                ("permissions", "Permissions"),
+                ("power", "Power"),
+                ("services", "Services"),
+                ("stack", "Stack"),
+                ("testing", "Testing"),
+                ("vm", "VM"),
+            ]
+            by_category: dict[str, list[object]] = {}
+            for k in visible_knobs:
+                key = str(getattr(k, "category", "uncategorized"))
+                by_category.setdefault(key, []).append(k)
+
+            def _sorted_items(items: list[object]) -> list[object]:
+                if self._sort_column is None:
+                    return items
                 col = int(self._sort_column)
-                reboot_knobs = sorted(reboot_knobs, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
-                other_knobs = sorted(other_knobs, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
-            REBOOT_HEADER = object()
-            SECTION_SEPARATOR = object()
-            if reboot_knobs:
-                ordered.append(REBOOT_HEADER)
-                ordered.extend(reboot_knobs)
-            if reboot_knobs and other_knobs:
-                ordered.append(SECTION_SEPARATOR)
-            ordered.extend(other_knobs)
+                return sorted(items, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
+
+            CATEGORY_HEADER = object()
+            CATEGORY_SEPARATOR = object()
+            known_categories = {c[0] for c in category_order}
+            extra_categories = sorted(set(by_category.keys()) - known_categories)
+
+            for cat_key, cat_label in category_order + [(c, c.title()) for c in extra_categories]:
+                items = by_category.get(cat_key, [])
+                if not items:
+                    continue
+                ordered.append((CATEGORY_HEADER, cat_label))
+                ordered.extend(_sorted_items(items))
+                ordered.append(CATEGORY_SEPARATOR)
+
+            if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                ordered.pop()
 
             self.table.setRowCount(len(ordered))
             self._row_dim = [False] * len(ordered)
 
             for r, k in enumerate(ordered):
-                if k is REBOOT_HEADER:
-                    self.table.setSpan(r, 0, 1, 8)
-                    header_widget = QWidget()
-                    header_layout = QHBoxLayout(header_widget)
-                    header_layout.setContentsMargins(8, 2, 8, 2)
-                    header_layout.setSpacing(8)
-                    header_layout.addWidget(self.reboot_toggle)
-                    header_layout.addStretch(1)
-                    self.table.setCellWidget(r, 0, header_widget)
-                    for c in range(1, 8):
+                if isinstance(k, tuple) and k and k[0] is CATEGORY_HEADER:
+                    label = str(k[1])
+                    self.table.setSpan(r, 0, 1, self.table.columnCount())
+                    header_item = QTableWidgetItem(label)
+                    header_item.setFlags(Qt.ItemIsEnabled)
+                    header_item.setForeground(QColor("#cfcfcf"))
+                    header_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                    header_font = header_item.font()
+                    header_font.setBold(True)
+                    header_item.setFont(header_font)
+                    self.table.setItem(r, 0, header_item)
+                    for c in range(1, self.table.columnCount()):
                         self.table.removeCellWidget(r, c)
                         self.table.setItem(r, c, QTableWidgetItem(""))
                     continue
-                if k is SECTION_SEPARATOR:
+                if k is CATEGORY_SEPARATOR:
                     self.table.removeCellWidget(r, 0)
                     sep = QTableWidgetItem("")
                     sep.setFlags(Qt.ItemIsEnabled)
                     sep.setForeground(QColor("#9e9e9e"))
                     sep.setTextAlignment(Qt.AlignCenter)
-                    self.table.setSpan(r, 0, 1, 8)
+                    self.table.setSpan(r, 0, 1, self.table.columnCount())
                     self.table.setItem(r, 0, sep)
-                    for c in range(1, 8):
+                    for c in range(1, self.table.columnCount()):
                         self.table.removeCellWidget(r, c)
                         self.table.setItem(r, c, QTableWidgetItem(""))
+                    try:
+                        self.table.setRowHeight(r, 10)
+                    except Exception:
+                        pass
                     continue
                 status = self._knob_statuses.get(k.id, "unknown")
                 busy = k.id in self._busy_knobs
                 display_status = "running" if busy else status
-                session_saved = session_locked and k.id in self._audio_session_selected()
-                if session_saved and display_status in ("not_applied", "sys_default"):
-                    display_status = "session_saved"
                 not_applicable = (status == "not_applicable")
                 not_applicable_reason = "Not available on this system"
                 if k.id == "disable_tracker" and desktop_kind == "kde":
@@ -2317,11 +2368,12 @@ def main() -> int:
                 commands_ok = self._knob_commands_ok(k)
                 missing_cmds = self._knob_missing_commands(k)
                 reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
+                advanced_gate_lock = k.id in advanced_knobs and not advanced_enabled and status not in ("applied", "pending_reboot")
                 reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
-                locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock
-                row_dim = locked or not_applicable or session_locked
+                locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock or advanced_gate_lock
+                row_dim = locked or not_applicable
                 self._row_dim[r] = row_dim
-                row_dim = locked or not_applicable or session_locked
+                row_dim = locked or not_applicable
                 
                 # Determine lock reason
                 lock_reason = ""
@@ -2333,6 +2385,8 @@ def main() -> int:
                     lock_reason = f"Join groups: {', '.join(k.requires_groups)}"
                 elif reboot_gate_lock:
                     lock_reason = f"Reboot required: {k.title}"
+                elif advanced_gate_lock:
+                    lock_reason = "Enable advanced knobs"
                 elif not commands_ok:
                     lock_reason = f"Install: {', '.join(missing_cmds)}"
                 
@@ -2362,11 +2416,16 @@ def main() -> int:
                     title_item.setToolTip(lock_reason)
                 elif not_applicable:
                     title_item.setToolTip(not_applicable_reason)
-                elif session_locked:
-                    title_item.setToolTip("Audio Session is off")
                 self.table.setItem(r, 1, title_item)
 
-                # Column 4: Status (with color)
+                # Column 4: Requirements
+                req_item = QTableWidgetItem(self._requirements_label(k, advanced_knobs))
+                if row_dim:
+                    req_item.setForeground(locked_fg)
+                    req_item.setBackground(locked_bg)
+                self.table.setItem(r, 4, req_item)
+
+                # Column 5: Status (with color)
                 if locked:
                     status_item = QTableWidgetItem("Locked")
                     status_item.setForeground(locked_fg)
@@ -2379,26 +2438,30 @@ def main() -> int:
                     status_text, status_color = self._status_display(display_status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
-                    if session_locked:
-                        status_item.setForeground(locked_fg)
-                        status_item.setToolTip("Audio Session is off")
                 if row_dim:
                     status_item.setBackground(locked_bg)
-                self.table.setItem(r, 4, status_item)
+                self.table.setItem(r, 5, status_item)
 
-                # Column 6: Category
+                # Column 7: Category
                 cat_item = QTableWidgetItem(str(k.category))
                 if row_dim:
                     cat_item.setForeground(locked_fg)
                     cat_item.setBackground(locked_bg)
-                self.table.setItem(r, 6, cat_item)
+                self.table.setItem(r, 7, cat_item)
 
-                # Column 7: Risk
+                # Column 8: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
                 if row_dim:
                     risk_item.setForeground(locked_fg)
                     risk_item.setBackground(locked_bg)
-                self.table.setItem(r, 7, risk_item)
+                self.table.setItem(r, 8, risk_item)
+
+                # Column 9: Sys
+                sys_item = QTableWidgetItem(self._sys_label_for_knob(k))
+                if row_dim:
+                    sys_item.setForeground(locked_fg)
+                    sys_item.setBackground(locked_bg)
+                self.table.setItem(r, 9, sys_item)
 
                 # Column 2: Action button (context-sensitive)
                 if k.id == "audio_group_membership":
@@ -2433,6 +2496,12 @@ def main() -> int:
                     btn.setStyleSheet(locked_style)
                     self._set_action_cell(r, btn)
                 elif reboot_gate_lock:
+                    btn = self._make_action_button("🔒")
+                    btn.setEnabled(False)
+                    btn.setToolTip(lock_reason)
+                    btn.setStyleSheet(locked_style)
+                    self._set_action_cell(r, btn)
+                elif advanced_gate_lock:
                     btn = self._make_action_button("🔒")
                     btn.setEnabled(False)
                     btn.setToolTip(lock_reason)
@@ -2674,17 +2743,7 @@ def main() -> int:
                     if item is not None and item.text() == "":
                         self.table.takeItem(r, 3)
 
-                if session_locked and not locked and not not_applicable:
-                    for col in (2, 3):
-                        widget = self.table.cellWidget(r, col)
-                        if widget is None:
-                            continue
-                        widget.setEnabled(False)
-                        widget.setToolTip("Audio Session is off")
-                        if isinstance(widget, QPushButton):
-                            widget.setStyleSheet(locked_style)
-
-                # Column 5: Status check
+                # Column 6: Status check
                 if k.impl and k.impl.kind == "read_only":
                     check_btn = self._make_action_button("N/A")
                     check_btn.setEnabled(False)
@@ -2696,9 +2755,18 @@ def main() -> int:
                     check_btn.setToolTip("Show live CLI status details")
                     check_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
                 self._install_hover_tracking(check_btn, r)
-                self.table.setCellWidget(r, 5, check_btn)
+                self.table.setCellWidget(r, 6, check_btn)
+                if row_dim:
+                    for col in range(self.table.columnCount()):
+                        widget = self.table.cellWidget(r, col)
+                        if widget is None:
+                            continue
+                        if isinstance(widget, QPushButton):
+                            widget.setStyleSheet(locked_style)
+                        else:
+                            widget.setEnabled(False)
             
-            # Keep built-in sorting disabled; we handle per-section sorting.
+            # Keep built-in sorting disabled; we handle per-category sorting.
             self.table.setSortingEnabled(False)
             # Reflow row heights so text/widgets don't clip when font size changes.
             try:
@@ -2719,6 +2787,7 @@ def main() -> int:
                 self.table.horizontalHeader().setFont(font)
                 self.font_spinner.setFont(font)
                 self.reboot_toggle.setFont(font)
+                self.advanced_toggle.setFont(font)
                 self.btn_reset.setFont(font)
                 for r in range(self.table.rowCount()):
                     for c in range(self.table.columnCount()):
@@ -2758,18 +2827,33 @@ def main() -> int:
                 "⚠ Deviated",
                 "⟳ Reboot",
                 "◐ Partial",
-                "⏸ Saved",
                 "N/A",
                 "⏳ Updating",
                 "—",
             ]
             status_width = max([_w("Status")] + [_w(t) for t in status_texts])
 
+            requirements_texts = [
+                "Requirements",
+                "Adv",
+                "Rbt",
+                "Grp",
+                "Adv Rbt",
+                "Adv Grp",
+                "Rbt Grp",
+                "Adv Rbt Grp",
+                "—",
+            ]
+            requirements_width = max(_w(t) for t in requirements_texts)
+
             category_texts = [str(k.category) for k in self.registry] + ["Category"]
             category_width = max(_w(t) for t in category_texts)
 
             risk_texts = [str(k.risk_level) for k in self.registry] + ["Risk"]
             risk_width = max(_w(t) for t in risk_texts)
+
+            sys_texts = [self._sys_label_for_knob(k) for k in self.registry] + ["Sys"]
+            sys_width = max(_w(t[:24] + ("..." if len(t) > 24 else "")) for t in sys_texts)
 
             action_texts = ["Apply", "Reset", "Install", "View", "Test", "Scan", "Join", "Leave", "Action"]
             action_width = max(_w(t, pad=40) for t in action_texts)
@@ -2787,17 +2871,19 @@ def main() -> int:
                 0: 32,
                 2: action_width,
                 3: config_width,
-                5: check_width,
+                6: check_width,
             }
 
             self.table.setColumnWidth(0, 32)  # Info button
             self.table.setColumnWidth(1, knob_width)
             self.table.setColumnWidth(2, action_width)
             self.table.setColumnWidth(3, config_width)
-            self.table.setColumnWidth(4, status_width)
-            self.table.setColumnWidth(5, check_width)
-            self.table.setColumnWidth(6, category_width)
-            self.table.setColumnWidth(7, risk_width)
+            self.table.setColumnWidth(4, requirements_width)
+            self.table.setColumnWidth(5, status_width)
+            self.table.setColumnWidth(6, check_width)
+            self.table.setColumnWidth(7, category_width)
+            self.table.setColumnWidth(8, risk_width)
+            self.table.setColumnWidth(9, sys_width)
             self._enforce_min_column_widths()
 
         def _apply_window_constraints(self) -> None:
@@ -3402,8 +3488,8 @@ def main() -> int:
                 if item.data(Qt.UserRole) == knob_id:
                     status_item = QTableWidgetItem(display)
                     status_item.setForeground(QColor("#1976d2"))
-                    # Status column is col 4 (col 1 is knob title).
-                    self.table.setItem(r, 4, status_item)
+                    # Status column is col 5 (col 1 is knob title).
+                    self.table.setItem(r, 5, status_item)
                     break
 
         def on_view_stack(self) -> None:
@@ -4771,77 +4857,22 @@ def main() -> int:
             self._update_queue_ui()
             self._populate()
 
-        def _on_audio_session_toggle(self, enabled: bool) -> None:
-            if self._queue_busy or self._busy_knobs:
-                QMessageBox.information(
-                    self,
-                    "Busy",
-                    "Finish current operations before toggling Audio Session.",
-                )
-                self.session_toggle.blockSignals(True)
-                self.session_toggle.setChecked(not enabled)
-                self.session_toggle.blockSignals(False)
-                return
-            if self._queued_actions:
-                QMessageBox.information(
-                    self,
-                    "Queue Pending",
-                    "Apply or clear queued changes before toggling Audio Session.",
-                )
-                self.session_toggle.blockSignals(True)
-                self.session_toggle.setChecked(not enabled)
-                self.session_toggle.blockSignals(False)
-                return
-
-            prev = bool(self.state.get("audio_session_enabled", False))
-            self.state["audio_session_enabled"] = bool(enabled)
+        def _on_advanced_mode_toggle(self, enabled: bool) -> None:
+            self.state["advanced_mode_enabled"] = bool(enabled)
             save_state(self.state)
-
-            selected = self._audio_session_selected()
-            if not selected:
-                self._populate()
-                return
-
-            if enabled:
-                action = "apply"
-                target_ids = [
-                    kid
-                    for kid in selected
-                    if self._knob_statuses.get(kid, "unknown") not in ("applied", "pending_reboot")
-                ]
-            else:
-                action = "reset"
-                target_ids = [
-                    kid
-                    for kid in selected
-                    if self._knob_statuses.get(kid, "unknown")
-                    not in ("not_applied", "sys_default", "unknown", "not_applicable", "read_only")
-                ]
-
-            if not target_ids:
-                self._populate()
-                return
-
-            for kid in target_ids:
-                self._queued_actions[kid] = action
-            self._save_queue()
-            self._update_queue_ui()
+            v_scroll = None
+            try:
+                v_scroll = self.table.verticalScrollBar().value()
+                self.table.clearSelection()
+                self._clear_dim_hover()
+            except Exception:
+                v_scroll = None
             self._populate()
-
-            self._audio_session_toggle_inflight = True
-            started = self._on_apply_queue(reboot_after=False)
-            if not started:
-                self._audio_session_toggle_inflight = False
-                self.state["audio_session_enabled"] = prev
-                save_state(self.state)
-                self.session_toggle.blockSignals(True)
-                self.session_toggle.setChecked(prev)
-                self.session_toggle.blockSignals(False)
-                for kid in target_ids:
-                    self._queued_actions.pop(kid, None)
-                self._save_queue()
-                self._update_queue_ui()
-                self._populate()
+            if v_scroll is not None:
+                try:
+                    self.table.verticalScrollBar().setValue(v_scroll)
+                except Exception:
+                    pass
 
         def _on_apply_queue(self, reboot_after: bool) -> bool:
             if not self._queued_actions or self._queue_busy:
@@ -5138,7 +5169,6 @@ def main() -> int:
                     self._queue_needs_reboot = False
                     self._refresh_statuses()
                     self._populate()
-                    self._audio_session_toggle_inflight = False
                     return
 
                 missing_user, other_user = self._collect_no_transaction_knobs(reset_user)
@@ -5198,17 +5228,7 @@ def main() -> int:
                     ",".join(sorted(restored_ids)) or "-",
                 )
                 if applied_ids or restored_ids:
-                    if not self._audio_session_toggle_inflight:
-                        selected = self._audio_session_selected()
-                        session_knobs = self._audio_session_knob_ids()
-                        for kid in applied_ids:
-                            if kid in session_knobs:
-                                selected.add(kid)
-                        for kid in restored_ids:
-                            if kid in session_knobs:
-                                selected.discard(kid)
-                        self._set_audio_session_selected(selected)
-            self._audio_session_toggle_inflight = False
+                    pass
 
             queue_reboot = self._queue_needs_reboot
             self._queue_needs_reboot = False
