@@ -1046,7 +1046,6 @@ def main() -> int:
                     "irqbalance_disable",
                     "rtirq_enable",
                     "irq_pinning",
-                    "cpu_governor_performance_temp",
                     "cpu_governor_performance_persistent",
                     "kernel_threadirqs",
                     "kernel_audit_off",
@@ -1999,9 +1998,6 @@ def main() -> int:
             for knob in self.registry:
                 current = self._knob_statuses.get(knob.id)
                 if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable"):
-                    continue
-                if knob.impl and knob.impl.kind in ("irq_affinity", "sysfs_glob_kv", "sysfs_write"):
-                    # Runtime-only knobs should reflect live status after reboot.
                     continue
                 if root_tx_unknown and knob.requires_root:
                     continue

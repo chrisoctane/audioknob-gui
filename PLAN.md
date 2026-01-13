@@ -271,7 +271,7 @@ The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORK
 The GUI log also records high-level action start/finish entries (apply queue, reset all) so successes are visible in-app.
 Force-reset prompts and outcomes are also logged in the GUI log.
 If a reset would disable a dependency, the GUI prompts and adds dependent knobs to the reset queue when accepted.
-Status uses the initial baseline: if current matches baseline it shows “Sys Default” (runtime-only knobs like sysfs/IRQ pinning skip this overlay so live status is visible); if current matches neither baseline nor tweak it shows “Deviated.”
+Status uses the initial baseline: if current matches baseline it shows “Sys Default”; if current matches neither baseline nor tweak it shows “Deviated.”
 
 ### With config dialog (via info popup)
 ```python
@@ -282,11 +282,11 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Kernel isolation knobs also use the Config column core selector. Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying PipeWire knobs restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Kernel isolation knobs also use the Config column core selector. Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying IRQ pinning writes a system config in `/var/lib/audioknob-gui/state.json` and enables `audioknob-irq-pinning.service` so pinning persists across reboots. Applying PipeWire knobs restarts PipeWire services automatically.
 
 ---
 
-## Current Knobs (28) - ALL IMPLEMENTED ✓
+## Current Knobs (27) - ALL IMPLEMENTED ✓
 
 ### Permissions
 | Knob | Kind | Status |
@@ -306,7 +306,6 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 ### CPU
 | Knob | Kind | Status |
 |------|------|--------|
-| CPU Performance (until reboot) | sysfs_glob_kv | ✓ |
 | CPU Performance (persistent) | sysfs_glob_kv (+ cpupower config + service) | ✓ |
 | CPU DMA latency udev rule | udev_rule | ✓ |
 
@@ -314,7 +313,7 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 | Knob | Kind | Status |
 |------|------|--------|
 | Reduce swappiness | sysctl_conf | ✓ |
-| THP: madvise mode | sysfs_glob_kv | ✓ |
+| THP: madvise mode | kernel_cmdline | ✓ |
 | Increase inotify watches | sysctl_conf | ✓ |
 | Reduce dirty writeback | sysctl_conf | ✓ |
 
@@ -469,7 +468,7 @@ Verify:
 Only after non-root testing is stable:
 - systemd toggles (irqbalance) + rtirq config/service
 - IRQ pinning (affinity changes)
-- sysfs knobs (CPU governor, THP)
+- sysfs knobs (CPU governor)
 - udev rule knobs
 - kernel cmdline knobs (require reboot; do last)
 

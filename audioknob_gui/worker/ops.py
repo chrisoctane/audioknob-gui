@@ -204,6 +204,15 @@ def build_knob_paths(
             targets.append({"type": "systemd_unit", "value": unit})
         elif kind == "irq_affinity":
             targets.append({"type": "proc_irq", "value": "/proc/irq"})
+            state_path = str(params.get("persist_state_path", ""))
+            if state_path:
+                targets.append({"type": "path", "value": state_path})
+            unit = str(params.get("persist_unit", ""))
+            if unit:
+                targets.append({"type": "systemd_unit", "value": unit})
+            unit_path = str(params.get("persist_unit_path", ""))
+            if unit_path:
+                targets.append({"type": "path", "value": unit_path})
         elif kind == "sysfs_glob_kv":
             glob_pat = str(params.get("glob", ""))
             if glob_pat:
@@ -607,6 +616,8 @@ def _irq_affinity_preview(params: dict[str, Any]) -> tuple[list[dict[str, Any]],
 
     device_keys = params.get("device_keys") or []
     cpu_cores = str(params.get("cpu_cores", "")).strip()
+    state_path = str(params.get("persist_state_path", "")).strip()
+    unit = str(params.get("persist_unit", "")).strip()
     notes: list[str] = []
     would_write: list[dict[str, Any]] = []
     try:
@@ -644,6 +655,11 @@ def _irq_affinity_preview(params: dict[str, Any]) -> tuple[list[dict[str, Any]],
         warning = device.get("warning")
         if warning:
             notes.append(str(warning))
+
+    if state_path:
+        notes.append(f"Will persist IRQ pinning in {state_path}.")
+    if unit:
+        notes.append(f"Will enable {unit} to re-apply IRQ pinning at boot.")
 
     return would_write, notes
 
@@ -1444,9 +1460,33 @@ def check_knob_status(knob: Any) -> str:
             if parse_cpu_list(current) == expected_set:
                 matched += 1
 
-        if matched == len(target_irqs) and not missing:
+        state_path = str(params.get("persist_state_path", "")).strip()
+        unit = str(params.get("persist_unit", "")).strip()
+        config_ok = False
+        service_ok = False
+        service_partial = False
+        if state_path:
+            config_ok = Path(state_path).exists()
+        if unit:
+            try:
+                enabled_result = run(["systemctl", "is-enabled", unit])
+                enabled_msg = (enabled_result.stderr or enabled_result.stdout or "").strip()
+                enabled = enabled_result.stdout.strip() or enabled_msg
+                if "not-found" in enabled_msg.lower() or "not found" in enabled_msg.lower():
+                    service_ok = False
+                elif enabled in ("enabled", "static", "indirect"):
+                    service_ok = True
+                elif enabled in ("disabled", "masked"):
+                    service_ok = False
+                else:
+                    service_partial = True
+            except Exception:
+                service_partial = True
+
+        persistent_ok = (not state_path or config_ok) and (not unit or service_ok) and not service_partial
+        if matched == len(target_irqs) and not missing and persistent_ok:
             return "applied"
-        if matched > 0 or missing:
+        if matched > 0 or missing or config_ok or service_ok or service_partial:
             return "partial"
         return "not_applied"
     

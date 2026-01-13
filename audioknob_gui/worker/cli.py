@@ -763,6 +763,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         elif kind == "irq_affinity":
             from audioknob_gui.core.irq import (
+                build_irq_pinning_unit,
                 collect_target_irqs,
                 parse_cpu_list,
                 resolve_selected_devices,
@@ -830,6 +831,41 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
             if errors:
                 raise SystemExit("IRQ affinity update failed: " + "; ".join(errors))
+
+            if os.environ.get("AUDIOKNOB_IRQ_PINNING_SERVICE") != "1":
+                persist_state_path = str(params.get("persist_state_path", "")).strip()
+                state_path = Path(persist_state_path) if persist_state_path else Path(default_paths().var_lib_dir) / "state.json"
+                persist_unit = str(params.get("persist_unit", "")).strip() or "audioknob-irq-pinning.service"
+                persist_unit_path = str(params.get("persist_unit_path", "")).strip()
+                unit_path = Path(persist_unit_path) if persist_unit_path else Path("/etc/systemd/system") / persist_unit
+
+                try:
+                    _backup_once(tx, backups, str(state_path), we_created=not state_path.exists())
+                    state_payload: dict[str, Any] = {}
+                    if state_path.exists():
+                        try:
+                            existing = json.loads(state_path.read_text(encoding="utf-8"))
+                            if isinstance(existing, dict):
+                                state_payload.update(existing)
+                        except Exception:
+                            state_payload = {}
+                    state_payload["irq_pinning_devices"] = [str(x) for x in device_keys]
+                    state_payload["irq_pinning_cpu_cores"] = sorted(expected_set)
+                    state_path.parent.mkdir(parents=True, exist_ok=True)
+                    state_path.write_text(json.dumps(state_payload, indent=2) + "\n", encoding="utf-8")
+                except Exception as exc:
+                    warnings.append(f"Failed to persist IRQ pinning config: {exc}")
+
+                try:
+                    _backup_once(tx, backups, str(unit_path), we_created=not unit_path.exists())
+                    unit_content = build_irq_pinning_unit(str(state_path.parent))
+                    unit_path.parent.mkdir(parents=True, exist_ok=True)
+                    unit_path.write_text(unit_content, encoding="utf-8")
+                    subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True, text=True)
+                    from audioknob_gui.worker.ops import systemd_enable_now
+                    effects.append(systemd_enable_now(persist_unit))
+                except Exception as exc:
+                    warnings.append(f"Failed to enable IRQ pinning service: {exc}")
 
         elif kind == "sysfs_glob_kv":
             from audioknob_gui.worker.ops import write_sysfs_values

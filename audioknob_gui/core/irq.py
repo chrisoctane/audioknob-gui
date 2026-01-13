@@ -53,6 +53,25 @@ def parse_cpu_list(raw: str) -> set[int]:
     return out
 
 
+def build_irq_pinning_unit(state_dir: str) -> str:
+    state_path = Path(state_dir) / "state.json"
+    return (
+        "[Unit]\n"
+        "Description=Apply audioknob IRQ pinning\n"
+        "After=multi-user.target\n"
+        f"ConditionPathExists={state_path}\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"Environment=AUDIOKNOB_STATE_DIR={state_dir}\n"
+        "Environment=AUDIOKNOB_IRQ_PINNING_SERVICE=1\n"
+        "ExecStart=/usr/libexec/audioknob-gui-worker apply irq_pinning\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
 def _parse_asound_cards() -> dict[int, str]:
     cards_path = Path("/proc/asound/cards")
     if not cards_path.exists():

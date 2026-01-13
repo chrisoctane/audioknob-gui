@@ -248,32 +248,15 @@ Directive:
 - Show full device list (or show full list with a “Copy to clipboard” button).
 - Consider including additional details (pipewire graph summary, jack detection details) but at minimum: do not truncate.
 
-### P1: THP “madvise mode” correctness — verify apply actually changes kernel state + status refresh
-
-User symptom:
-- “Madvise mode doesn’t seem to reflect any changes.”
+### P1: THP “madvise mode” correctness — verify kernel cmdline + reboot
 
 Notes:
-- Knob is `thp_mode_madvise` using `sysfs_glob_kv` at `/sys/kernel/mm/transparent_hugepage/enabled`.
-- Status logic in worker *should* handle bracketed selector formats, but we need to validate end-to-end on TW.
+- Knob is `thp_mode_madvise` using kernel cmdline `transparent_hugepage=madvise` (reboot required).
 
 Directive:
-- Add a focused manual validation step in docs (or a small integration test if feasible):
-  - before: read THP state
-  - apply knob
-  - after: confirm bracketed mode is `madvise`
-  - verify GUI status refreshes to “Applied”
-- If apply is running but state doesn’t change: capture stderr from sysfs write and surface it in GUI error message.
-
-**Found on Tumbleweed (action required):** `thp_mode_madvise` can be *already* in effect (e.g. `/sys/kernel/mm/transparent_hugepage/enabled` shows `always [madvise] never`), but worker status still reports `not_applied`.
-
-Root cause:
-- `worker/ops.py::check_knob_status(kind=="sysfs_glob_kv")` only strips selector format when the line **starts** with `[` (i.e. `"[madvise] always never"`).
-- Actual THP format is typically `"always [madvise] never"` (bracketed token **not** at start), so status comparison fails.
-
-Worker fix (P0):
-- Update sysfs status parsing to detect bracketed token anywhere in the line (similar to `write_sysfs_values()`’s token scan).
-- After fix, `thp_mode_madvise` should report `applied` when the bracketed token is `madvise` even if it was pre-existing.
+- Apply knob → confirm bootloader config includes `transparent_hugepage=madvise`.
+- Reboot → confirm `/proc/cmdline` includes the token and `/sys/kernel/mm/transparent_hugepage/enabled` shows `[madvise]`.
+- Status should show “Reboot” before reboot and “Applied” after reboot.
 
 ---
 
@@ -306,15 +289,11 @@ Rules:
     - `systemctl is-active rtirq.service`
 
 #### 2) sysfs knobs (root, no reboot)
-- `cpu_governor_performance_temp`
+- `cpu_governor_performance_persistent`
   - Verify: `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`
   - Apply → expect `performance`
   - Reset → expect pre-value restored
-- `thp_mode_madvise`
-  - Verify: `cat /sys/kernel/mm/transparent_hugepage/enabled`
-  - Apply → bracketed token should become `[madvise]` (format varies)
-  - Reset → bracketed token returns to pre token
-  - If kernel refuses writes, GUI must show stderr and status should become `unknown`/conservative.
+  - Verify cpupower config updated (e.g., `/etc/sysconfig/cpupower` or `/etc/default/cpufrequtils`) and service enabled
 
 #### 3) udev rule knobs (root, no reboot)
 - `usb_autosuspend_disable`
@@ -332,13 +311,14 @@ Rules:
 - `kernel_threadirqs` (threadirqs)
 - `kernel_audit_off` (audit=0)
 - `kernel_mitigations_off` (mitigations=off)
+- `thp_mode_madvise` (transparent_hugepage=madvise)
 
 For each knob:
 - Apply in GUI → verify bootloader file updated:
   - Tumbleweed: `/etc/kernel/cmdline` contains token
   - Verify update tool output is surfaced (sdbootutil/grub update)
 - Reboot → verify:
-  - `cat /proc/cmdline | tr ' ' '\\n' | grep -E '^(threadirqs|audit=0|mitigations=off)$'`
+  - `cat /proc/cmdline | tr ' ' '\\n' | grep -E '^(threadirqs|audit=0|mitigations=off|transparent_hugepage=madvise)$'`
   - GUI status becomes applied
 - Reset in GUI → verify token removed from bootloader file
 - Reboot → verify token absent in `/proc/cmdline` and GUI status not_applied
@@ -346,7 +326,7 @@ For each knob:
 ### P0 — Status correctness sweep (must pass)
 
 For each knob kind, ensure status checks actual state and avoids false positives:
-- `sysfs_glob_kv`: must handle selector formats (THP) and plain values.
+- `sysfs_glob_kv`: must handle per-CPU files (CPU governor) and missing sysfs entries.
 - `systemd_unit_toggle`: handle masked/static/indirect/generator states correctly.
 - `kernel_cmdline`: exact token matching only (no substring matches).
 - `group_membership`: status reflects actual group membership even if applied externally.
@@ -456,8 +436,8 @@ Captured system state with multiple applied changes:
 |------|-------|--------------|-------|------------------|--------|
 | irqbalance_disable | | | | | PENDING |
 | rtirq_enable | | | | | PENDING |
-| cpu_governor_performance_temp | | | | | PENDING |
-| thp_mode_madvise | | | | | PENDING |
+| cpu_governor_performance_persistent | | | | | PENDING |
+| thp_mode_madvise | | | | | PENDING (reboot) |
 | usb_autosuspend_disable | | | | | PENDING |
 | cpu_dma_latency_udev | | | | | PENDING |
 | kernel_threadirqs | | | | | PENDING (reboot) |
@@ -907,12 +887,12 @@ During manual validation, we discovered a fundamental UX issue:
 
 ```json
 {
-  "id": "thp_mode_madvise",
+  "id": "cpu_governor_performance_persistent",
   "impl": {
     "kind": "sysfs_glob_kv",
-    "default_value": "always",
-    "optimized_value": "madvise",
-    "paths": ["/sys/kernel/mm/transparent_hugepage/enabled"]
+    "default_value": "powersave",
+    "optimized_value": "performance",
+    "paths": ["/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"]
   }
 }
 ```
@@ -924,8 +904,8 @@ For knobs where we don't know/care about default:
 
 ```json
 {
-  "knob_id": "thp_mode_madvise",
-  "current_value": "madvise",
+  "knob_id": "cpu_governor_performance_persistent",
+  "current_value": "performance",
   "state": "optimized",
   "has_transaction": true
 }
@@ -1276,4 +1256,3 @@ Proposal documented in PROJECT_STATE.md under "Future Enhancements (P2)".
 Not implemented - marked as future enhancement, not blocking for v1.0.
 
 Current workaround: Reset button works if we have a transaction; "no transaction" cases need manual handling.
-

@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **28 knobs defined** (ALL 28 IMPLEMENTED)
+- **27 knobs defined** (ALL 27 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
@@ -29,7 +29,7 @@
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
-- **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in)
+- **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in), persisted via a boot-time systemd oneshot
 
 ### GUI Layout
 ```
@@ -44,7 +44,7 @@ Notes:
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - "Sys" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
-- IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers.
+- IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also writes a system config + enables `audioknob-irq-pinning.service` so pinning persists across reboots.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
 - Header row includes a Re-check State button to refresh current status.
 - Main window title includes app version and git short SHA when available.
@@ -88,7 +88,7 @@ Notes:
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
 - "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 - Resetting a knob that others depend on now prompts and cascades dependent resets when accepted.
-- Baseline-aware status labels knobs as “Sys Default” when current matches the initial scan (runtime-only knobs like sysfs/IRQ pinning skip this overlay so live status is visible).
+- Baseline-aware status labels knobs as “Sys Default” when current matches the initial scan.
 - System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
 - Main window can be resized up to the screen size (no max-height clamp to content).
 - Separator rows no longer show stale info buttons after table refresh.
@@ -223,14 +223,6 @@ systemctl is-active rtirq.service
 
 #### 2) sysfs knobs (root, no reboot)
 
-**cpu_governor_performance_temp:**
-```bash
-# Before
-cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
-# Apply → expect "performance"
-# Reset → expect pre-value restored
-```
-
 **cpu_governor_performance_persistent:**
 ```bash
 # Before
@@ -240,15 +232,6 @@ grep -E '^\s*GOVERNOR\s*=' /etc/sysconfig/cpupower 2>/dev/null || true
 
 # Apply → expect "performance" + cpupower enabled + GOV set to performance
 # Reset → expect pre-values restored (sysfs + config + service) via transaction
-```
-
-**thp_mode_madvise:**
-```bash
-# Before
-cat /sys/kernel/mm/transparent_hugepage/enabled
-# Apply → bracketed token becomes [madvise]
-# Reset → bracketed token returns to original
-# If kernel refuses writes: GUI must show stderr, status should become unknown
 ```
 
 #### 3) udev rule knobs (root, no reboot)
@@ -270,7 +253,7 @@ test -f /etc/udev/rules.d/99-cpu-dma-latency.rules && echo present || echo absen
 
 #### 4) kernel cmdline knobs (root, requires reboot) — DO LAST
 
-For each: `kernel_threadirqs`, `kernel_audit_off`, `kernel_mitigations_off`
+For each: `kernel_threadirqs`, `kernel_audit_off`, `kernel_mitigations_off`, `thp_mode_madvise`
 
 **Apply flow:**
 1. Apply in GUI → verify bootloader file updated:
@@ -280,12 +263,12 @@ For each: `kernel_threadirqs`, `kernel_audit_off`, `kernel_mitigations_off`
    - Confirm the token appears in an entry under `/boot/loader/entries/` or `/boot/efi/loader/entries/` (setup-dependent)
    - Example:
 ```bash
-sudo grep -R --line-number -E '(^| )threadirqs( |$)|(^| )audit=0( |$)|(^| )mitigations=off( |$)' /boot/loader/entries /boot/efi/loader/entries 2>/dev/null || true
+sudo grep -R --line-number -E '(^| )threadirqs( |$)|(^| )audit=0( |$)|(^| )mitigations=off( |$)|(^| )transparent_hugepage=madvise( |$)' /boot/loader/entries /boot/efi/loader/entries 2>/dev/null || true
 ```
 3. Reboot
 4. Verify:
 ```bash
-cat /proc/cmdline | tr ' ' '\n' | grep -E '^(threadirqs|audit=0|mitigations=off)$'
+cat /proc/cmdline | tr ' ' '\n' | grep -E '^(threadirqs|audit=0|mitigations=off|transparent_hugepage=madvise)$'
 ```
 5. GUI status should show "Applied"
 
@@ -962,7 +945,7 @@ Comprehensive realtime readiness scan inspired by `realtimeconfigquickscan` but 
 | Audio group | User in audio/realtime group | audio_group_membership |
 | RT priority | Can use chrt, rtprio limit | rt_limits_audio_group |
 | Memory lock | memlock limit sufficient | rt_limits_audio_group |
-| CPU governor | All CPUs on 'performance' | cpu_governor_performance_temp (or cpu_governor_performance_persistent) |
+| CPU governor | All CPUs on 'performance' | cpu_governor_performance_persistent |
 | Swappiness | vm.swappiness ≤ 10 | swappiness |
 | Inotify watches | ≥ 524288 for DAWs | inotify_max_watches |
 | Kernel RT | PREEMPT_RT or threadirqs | kernel_threadirqs |
@@ -988,7 +971,7 @@ Score: 88% (13 passed, 4 warnings, 0 failed)
 
 ✓ Audio group membership: User is in 'audio' group
 ⚠ CPU governor: Not all CPUs on 'performance'
-    Fix: Use 'cpu_governor_performance_temp' knob (or persistent knob if you want it to survive reboot)
+    Fix: Use 'cpu_governor_performance_persistent' knob
 ...
 ```
 

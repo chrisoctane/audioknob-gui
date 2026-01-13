@@ -123,7 +123,7 @@
         "restore": true
       },
       "category": "irq",
-      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning.",
+      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning. Persists via /var/lib/audioknob-gui/state.json + audioknob-irq-pinning.service.",
       "depends_on": [
         "irqbalance_disable"
       ],
@@ -132,7 +132,10 @@
         "kind": "irq_affinity",
         "params": {
           "cpu_cores": "0,1",
-          "device_keys": []
+          "device_keys": [],
+          "persist_state_path": "/var/lib/audioknob-gui/state.json",
+          "persist_unit": "audioknob-irq-pinning.service",
+          "persist_unit_path": "/etc/systemd/system/audioknob-irq-pinning.service"
         }
       },
       "requires_commands": [],
@@ -141,29 +144,6 @@
       "requires_root": true,
       "risk_level": "medium",
       "title": "IRQ Pinning"
-    },
-    {
-      "capabilities": {
-        "apply": true,
-        "read": true,
-        "restore": true
-      },
-      "category": "cpu",
-      "description": "Sets CPU frequency governor to 'performance' (until reboot). Prevents CPU frequency scaling which can cause latency spikes. File: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-      "id": "cpu_governor_performance_temp",
-      "impl": {
-        "kind": "sysfs_glob_kv",
-        "params": {
-          "glob": "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-          "value": "performance"
-        }
-      },
-      "requires_commands": [],
-      "requires_groups": [],
-      "requires_reboot": false,
-      "requires_root": true,
-      "risk_level": "low",
-      "title": "CPU Performance (until reboot)"
     },
     {
       "capabilities": {
@@ -248,18 +228,17 @@
         "restore": true
       },
       "category": "vm",
-      "description": "Sets Transparent Huge Pages to 'madvise' mode. Recommended for latency-sensitive audio workloads. File: /sys/kernel/mm/transparent_hugepage/enabled",
+      "description": "Sets Transparent Huge Pages to 'madvise' mode via kernel cmdline. Requires reboot to take effect. Param: transparent_hugepage=madvise",
       "id": "thp_mode_madvise",
       "impl": {
-        "kind": "sysfs_glob_kv",
+        "kind": "kernel_cmdline",
         "params": {
-          "glob": "/sys/kernel/mm/transparent_hugepage/enabled",
-          "value": "madvise"
+          "param": "transparent_hugepage=madvise"
         }
       },
       "requires_commands": [],
       "requires_groups": [],
-      "requires_reboot": false,
+      "requires_reboot": true,
       "requires_root": true,
       "risk_level": "medium",
       "title": "Huge Pages"

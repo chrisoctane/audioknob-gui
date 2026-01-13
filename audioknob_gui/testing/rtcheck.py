@@ -182,7 +182,7 @@ def check_cpu_governor() -> CheckResult:
         status=CheckStatus.WARN,
         message=f"Not all CPUs on 'performance'",
         detail=gov_summary,
-        fix_knob="cpu_governor_performance_temp",
+        fix_knob="cpu_governor_performance_persistent",
         fix_command="cpupower frequency-set -g performance"
     )
 
