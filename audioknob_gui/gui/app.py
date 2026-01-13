@@ -916,8 +916,8 @@ def main() -> int:
             # Global reboot-required banner (shown when any knob is pending reboot).
             self.reboot_banner = QLabel("")
             self.reboot_banner.setStyleSheet("color: #f57c00; font-weight: bold;")
+            self.reboot_banner.setWordWrap(True)
             self.reboot_banner.setVisible(False)
-            top.addWidget(self.reboot_banner)
 
             self.reboot_toggle = QCheckBox("Enable reboot-required changes")
             self.reboot_toggle.setChecked(bool(self.state.get("enable_reboot_knobs", False)))
@@ -978,6 +978,7 @@ def main() -> int:
             self.btn_reset.setEnabled(self._baseline_ready)
             top.addWidget(self.btn_reset)
             root.addLayout(top)
+            root.addWidget(self.reboot_banner)
 
             advanced_note = QLabel(
                 "Advanced settings can reduce performance in intensive workloads. "
@@ -1007,6 +1008,9 @@ def main() -> int:
             info_header = self.table.horizontalHeaderItem(0)
             if info_header is not None:
                 info_header.setToolTip("Show details")
+            req_header = self.table.horizontalHeaderItem(4)
+            if req_header is not None:
+                req_header.setToolTip(self._requirements_key_tooltip())
             # Make every column user-resizable (Interactive). We also set reasonable defaults.
             # NOTE: ResizeToContents does NOT reliably account for cell widgets (buttons/combos),
             # which causes text clipping like "Apply" -> "Annlv".
@@ -1060,14 +1064,74 @@ def main() -> int:
         def _requirements_label(self, k, advanced_knobs: set[str]) -> str:
             parts: list[str] = []
             if k.id in advanced_knobs:
-                parts.append("Adv")
+                parts.append("A")
             if k.requires_reboot:
-                parts.append("Rbt")
+                parts.append("R")
             if k.requires_groups:
-                parts.append("Grp")
+                parts.append("G")
             if not parts:
                 return "—"
             return " ".join(parts)
+
+        def _requirements_key_tooltip(self) -> str:
+            return "A=Advanced, R=Reboot required, G=Groups required"
+
+        def _requirements_tooltip(self, k, advanced_knobs: set[str]) -> str:
+            legend = self._requirements_key_tooltip()
+            parts: list[str] = []
+            if k.id in advanced_knobs:
+                parts.append("Advanced")
+            if k.requires_reboot:
+                parts.append("Reboot required")
+            if k.requires_groups:
+                parts.append("Groups required")
+            if not parts:
+                return f"{legend}\nNo requirements"
+            return f"{legend}\nRequires: {', '.join(parts)}"
+
+        def _requirements_group_tooltip(self, label: str) -> str:
+            legend = self._requirements_key_tooltip()
+            if label == "—":
+                return f"{legend}\nNo requirements"
+            parts: list[str] = []
+            for letter in label.split():
+                if letter == "A":
+                    parts.append("Advanced")
+                elif letter == "R":
+                    parts.append("Reboot required")
+                elif letter == "G":
+                    parts.append("Groups required")
+            if not parts:
+                return legend
+            return f"{legend}\nRequires: {', '.join(parts)}"
+
+        def _grouping_mode(self) -> str | None:
+            if self._sort_column is None or self._sort_column == 7:
+                return "category"
+            if self._sort_column == 4:
+                return "requirements"
+            if self._sort_column == 5:
+                return "status"
+            if self._sort_column == 8:
+                return "risk"
+            return None
+
+        def _category_label(self, key: str) -> str:
+            mapping = {
+                "cpu": "CPU",
+                "irq": "IRQ",
+                "kernel": "Kernel",
+                "permissions": "Permissions",
+                "power": "Power",
+                "services": "Services",
+                "stack": "Stack",
+                "testing": "Testing",
+                "vm": "Memory",
+            }
+            if key in mapping:
+                return mapping[key]
+            cleaned = key.replace("_", " ").strip()
+            return cleaned.title() if cleaned else key
 
         def _sys_label_for_knob(self, k) -> str:
             if k.impl is None:
@@ -2236,6 +2300,7 @@ def main() -> int:
             advanced_knobs = self._advanced_knob_ids()
             visible_knobs = self._visible_knobs()
             ordered: list[object] = []
+            grouping_mode = self._grouping_mode()
 
             def _sort_key(k, col: int) -> tuple:
                 status = self._knob_statuses.get(k.id, "unknown")
@@ -2268,42 +2333,133 @@ def main() -> int:
                 return (status_order.get(status, 99), k.title.lower())
 
             category_order = [
-                ("cpu", "CPU"),
-                ("irq", "IRQ"),
-                ("kernel", "Kernel"),
-                ("permissions", "Permissions"),
-                ("power", "Power"),
-                ("services", "Services"),
-                ("stack", "Stack"),
-                ("testing", "Testing"),
-                ("vm", "VM"),
+                "cpu",
+                "irq",
+                "kernel",
+                "permissions",
+                "power",
+                "services",
+                "stack",
+                "vm",
+                "testing",
             ]
-            by_category: dict[str, list[object]] = {}
-            for k in visible_knobs:
-                key = str(getattr(k, "category", "uncategorized"))
-                by_category.setdefault(key, []).append(k)
 
-            def _sorted_items(items: list[object]) -> list[object]:
+            def _sorted_items(items: list[object], *, force_title: bool = False) -> list[object]:
                 if self._sort_column is None:
                     return items
+                if force_title:
+                    return sorted(items, key=lambda k: k.title.lower(), reverse=self._sort_descending)
                 col = int(self._sort_column)
                 return sorted(items, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
 
             CATEGORY_HEADER = object()
             CATEGORY_SEPARATOR = object()
-            known_categories = {c[0] for c in category_order}
-            extra_categories = sorted(set(by_category.keys()) - known_categories)
-
-            for cat_key, cat_label in category_order + [(c, c.title()) for c in extra_categories]:
-                items = by_category.get(cat_key, [])
-                if not items:
-                    continue
-                ordered.append((CATEGORY_HEADER, cat_label))
-                ordered.extend(_sorted_items(items))
-                ordered.append(CATEGORY_SEPARATOR)
-
-            if ordered and ordered[-1] is CATEGORY_SEPARATOR:
-                ordered.pop()
+            if grouping_mode is None:
+                ordered = _sorted_items(list(visible_knobs))
+            elif grouping_mode == "category":
+                by_category: dict[str, list[object]] = {}
+                for k in visible_knobs:
+                    key = str(getattr(k, "category", "uncategorized"))
+                    by_category.setdefault(key, []).append(k)
+                known_categories = set(category_order)
+                extra_categories = sorted(set(by_category.keys()) - known_categories)
+                ordered_categories = (
+                    [(c, self._category_label(c)) for c in category_order]
+                    + [(c, self._category_label(c)) for c in extra_categories]
+                )
+                if self._sort_column == 7 and self._sort_descending:
+                    ordered_categories = list(reversed(ordered_categories))
+                for cat_key, cat_label in ordered_categories:
+                    items = by_category.get(cat_key, [])
+                    if not items:
+                        continue
+                    ordered.append((CATEGORY_HEADER, cat_label))
+                    ordered.extend(_sorted_items(items, force_title=self._sort_column is not None))
+                    ordered.append(CATEGORY_SEPARATOR)
+                if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                    ordered.pop()
+            elif grouping_mode == "requirements":
+                by_req: dict[str, list[object]] = {}
+                for k in visible_knobs:
+                    label = self._requirements_label(k, advanced_knobs)
+                    by_req.setdefault(label, []).append(k)
+                req_order = ["—", "A", "R", "G", "A R", "A G", "R G", "A R G"]
+                extra_labels = sorted(set(by_req.keys()) - set(req_order))
+                ordered_labels = req_order + extra_labels
+                if self._sort_descending:
+                    ordered_labels = list(reversed(ordered_labels))
+                for label in ordered_labels:
+                    items = by_req.get(label, [])
+                    if not items:
+                        continue
+                    ordered.append((CATEGORY_HEADER, label, self._requirements_group_tooltip(label)))
+                    ordered.extend(_sorted_items(items, force_title=True))
+                    ordered.append(CATEGORY_SEPARATOR)
+                if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                    ordered.pop()
+            elif grouping_mode == "status":
+                status_labels = {
+                    "applied": "Applied",
+                    "pending_reboot": "Reboot Required",
+                    "deviated": "Deviated",
+                    "partial": "Partial",
+                    "sys_default": "Sys Default",
+                    "not_applied": "Not Applied",
+                    "not_applicable": "N/A",
+                    "read_only": "Read Only",
+                    "unknown": "Unknown",
+                }
+                status_order = [
+                    "applied",
+                    "pending_reboot",
+                    "deviated",
+                    "partial",
+                    "sys_default",
+                    "not_applied",
+                    "not_applicable",
+                    "read_only",
+                    "unknown",
+                ]
+                by_status: dict[str, list[object]] = {}
+                for k in visible_knobs:
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    key = status if status in status_labels else "unknown"
+                    by_status.setdefault(key, []).append(k)
+                extra_statuses = sorted(set(by_status.keys()) - set(status_order))
+                ordered_statuses = status_order + extra_statuses
+                if self._sort_descending:
+                    ordered_statuses = list(reversed(ordered_statuses))
+                for key in ordered_statuses:
+                    items = by_status.get(key, [])
+                    if not items:
+                        continue
+                    label = status_labels.get(key, key)
+                    ordered.append((CATEGORY_HEADER, label))
+                    ordered.extend(_sorted_items(items, force_title=True))
+                    ordered.append(CATEGORY_SEPARATOR)
+                if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                    ordered.pop()
+            elif grouping_mode == "risk":
+                risk_labels = {"low": "Low", "medium": "Medium", "high": "High", "unknown": "Unknown"}
+                risk_order = ["low", "medium", "high", "unknown"]
+                by_risk: dict[str, list[object]] = {}
+                for k in visible_knobs:
+                    risk = str(getattr(k, "risk_level", "unknown")).lower()
+                    key = risk if risk in risk_labels else "unknown"
+                    by_risk.setdefault(key, []).append(k)
+                extra_risks = sorted(set(by_risk.keys()) - set(risk_order))
+                ordered_risks = risk_order + extra_risks
+                if self._sort_descending:
+                    ordered_risks = list(reversed(ordered_risks))
+                for key in ordered_risks:
+                    items = by_risk.get(key, [])
+                    if not items:
+                        continue
+                    ordered.append((CATEGORY_HEADER, risk_labels.get(key, key.title())))
+                    ordered.extend(_sorted_items(items, force_title=True))
+                    ordered.append(CATEGORY_SEPARATOR)
+                if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                    ordered.pop()
 
             self.table.setRowCount(len(ordered))
             self._row_dim = [False] * len(ordered)
@@ -2311,6 +2467,9 @@ def main() -> int:
             for r, k in enumerate(ordered):
                 if isinstance(k, tuple) and k and k[0] is CATEGORY_HEADER:
                     label = str(k[1])
+                    tooltip = str(k[2]) if len(k) > 2 and k[2] else ""
+                    for c in range(self.table.columnCount()):
+                        self.table.removeCellWidget(r, c)
                     self.table.setSpan(r, 0, 1, self.table.columnCount())
                     header_item = QTableWidgetItem(label)
                     header_item.setFlags(Qt.ItemIsEnabled)
@@ -2319,13 +2478,15 @@ def main() -> int:
                     header_font = header_item.font()
                     header_font.setBold(True)
                     header_item.setFont(header_font)
+                    if tooltip:
+                        header_item.setToolTip(tooltip)
                     self.table.setItem(r, 0, header_item)
                     for c in range(1, self.table.columnCount()):
-                        self.table.removeCellWidget(r, c)
                         self.table.setItem(r, c, QTableWidgetItem(""))
                     continue
                 if k is CATEGORY_SEPARATOR:
-                    self.table.removeCellWidget(r, 0)
+                    for c in range(self.table.columnCount()):
+                        self.table.removeCellWidget(r, c)
                     sep = QTableWidgetItem("")
                     sep.setFlags(Qt.ItemIsEnabled)
                     sep.setForeground(QColor("#9e9e9e"))
@@ -2333,7 +2494,6 @@ def main() -> int:
                     self.table.setSpan(r, 0, 1, self.table.columnCount())
                     self.table.setItem(r, 0, sep)
                     for c in range(1, self.table.columnCount()):
-                        self.table.removeCellWidget(r, c)
                         self.table.setItem(r, c, QTableWidgetItem(""))
                     try:
                         self.table.setRowHeight(r, 10)
@@ -2419,6 +2579,7 @@ def main() -> int:
 
                 # Column 4: Requirements
                 req_item = QTableWidgetItem(self._requirements_label(k, advanced_knobs))
+                req_item.setToolTip(self._requirements_tooltip(k, advanced_knobs))
                 if row_dim:
                     req_item.setForeground(locked_fg)
                     req_item.setBackground(locked_bg)
@@ -2442,7 +2603,7 @@ def main() -> int:
                 self.table.setItem(r, 5, status_item)
 
                 # Column 7: Category
-                cat_item = QTableWidgetItem(str(k.category))
+                cat_item = QTableWidgetItem(self._category_label(str(k.category)))
                 if row_dim:
                     cat_item.setForeground(locked_fg)
                     cat_item.setBackground(locked_bg)
@@ -2834,13 +2995,13 @@ def main() -> int:
 
             requirements_texts = [
                 "Requirements",
-                "Adv",
-                "Rbt",
-                "Grp",
-                "Adv Rbt",
-                "Adv Grp",
-                "Rbt Grp",
-                "Adv Rbt Grp",
+                "A",
+                "R",
+                "G",
+                "A R",
+                "A G",
+                "R G",
+                "A R G",
                 "—",
             ]
             requirements_width = max(_w(t) for t in requirements_texts)

@@ -37,16 +37,18 @@ Columns: Info | Knob | Action | Config | Requirements | Status | Check | Categor
          (0)  (1)    (2)      (3)      (4)           (5)     (6)    (7)       (8)    (9)
 
 Notes:
-- Single table with category headers; advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
+- Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
-- "Requirements" shows Adv/Rbt/Grp markers for advanced, reboot-required, and group-required knobs.
+- "Requirements" shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - "Sys" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
+- Sorting by Category/Requirements/Status/Risk keeps grouped headers; other columns sort flat.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
 - IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also writes a system config + enables `audioknob-irq-pinning.service` so pinning persists across reboots.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
 - Header row includes a Re-check State button to refresh current status.
+- Reboot-required banner appears below the header row (wraps to avoid widening the window).
 - Main window title includes app version and git short SHA when available.
 ```
 
@@ -91,7 +93,7 @@ Notes:
 - Baseline-aware status labels knobs as “Sys Default” when current matches the initial scan.
 - System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
 - Main window can be resized up to the screen size (no max-height clamp to content).
-- Separator rows no longer show stale info buttons after table refresh.
+- Category headers and separators clear all cell widgets so no stray info buttons appear.
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 
 ### Next Steps

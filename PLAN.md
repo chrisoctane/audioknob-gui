@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.7)
+### Install on openSUSE Tumbleweed (RPM, v0.3.8)
 
-For v0.3.7 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.3.8 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -219,9 +219,9 @@ In `gui/app.py` → `_populate()`:
 
 **Advanced mode**: Single table; advanced knobs are gated by the "Enable advanced knobs" checkbox.
 
-**Sorting**: Click any column header to sort
+**Sorting**: Click any column header to sort. Category/Requirements/Status/Risk sorts show grouped headers; other columns sort as a flat list.
 
-**Requirements column**: Shows Adv/Rbt/Grp markers for advanced, reboot-required, and group-required knobs.
+**Requirements column**: Shows A/R/G markers for Advanced/Reboot/Groups (tooltip includes the key).
 
 **Sys column**: Shows the target command/file/parameter shorthand for each knob.
 
