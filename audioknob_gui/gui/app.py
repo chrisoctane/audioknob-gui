@@ -2212,7 +2212,7 @@ def main() -> int:
             
             mapping = {
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
-                "sys_default": ("✓ Sys Default", "#1976d2"), # Blue
+                "sys_default": ("Sys Default", "#1976d2"), # Blue
                 "deviated": ("⚠ Deviated", "#f57c00"),   # Orange warning
                 "not_applied": ("—", "#757575"),          # Gray dash
                 "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
@@ -2823,7 +2823,7 @@ def main() -> int:
             status_texts = [
                 "Locked",
                 "✓ Applied",
-                "✓ Sys Default",
+                "Sys Default",
                 "⚠ Deviated",
                 "⟳ Reboot",
                 "◐ Partial",

@@ -838,10 +838,13 @@ return "read_only"  # Special case, not apply/reset-able
 | Status | Meaning | GUI Display |
 |--------|---------|-------------|
 | `applied` | Changes are in effect | ✓ Applied (green) |
+| `sys_default` | Matches baseline state | Sys Default (blue) |
 | `not_applied` | Changes are not present | — (gray) |
 | `partial` | Some but not all changes applied | ◐ Partial (orange) |
 | `pending_reboot` | Applied to boot config, needs reboot | ⟳ Reboot (orange) |
 | `read_only` | Informational knob, no changes | — (gray) |
+| `deviated` | Neither baseline nor applied | ⚠ Deviated (orange) |
+| `not_applicable` | Not relevant on this system | N/A (gray) |
 | `unknown` | Could not determine status | — (gray) |
 
 ---
