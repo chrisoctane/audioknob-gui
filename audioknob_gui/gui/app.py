@@ -435,6 +435,14 @@ def load_state() -> dict:
         "queued_actions": {},
         # Per-knob UI state
         "qjackctl_cpu_cores": None,  # list[int] or None
+        "kernel_isolcpus_cores": None,  # list[int] or None
+        "kernel_nohz_full_cores": None,  # list[int] or None
+        "kernel_rcu_nocbs_cores": None,  # list[int] or None
+        "kernel_irqaffinity_cores": None,  # list[int] or None
+        "irq_pinning_devices": [],  # list[str]
+        "irq_pinning_cpu_cores": None,  # list[int] or None
+        "audio_session_enabled": False,  # bool
+        "audio_session_knobs": [],  # list[str]
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
         "jitter_test_last": None,  # dict payload from last run or None
@@ -457,6 +465,22 @@ def load_state() -> dict:
             data["font_size"] = 11
         if "qjackctl_cpu_cores" not in data:
             data["qjackctl_cpu_cores"] = None
+        if "kernel_isolcpus_cores" not in data:
+            data["kernel_isolcpus_cores"] = None
+        if "kernel_nohz_full_cores" not in data:
+            data["kernel_nohz_full_cores"] = None
+        if "kernel_rcu_nocbs_cores" not in data:
+            data["kernel_rcu_nocbs_cores"] = None
+        if "kernel_irqaffinity_cores" not in data:
+            data["kernel_irqaffinity_cores"] = None
+        if "irq_pinning_devices" not in data:
+            data["irq_pinning_devices"] = []
+        if "irq_pinning_cpu_cores" not in data:
+            data["irq_pinning_cpu_cores"] = None
+        if "audio_session_enabled" not in data:
+            data["audio_session_enabled"] = False
+        if "audio_session_knobs" not in data:
+            data["audio_session_knobs"] = []
         if "pipewire_quantum" not in data:
             data["pipewire_quantum"] = None
         if "pipewire_sample_rate" not in data:
@@ -500,6 +524,42 @@ def load_state() -> dict:
             data["queued_actions"] = cleaned
         if data.get("jitter_test_last") is not None and not isinstance(data.get("jitter_test_last"), dict):
             data["jitter_test_last"] = None
+        if data.get("irq_pinning_devices") is not None and not isinstance(data.get("irq_pinning_devices"), list):
+            data["irq_pinning_devices"] = []
+        else:
+            data["irq_pinning_devices"] = [
+                str(x) for x in data.get("irq_pinning_devices", []) if isinstance(x, (str, int))
+            ]
+        if data.get("irq_pinning_cpu_cores") is not None and not isinstance(data.get("irq_pinning_cpu_cores"), list):
+            data["irq_pinning_cpu_cores"] = None
+        else:
+            cores = data.get("irq_pinning_cpu_cores")
+            if isinstance(cores, list) and all(isinstance(x, int) for x in cores):
+                data["irq_pinning_cpu_cores"] = cores
+            else:
+                data["irq_pinning_cpu_cores"] = None
+        for key in (
+            "kernel_isolcpus_cores",
+            "kernel_nohz_full_cores",
+            "kernel_rcu_nocbs_cores",
+            "kernel_irqaffinity_cores",
+        ):
+            if data.get(key) is not None and not isinstance(data.get(key), list):
+                data[key] = None
+            else:
+                cores = data.get(key)
+                if isinstance(cores, list) and all(isinstance(x, int) for x in cores):
+                    data[key] = cores
+                else:
+                    data[key] = None
+        if data.get("audio_session_enabled") is not None and not isinstance(data.get("audio_session_enabled"), bool):
+            data["audio_session_enabled"] = False
+        if data.get("audio_session_knobs") is not None and not isinstance(data.get("audio_session_knobs"), list):
+            data["audio_session_knobs"] = []
+        else:
+            data["audio_session_knobs"] = [
+                str(x) for x in data.get("audio_session_knobs", []) if isinstance(x, str) and x.strip()
+            ]
         if data.get("system_profile") is not None and not isinstance(data.get("system_profile"), dict):
             data["system_profile"] = None
         if data.get("baseline_statuses") is not None and not isinstance(data.get("baseline_statuses"), dict):
@@ -545,15 +605,18 @@ def main() -> int:
             QDialog,
             QDialogButtonBox,
             QGridLayout,
+            QGroupBox,
             QHBoxLayout,
             QHeaderView,
             QLabel,
             QMainWindow,
             QMessageBox,
             QPushButton,
+            QScrollArea,
             QSizePolicy,
             QSlider,
             QSpinBox,
+            QTabWidget,
             QTableWidget,
             QTableWidgetItem,
             QTextEdit,
@@ -629,17 +692,30 @@ def main() -> int:
             self.accept()
 
     class CpuCoreDialog(QDialog):
-        def __init__(self, *, cpu_count: int, selected: set[int], parent: QWidget | None = None) -> None:
+        def __init__(
+            self,
+            *,
+            cpu_count: int,
+            selected: set[int],
+            title: str | None = None,
+            lines: list[str] | None = None,
+            parent: QWidget | None = None,
+        ) -> None:
             super().__init__(parent)
-            self.setWindowTitle("Configure CPU cores for JACK")
+            self.setWindowTitle(title or "Configure CPU cores for JACK")
             self.resize(520, 320)
 
             self._cpu_count = max(1, int(cpu_count))
             self._checks: list[QCheckBox] = []
 
             root = QVBoxLayout(self)
-            root.addWidget(QLabel("Select CPU cores to pin JACK to (taskset -c)."))
-            root.addWidget(QLabel("Tip: cores 0-1 are often busiest (IRQs/system tasks)."))
+            if lines is None:
+                lines = [
+                    "Select CPU cores to pin JACK to (taskset -c).",
+                    "Tip: cores 0-1 are often busiest (IRQs/system tasks).",
+                ]
+            for line in lines:
+                root.addWidget(QLabel(line))
 
             grid_wrap = QWidget()
             grid = QGridLayout(grid_wrap)
@@ -680,6 +756,122 @@ def main() -> int:
                     out.append(i)
             return out
 
+    class IrqPinningDialog(QDialog):
+        def __init__(
+            self,
+            *,
+            cpu_count: int,
+            selected_cores: set[int],
+            devices: list[dict[str, object]],
+            selected_devices: set[str],
+            parent: QWidget | None = None,
+        ) -> None:
+            super().__init__(parent)
+            self.setWindowTitle("Configure IRQ pinning")
+            self.resize(620, 520)
+
+            self._cpu_count = max(1, int(cpu_count))
+            self._core_checks: list[QCheckBox] = []
+            self._device_checks: dict[str, QCheckBox] = {}
+
+            root = QVBoxLayout(self)
+            root.addWidget(QLabel("Select audio devices to pin their IRQs."))
+            root.addWidget(QLabel("USB devices pin the host controller IRQs (shared)."))
+
+            device_box = QGroupBox("Devices")
+            device_layout = QVBoxLayout(device_box)
+            device_scroll = QScrollArea()
+            device_scroll.setWidgetResizable(True)
+            device_container = QWidget()
+            device_container_layout = QVBoxLayout(device_container)
+
+            for device in devices:
+                key = str(device.get("key"))
+                label = str(device.get("label") or key)
+                bus = str(device.get("bus") or "unknown")
+                irqs = device.get("irqs") or []
+                warning = device.get("warning")
+                controller = device.get("controller_pci_id")
+                driver = device.get("controller_driver")
+                extra: list[str] = []
+                if controller:
+                    ctrl = f"controller {controller}"
+                    if driver:
+                        ctrl += f" ({driver})"
+                    extra.append(ctrl)
+                if irqs:
+                    extra.append("IRQs: " + ",".join(str(x) for x in irqs))
+                if warning:
+                    extra.append(f"WARNING: {warning}")
+
+                text = f"{label} [{bus}]"
+                if extra:
+                    text += " - " + "; ".join(extra)
+
+                cb = QCheckBox(text)
+                cb.setChecked(key in selected_devices)
+                if not irqs:
+                    cb.setEnabled(False)
+                    cb.setToolTip("No IRQs detected for this device.")
+                self._device_checks[key] = cb
+                device_container_layout.addWidget(cb)
+
+            device_container_layout.addStretch(1)
+            device_scroll.setWidget(device_container)
+            device_layout.addWidget(device_scroll)
+            root.addWidget(device_box)
+
+            core_box = QGroupBox("CPU cores")
+            core_layout = QVBoxLayout(core_box)
+            core_layout.addWidget(QLabel("Select CPU cores to pin IRQs to."))
+
+            grid_wrap = QWidget()
+            grid = QGridLayout(grid_wrap)
+
+            cols = 4
+            for core in range(self._cpu_count):
+                cb = QCheckBox(f"Core {core}")
+                cb.setChecked(core in selected_cores)
+                self._core_checks.append(cb)
+                grid.addWidget(cb, core // cols, core % cols)
+
+            core_layout.addWidget(grid_wrap)
+
+            btn_row = QHBoxLayout()
+            btn_all = QPushButton("Select all")
+            btn_none = QPushButton("Clear all")
+            btn_row.addWidget(btn_all)
+            btn_row.addWidget(btn_none)
+            btn_row.addStretch(1)
+            core_layout.addLayout(btn_row)
+
+            def _set_all(v: bool) -> None:
+                for cb in self._core_checks:
+                    cb.setChecked(v)
+
+            btn_all.clicked.connect(lambda: _set_all(True))
+            btn_none.clicked.connect(lambda: _set_all(False))
+            root.addWidget(core_box)
+
+            btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+            btns.accepted.connect(self.accept)
+            btns.rejected.connect(self.reject)
+            root.addWidget(btns)
+
+        def selected_core_list(self) -> list[int]:
+            out: list[int] = []
+            for i, cb in enumerate(self._core_checks):
+                if cb.isChecked():
+                    out.append(i)
+            return out
+
+        def selected_device_keys(self) -> list[str]:
+            out: list[str] = []
+            for key, cb in self._device_checks.items():
+                if cb.isChecked():
+                    out.append(key)
+            return out
+
     class MainWindow(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
@@ -703,6 +895,7 @@ def main() -> int:
             self._queue_busy = False
             self._queue_needs_reboot = False
             self._queue_inflight: list[tuple[str, str]] = []
+            self._audio_session_toggle_inflight = False
             
             # Apply saved font size
             self._apply_font_size(self.state.get("font_size", 11))
@@ -788,6 +981,50 @@ def main() -> int:
             top.addWidget(self.btn_reset)
             root.addLayout(top)
 
+            self.tabs = QTabWidget()
+            self.main_tab = QWidget()
+            self.session_tab = QWidget()
+            self.tabs.addTab(self.main_tab, "Main")
+            self.tabs.addTab(self.session_tab, "Audio Session")
+            root.addWidget(self.tabs)
+
+            self._main_tab_layout = QVBoxLayout(self.main_tab)
+            self._main_tab_layout.setContentsMargins(0, 0, 0, 0)
+            self._main_tab_layout.setSpacing(8)
+
+            self._session_tab_layout = QVBoxLayout(self.session_tab)
+            self._session_tab_layout.setContentsMargins(0, 0, 0, 0)
+            self._session_tab_layout.setSpacing(8)
+
+            session_header = QWidget()
+            session_header_layout = QHBoxLayout(session_header)
+            session_header_layout.setContentsMargins(8, 2, 8, 2)
+            session_header_layout.setSpacing(8)
+            self.session_toggle = QCheckBox("Audio Session Mode")
+            self.session_toggle.setChecked(bool(self.state.get("audio_session_enabled", False)))
+            self.session_toggle.setToolTip("Enable advanced audio session tweaks (may impact general performance)")
+            self.session_toggle.toggled.connect(self._on_audio_session_toggle)
+            session_header_layout.addWidget(self.session_toggle)
+            session_header_layout.addStretch(1)
+            self._session_tab_layout.addWidget(session_header)
+
+            session_note = QLabel(
+                "Advanced settings can reduce performance in other system intensive workloads. "
+                "Toggle off to restore defaults; reboot may be required."
+            )
+            session_note.setWordWrap(True)
+            self._session_tab_layout.addWidget(session_note)
+
+            self._main_table_container = QWidget()
+            self._main_table_layout = QVBoxLayout(self._main_table_container)
+            self._main_table_layout.setContentsMargins(0, 0, 0, 0)
+            self._main_tab_layout.addWidget(self._main_table_container)
+
+            self._session_table_container = QWidget()
+            self._session_table_layout = QVBoxLayout(self._session_table_container)
+            self._session_table_layout.setContentsMargins(0, 0, 0, 0)
+            self._session_tab_layout.addWidget(self._session_table_container)
+
             self.table = QTableWidget(0, 8)
             self.table.setHorizontalHeaderLabels(["Info", "Knob", "Action", "Config", "Status", "Check", "Category", "Risk"])
             self.table.horizontalHeader().setStretchLastSection(False)
@@ -819,7 +1056,9 @@ def main() -> int:
             header.sectionResized.connect(self._on_section_resized)
             self._min_column_widths: dict[int, int] = {}
             self._apply_default_column_widths()
-            root.addWidget(self.table)
+            self._active_view = "main"
+            self._attach_table(self._main_table_layout)
+            self.tabs.currentChanged.connect(self._on_tab_changed)
 
             self._knob_statuses: dict[str, str] = {}
             self._busy_knobs: set[str] = set()
@@ -839,6 +1078,62 @@ def main() -> int:
             self.table.horizontalHeader().installEventFilter(self)
             self.table.installEventFilter(self)
             self.installEventFilter(self)
+
+        def _attach_table(self, layout: QVBoxLayout) -> None:
+            parent = self.table.parentWidget()
+            if parent is not None:
+                current_layout = parent.layout()
+                if current_layout is not None:
+                    current_layout.removeWidget(self.table)
+            self.table.setParent(layout.parentWidget())
+            layout.addWidget(self.table)
+
+        def _on_tab_changed(self, index: int) -> None:
+            view = "session" if index == 1 else "main"
+            if view == self._active_view:
+                return
+            self._active_view = view
+            target_layout = self._session_table_layout if view == "session" else self._main_table_layout
+            self._attach_table(target_layout)
+            self._populate()
+            self._apply_window_constraints()
+
+        def _audio_session_knob_ids(self) -> set[str]:
+            return set(
+                [
+                    "irqbalance_disable",
+                    "rtirq_enable",
+                    "irq_pinning",
+                    "cpu_governor_performance_temp",
+                    "cpu_governor_performance_persistent",
+                    "kernel_threadirqs",
+                    "kernel_audit_off",
+                    "kernel_mitigations_off",
+                    "kernel_isolcpus",
+                    "kernel_nohz_full",
+                    "kernel_rcu_nocbs",
+                    "kernel_irqaffinity",
+                ]
+            )
+
+        def _audio_session_selected(self) -> set[str]:
+            raw = self.state.get("audio_session_knobs")
+            if not isinstance(raw, list):
+                return set()
+            allowed = self._audio_session_knob_ids()
+            return {str(x) for x in raw if isinstance(x, str) and x in allowed}
+
+        def _set_audio_session_selected(self, selected: set[str]) -> None:
+            allowed = self._audio_session_knob_ids()
+            cleaned = sorted(k for k in selected if k in allowed)
+            self.state["audio_session_knobs"] = cleaned
+            save_state(self.state)
+
+        def _visible_knobs(self) -> list:
+            session_knobs = self._audio_session_knob_ids()
+            if self._active_view == "session":
+                return [k for k in self.registry if k.id in session_knobs]
+            return [k for k in self.registry if k.id not in session_knobs]
 
         def _refresh_user_groups(self) -> None:
             """Get current user's group memberships."""
@@ -1902,6 +2197,7 @@ def main() -> int:
                 "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
                 "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
+                "session_saved": ("⏸ Saved", "#7a7a7a"),  # Gray saved (session off)
                 "read_only": ("—", "#9e9e9e"),            # Gray dash
                 "unknown": ("—", "#9e9e9e"),              # Gray dash
                 "running": ("⏳ Updating", "#1976d2"),    # Blue spinner
@@ -1917,9 +2213,12 @@ def main() -> int:
             reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
             group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
             desktop_kind = self._detect_desktop()
+            session_enabled = bool(self.state.get("audio_session_enabled", False))
+            session_locked = self._active_view == "session" and not session_enabled
+            visible_knobs = self._visible_knobs()
 
-            reboot_knobs = [k for k in self.registry if k.requires_reboot]
-            other_knobs = [k for k in self.registry if not k.requires_reboot]
+            reboot_knobs = [k for k in visible_knobs if k.requires_reboot]
+            other_knobs = [k for k in visible_knobs if not k.requires_reboot]
             ordered: list[object] = []
 
             def _sort_key(k, col: int) -> tuple:
@@ -1977,6 +2276,7 @@ def main() -> int:
                         self.table.setItem(r, c, QTableWidgetItem(""))
                     continue
                 if k is SECTION_SEPARATOR:
+                    self.table.removeCellWidget(r, 0)
                     sep = QTableWidgetItem("")
                     sep.setFlags(Qt.ItemIsEnabled)
                     sep.setForeground(QColor("#9e9e9e"))
@@ -1990,6 +2290,9 @@ def main() -> int:
                 status = self._knob_statuses.get(k.id, "unknown")
                 busy = k.id in self._busy_knobs
                 display_status = "running" if busy else status
+                session_saved = session_locked and k.id in self._audio_session_selected()
+                if session_saved and display_status in ("not_applied", "sys_default"):
+                    display_status = "session_saved"
                 not_applicable = (status == "not_applicable")
                 not_applicable_reason = "Not available on this system"
                 if k.id == "disable_tracker" and desktop_kind == "kde":
@@ -2016,9 +2319,9 @@ def main() -> int:
                 reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
                 reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
                 locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock
-                row_dim = locked or not_applicable
+                row_dim = locked or not_applicable or session_locked
                 self._row_dim[r] = row_dim
-                row_dim = locked or not_applicable
+                row_dim = locked or not_applicable or session_locked
                 
                 # Determine lock reason
                 lock_reason = ""
@@ -2059,6 +2362,8 @@ def main() -> int:
                     title_item.setToolTip(lock_reason)
                 elif not_applicable:
                     title_item.setToolTip(not_applicable_reason)
+                elif session_locked:
+                    title_item.setToolTip("Audio Session is off")
                 self.table.setItem(r, 1, title_item)
 
                 # Column 4: Status (with color)
@@ -2074,6 +2379,9 @@ def main() -> int:
                     status_text, status_color = self._status_display(display_status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
+                    if session_locked:
+                        status_item.setForeground(locked_fg)
+                        status_item.setToolTip("Audio Session is off")
                 if row_dim:
                     status_item.setBackground(locked_bg)
                 self.table.setItem(r, 4, status_item)
@@ -2275,6 +2583,54 @@ def main() -> int:
                         cfg_btn.setEnabled(False)
                         cfg_btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 3, cfg_btn)
+                elif k.id == "irq_pinning":
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status in ("applied", "pending_reboot"):
+                        btn = self._make_reset_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset")
+                    else:
+                        btn = self._make_apply_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply")
+                    self._apply_busy_state(btn, busy=busy)
+                    if locked:
+                        btn.setStyleSheet(locked_style)
+                    self._set_action_cell(r, btn)
+
+                    cfg_btn = self._make_action_button("Devices")
+                    cfg_btn.setToolTip("Configure devices and CPU cores")
+                    cfg_btn.setFocusPolicy(Qt.NoFocus)
+                    cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                    self._install_hover_tracking(cfg_btn, r)
+                    if locked:
+                        cfg_btn.setEnabled(False)
+                        cfg_btn.setStyleSheet(locked_style)
+                    self.table.setCellWidget(r, 3, cfg_btn)
+                elif k.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status in ("applied", "pending_reboot"):
+                        btn = self._make_reset_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset")
+                    else:
+                        btn = self._make_apply_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply")
+                    self._apply_busy_state(btn, busy=busy)
+                    if locked:
+                        btn.setStyleSheet(locked_style)
+                    self._set_action_cell(r, btn)
+
+                    cfg_btn = self._make_action_button("Cores")
+                    cfg_btn.setToolTip("Configure CPU cores")
+                    cfg_btn.setFocusPolicy(Qt.NoFocus)
+                    cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                    self._install_hover_tracking(cfg_btn, r)
+                    if locked:
+                        cfg_btn.setEnabled(False)
+                        cfg_btn.setStyleSheet(locked_style)
+                    self.table.setCellWidget(r, 3, cfg_btn)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
                     btn = self._make_action_button("—")
@@ -2297,7 +2653,16 @@ def main() -> int:
 
                 # Column 3: Config - clear if no widget was set for this row
                 # (PipeWire rows set their own widgets above; other rows need clearing)
-                if k.id not in ("pipewire_quantum", "pipewire_sample_rate", "qjackctl_server_prefix_rt"):
+                if k.id not in (
+                    "pipewire_quantum",
+                    "pipewire_sample_rate",
+                    "qjackctl_server_prefix_rt",
+                    "irq_pinning",
+                    "kernel_isolcpus",
+                    "kernel_nohz_full",
+                    "kernel_rcu_nocbs",
+                    "kernel_irqaffinity",
+                ):
                     self.table.removeCellWidget(r, 3)
                 if row_dim and self.table.item(r, 3) is None:
                     dim_item = QTableWidgetItem("")
@@ -2308,6 +2673,16 @@ def main() -> int:
                     item = self.table.item(r, 3)
                     if item is not None and item.text() == "":
                         self.table.takeItem(r, 3)
+
+                if session_locked and not locked and not not_applicable:
+                    for col in (2, 3):
+                        widget = self.table.cellWidget(r, col)
+                        if widget is None:
+                            continue
+                        widget.setEnabled(False)
+                        widget.setToolTip("Audio Session is off")
+                        if isinstance(widget, QPushButton):
+                            widget.setStyleSheet(locked_style)
 
                 # Column 5: Status check
                 if k.impl and k.impl.kind == "read_only":
@@ -2383,6 +2758,7 @@ def main() -> int:
                 "⚠ Deviated",
                 "⟳ Reboot",
                 "◐ Partial",
+                "⏸ Saved",
                 "N/A",
                 "⏳ Updating",
                 "—",
@@ -2399,7 +2775,7 @@ def main() -> int:
             action_width = max(_w(t, pad=40) for t in action_texts)
             action_width = max(action_width, 80)
 
-            config_texts = ["Config", "Cores", "44100 Hz", "192000 Hz", "512", "1024"]
+            config_texts = ["Config", "Cores", "Devices", "44100 Hz", "192000 Hz", "512", "1024"]
             config_width = max(_w(t, pad=44) for t in config_texts)
             config_width = max(config_width, 128)
 
@@ -2425,58 +2801,15 @@ def main() -> int:
             self._enforce_min_column_widths()
 
         def _apply_window_constraints(self) -> None:
-            """Limit window growth to the content size (bounded by screen)."""
+            """Allow resizing up to the available screen size."""
             try:
-                from PySide6.QtCore import QTimer
                 from PySide6.QtGui import QGuiApplication
-
-                header_w = self.table.horizontalHeader().length()
-                header_h = self.table.verticalHeader().length()
-                if header_w <= 0 or header_h <= 0:
-                    QTimer.singleShot(0, self._apply_window_constraints)
-                    return
-
-                table_width = header_w + self.table.verticalHeader().width() + self.table.frameWidth() * 2
-                table_height = header_h + self.table.horizontalHeader().height() + self.table.frameWidth() * 2
-
-                layout = self.centralWidget().layout() if self.centralWidget() else None
-                margins = layout.contentsMargins() if layout else None
-                extra_w = (margins.left() + margins.right()) if margins else 16
-                extra_h = (margins.top() + margins.bottom()) if margins else 16
-                spacing = layout.spacing() if layout else 8
-
-                header_hint_w = self.header_layout.sizeHint().width() if hasattr(self, "header_layout") else 0
-                header_hint_h = self.header_layout.sizeHint().height() if hasattr(self, "header_layout") else 0
-
-                pad = 20
-                full_w = max(table_width, header_hint_w) + extra_w + (pad * 2)
-                full_h = header_hint_h + spacing + table_height + extra_h + (pad * 2)
-
-                vscroll_w = self.table.verticalScrollBar().sizeHint().width()
-                hscroll_h = self.table.horizontalScrollBar().sizeHint().height()
-                need_vscroll = self.table.verticalScrollBar().isVisible()
-                need_hscroll = self.table.horizontalScrollBar().isVisible()
-                if not need_vscroll:
-                    need_vscroll = table_height > self.table.viewport().height()
-                if not need_hscroll:
-                    need_hscroll = table_width > self.table.viewport().width()
-                if need_vscroll:
-                    full_w += vscroll_w
-                if need_hscroll:
-                    full_h += hscroll_h
 
                 screen = QGuiApplication.primaryScreen()
                 avail = screen.availableGeometry() if screen else None
-                max_w = full_w
-                max_h = full_h
-                # Avoid shrinking the window below its current size.
-                max_w = max(max_w, self.width())
-                max_h = max(max_h, self.height())
-                if avail:
-                    max_w = min(max_w, avail.width())
-                    max_h = min(max_h, avail.height())
-
-                self.setMaximumSize(max_w, max_h)
+                if not avail:
+                    return
+                self.setMaximumSize(avail.width(), avail.height())
             except Exception:
                 return
 
@@ -2734,6 +3067,65 @@ def main() -> int:
                 return v
             return None
 
+        def _irq_pinning_devices_from_state(self) -> list[str]:
+            raw = self.state.get("irq_pinning_devices")
+            if not isinstance(raw, list):
+                return []
+            return [str(x) for x in raw if isinstance(x, (str, int)) and str(x).strip()]
+
+        def _irq_pinning_cpu_cores_from_state(self) -> list[int] | None:
+            raw = self.state.get("irq_pinning_cpu_cores")
+            if raw is None:
+                return None
+            if isinstance(raw, list) and all(isinstance(x, int) for x in raw):
+                return [int(x) for x in raw]
+            return None
+
+        def _kernel_core_key(self, knob_id: str) -> str | None:
+            mapping = {
+                "kernel_isolcpus": "kernel_isolcpus_cores",
+                "kernel_nohz_full": "kernel_nohz_full_cores",
+                "kernel_rcu_nocbs": "kernel_rcu_nocbs_cores",
+                "kernel_irqaffinity": "kernel_irqaffinity_cores",
+            }
+            return mapping.get(knob_id)
+
+        def _kernel_cores_from_state(self, knob_id: str) -> list[int] | None:
+            key = self._kernel_core_key(knob_id)
+            if not key:
+                return None
+            raw = self.state.get(key)
+            if raw is None:
+                return None
+            if isinstance(raw, list) and all(isinstance(x, int) for x in raw):
+                return [int(x) for x in raw]
+            return None
+
+        def _kernel_cmdline_param_for_state(self, knob_id: str) -> str | None:
+            key = self._kernel_core_key(knob_id)
+            if not key:
+                return None
+            cores = self._kernel_cores_from_state(knob_id)
+            if not cores:
+                return None
+            try:
+                from audioknob_gui.core.irq import cpu_list_from_cores
+            except Exception:
+                return None
+            cpu_list = cpu_list_from_cores(cores)
+            if not cpu_list:
+                return None
+            prefixes = {
+                "kernel_isolcpus": "isolcpus",
+                "kernel_nohz_full": "nohz_full",
+                "kernel_rcu_nocbs": "rcu_nocbs",
+                "kernel_irqaffinity": "irqaffinity",
+            }
+            prefix = prefixes.get(knob_id)
+            if not prefix:
+                return None
+            return f"{prefix}={cpu_list}"
+
         def on_configure_knob(self, knob_id: str) -> None:
             if knob_id == "qjackctl_server_prefix_rt":
                 from audioknob_gui.platform.detect import get_cpu_count
@@ -2759,6 +3151,111 @@ def main() -> int:
                     "Saved",
                     "Saved CPU core selection for QjackCtl."
                     + (f" Cores: {','.join(map(str, chosen))}" if chosen else " (no pinning)"),
+                )
+                return
+
+            if knob_id == "irq_pinning":
+                from audioknob_gui.core.irq import list_audio_devices
+                from audioknob_gui.platform.detect import get_cpu_count
+
+                devices = list_audio_devices()
+                if not devices:
+                    QMessageBox.warning(
+                        self,
+                        "No audio devices",
+                        "No audio devices were detected. Connect a device and try again.",
+                    )
+                    return
+
+                cpu_count = get_cpu_count()
+                selected_devices = set(self._irq_pinning_devices_from_state())
+                selected_cores = set(self._irq_pinning_cpu_cores_from_state() or [])
+
+                d = IrqPinningDialog(
+                    cpu_count=cpu_count,
+                    selected_cores=selected_cores,
+                    devices=devices,
+                    selected_devices=selected_devices,
+                    parent=self,
+                )
+                if d.exec() != QDialog.Accepted:
+                    return
+
+                chosen_devices = d.selected_device_keys()
+                chosen_cores = d.selected_core_list()
+                self.state["irq_pinning_devices"] = chosen_devices
+                self.state["irq_pinning_cpu_cores"] = chosen_cores
+                save_state(self.state)
+
+                status = self._knob_statuses.get(knob_id)
+                if status in ("applied", "pending_reboot"):
+                    _get_gui_logger().info("irq pinning config updated; reapplying")
+                    self._on_apply_knob(knob_id)
+                    return
+                QMessageBox.information(
+                    self,
+                    "Saved",
+                    "Saved IRQ pinning configuration."
+                    + (f" Devices: {len(chosen_devices)}" if chosen_devices else " (no devices)")
+                    + (f" Cores: {','.join(map(str, chosen_cores))}" if chosen_cores else " (no cores)"),
+                )
+                return
+
+            if knob_id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
+                from audioknob_gui.platform.detect import get_cpu_count
+
+                cpu_count = get_cpu_count()
+                selected = set(self._kernel_cores_from_state(knob_id) or [])
+                titles = {
+                    "kernel_isolcpus": "Configure isolcpus cores",
+                    "kernel_nohz_full": "Configure nohz_full cores",
+                    "kernel_rcu_nocbs": "Configure rcu_nocbs cores",
+                    "kernel_irqaffinity": "Configure irqaffinity cores",
+                }
+                lines = {
+                    "kernel_isolcpus": [
+                        "Select CPU cores to isolate from the scheduler.",
+                        "These cores should be reserved for audio workloads.",
+                    ],
+                    "kernel_nohz_full": [
+                        "Select CPU cores for full tickless mode.",
+                        "Use the same isolated cores for best results.",
+                    ],
+                    "kernel_rcu_nocbs": [
+                        "Select CPU cores to offload RCU callbacks.",
+                        "Use the same isolated cores for best results.",
+                    ],
+                    "kernel_irqaffinity": [
+                        "Select housekeeping cores for default IRQ handling.",
+                        "Use non-isolated cores to keep IRQs off audio cores.",
+                    ],
+                }
+                d = CpuCoreDialog(
+                    cpu_count=cpu_count,
+                    selected=selected,
+                    title=titles.get(knob_id, "Configure CPU cores"),
+                    lines=lines.get(knob_id),
+                    parent=self,
+                )
+                if d.exec() != QDialog.Accepted:
+                    return
+
+                chosen = d.selected_cores()
+                key = self._kernel_core_key(knob_id)
+                if key:
+                    self.state[key] = chosen
+                    save_state(self.state)
+
+                status = self._knob_statuses.get(knob_id)
+                if status in ("applied", "pending_reboot"):
+                    _get_gui_logger().info("%s cores updated; reapplying", knob_id)
+                    self._on_apply_knob(knob_id)
+                    return
+                QMessageBox.information(
+                    self,
+                    "Saved",
+                    "Saved CPU core selection."
+                    + (f" Cores: {','.join(map(str, chosen))}" if chosen else " (no cores)"),
                 )
                 return
 
@@ -3010,6 +3507,17 @@ def main() -> int:
                     r = self._pipewire_sample_rate_from_state()
                     if r is not None:
                         params["rate"] = r
+                if k.id == "irq_pinning":
+                    devices = self._irq_pinning_devices_from_state()
+                    cores = self._irq_pinning_cpu_cores_from_state()
+                    if devices:
+                        params["device_keys"] = devices
+                    if cores is not None:
+                        params["cpu_cores"] = ",".join(str(c) for c in cores)
+                if k.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
+                    override = self._kernel_cmdline_param_for_state(k.id)
+                    if override:
+                        params["param"] = override
 
                 for key, val in params.items():
                     if isinstance(val, list):
@@ -3122,6 +3630,14 @@ def main() -> int:
                 layout.addWidget(config_btn)
             if k.id == "pipewire_sample_rate":
                 config_btn = QPushButton("Configure Sample Rate...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
+            if k.id == "irq_pinning":
+                config_btn = QPushButton("Configure IRQ Pinning...")
+                config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
+                layout.addWidget(config_btn)
+            if k.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
+                config_btn = QPushButton("Configure CPU Cores...")
                 config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
                 layout.addWidget(config_btn)
 
@@ -3288,6 +3804,49 @@ def main() -> int:
                         lines.append(f"jackd_rt_threads: {rt_threads}")
                         if rt_priorities:
                             lines.append(f"jackd_rt_priorities: {', '.join(str(p) for p in rt_priorities)}")
+            elif kind == "irq_affinity":
+                from audioknob_gui.core.irq import collect_target_irqs, resolve_selected_devices
+
+                def _read_irq_affinity(irq: int) -> str | None:
+                    p = Path(f"/proc/irq/{irq}/smp_affinity_list")
+                    if not p.exists():
+                        return None
+                    try:
+                        return p.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        return None
+
+                lines.append("")
+                lines.append("irq_pinning:")
+                device_keys = self._irq_pinning_devices_from_state()
+                cores = self._irq_pinning_cpu_cores_from_state()
+                cpu_list = ",".join(str(c) for c in (cores or []))
+                lines.append(f"cpu_cores: {cpu_list or 'unset'}")
+                lines.append(f"device_keys: {', '.join(device_keys) if device_keys else 'unset'}")
+
+                selected, missing = resolve_selected_devices(device_keys)
+                if missing:
+                    lines.append(f"missing_devices: {', '.join(missing)}")
+                if selected:
+                    for device in selected:
+                        label = str(device.get("label") or device.get("key"))
+                        bus = str(device.get("bus") or "unknown")
+                        irqs = device.get("irqs") or []
+                        lines.append(f"device: {label} [{bus}] irqs={','.join(str(i) for i in irqs) if irqs else 'none'}")
+                        warning = device.get("warning")
+                        if warning:
+                            lines.append(f"warning: {warning}")
+                else:
+                    lines.append("device: none")
+
+                target_irqs = collect_target_irqs(selected)
+                if target_irqs:
+                    for irq in target_irqs:
+                        current = _read_irq_affinity(irq)
+                        if current is None:
+                            lines.append(f"irq[{irq}]: missing")
+                        else:
+                            lines.append(f"irq[{irq}] affinity: {current}")
             elif kind == "systemd_unit_toggle":
                 unit = str(params.get("unit", ""))
                 if unit:
@@ -3337,6 +3896,9 @@ def main() -> int:
                             lines.append(f"{p}: unreadable: {e}")
             elif kind == "kernel_cmdline":
                 param = str(params.get("param", ""))
+                override = self._kernel_cmdline_param_for_state(knob.id)
+                if override:
+                    param = override
                 if param:
                     try:
                         running = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
@@ -4209,20 +4771,92 @@ def main() -> int:
             self._update_queue_ui()
             self._populate()
 
-        def _on_apply_queue(self, reboot_after: bool) -> None:
-            if not self._queued_actions or self._queue_busy:
+        def _on_audio_session_toggle(self, enabled: bool) -> None:
+            if self._queue_busy or self._busy_knobs:
+                QMessageBox.information(
+                    self,
+                    "Busy",
+                    "Finish current operations before toggling Audio Session.",
+                )
+                self.session_toggle.blockSignals(True)
+                self.session_toggle.setChecked(not enabled)
+                self.session_toggle.blockSignals(False)
                 return
+            if self._queued_actions:
+                QMessageBox.information(
+                    self,
+                    "Queue Pending",
+                    "Apply or clear queued changes before toggling Audio Session.",
+                )
+                self.session_toggle.blockSignals(True)
+                self.session_toggle.setChecked(not enabled)
+                self.session_toggle.blockSignals(False)
+                return
+
+            prev = bool(self.state.get("audio_session_enabled", False))
+            self.state["audio_session_enabled"] = bool(enabled)
+            save_state(self.state)
+
+            selected = self._audio_session_selected()
+            if not selected:
+                self._populate()
+                return
+
+            if enabled:
+                action = "apply"
+                target_ids = [
+                    kid
+                    for kid in selected
+                    if self._knob_statuses.get(kid, "unknown") not in ("applied", "pending_reboot")
+                ]
+            else:
+                action = "reset"
+                target_ids = [
+                    kid
+                    for kid in selected
+                    if self._knob_statuses.get(kid, "unknown")
+                    not in ("not_applied", "sys_default", "unknown", "not_applicable", "read_only")
+                ]
+
+            if not target_ids:
+                self._populate()
+                return
+
+            for kid in target_ids:
+                self._queued_actions[kid] = action
+            self._save_queue()
+            self._update_queue_ui()
+            self._populate()
+
+            self._audio_session_toggle_inflight = True
+            started = self._on_apply_queue(reboot_after=False)
+            if not started:
+                self._audio_session_toggle_inflight = False
+                self.state["audio_session_enabled"] = prev
+                save_state(self.state)
+                self.session_toggle.blockSignals(True)
+                self.session_toggle.setChecked(prev)
+                self.session_toggle.blockSignals(False)
+                for kid in target_ids:
+                    self._queued_actions.pop(kid, None)
+                self._save_queue()
+                self._update_queue_ui()
+                self._populate()
+
+        def _on_apply_queue(self, reboot_after: bool) -> bool:
+            if not self._queued_actions or self._queue_busy:
+                return False
             if self._busy_knobs:
                 QMessageBox.information(
                     self,
                     "Busy",
                     "Finish current operations before applying queued changes.",
                 )
-                return
+                return False
             by_id = {k.id: k for k in self.registry}
             queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
             if not queued:
-                return
+                return False
             if any(kid == "qjackctl_server_prefix_rt" for kid, _ in queued) and self._is_process_running(
                 ["qjackctl", "qjackctl6"]
             ):
@@ -4232,12 +4866,12 @@ def main() -> int:
                     "Quit QjackCtl before applying QjackCtl RT.\n\n"
                     "QjackCtl rewrites its config on exit, which can undo changes.",
                 )
-                return
+                return False
             reset_ids = [kid for kid, action in queued if action == "reset"]
             if reset_ids:
                 dependents = self._confirm_dependency_reset(reset_ids)
                 if dependents is None:
-                    return
+                    return False
                 if dependents:
                     for kid in dependents:
                         self._queued_actions[kid] = "reset"
@@ -4246,7 +4880,7 @@ def main() -> int:
                     self._populate()
                     queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
                     if not queued:
-                        return
+                        return False
             titles = []
             for kid, action in queued:
                 verb = "Apply" if action == "apply" else "Reset"
@@ -4254,7 +4888,7 @@ def main() -> int:
             confirm = ConfirmDialog(titles, parent=self)
             confirm.exec()
             if not confirm.ok:
-                return
+                return False
 
             _get_gui_logger().info(
                 "apply queue start reboot_after=%s actions=%s",
@@ -4331,6 +4965,7 @@ def main() -> int:
             worker.finished.connect(worker.deleteLater)
             self._task_threads.append(worker)
             worker.start()
+            return True
 
         def _on_reset_knob(self, knob_id: str, requires_root: bool) -> None:
             """Reset a single knob to original."""
@@ -4503,6 +5138,7 @@ def main() -> int:
                     self._queue_needs_reboot = False
                     self._refresh_statuses()
                     self._populate()
+                    self._audio_session_toggle_inflight = False
                     return
 
                 missing_user, other_user = self._collect_no_transaction_knobs(reset_user)
@@ -4544,23 +5180,35 @@ def main() -> int:
                         self._run_force_reset_many(supported)
                     elif supported:
                         _get_gui_logger().info("apply queue force reset cancelled")
-                    if unsupported:
-                        _get_gui_logger().warning(
-                            "apply queue force reset unsupported=%s",
-                            ",".join(unsupported),
-                        )
-                        msg = (
-                            "No transaction was recorded for:\n"
-                            + "\n".join(unsupported)
-                            + "\n\nForce reset is not supported for these knobs."
-                        )
-                        QMessageBox.warning(self, "Force reset unavailable", msg)
+                if unsupported:
+                    _get_gui_logger().warning(
+                        "apply queue force reset unsupported=%s",
+                        ",".join(unsupported),
+                    )
+                    msg = (
+                        "No transaction was recorded for:\n"
+                        + "\n".join(unsupported)
+                        + "\n\nForce reset is not supported for these knobs."
+                    )
+                    QMessageBox.warning(self, "Force reset unavailable", msg)
             else:
                 _get_gui_logger().info(
                     "apply queue done applied=%s restored=%s",
                     ",".join(sorted(applied_ids)) or "-",
                     ",".join(sorted(restored_ids)) or "-",
                 )
+                if applied_ids or restored_ids:
+                    if not self._audio_session_toggle_inflight:
+                        selected = self._audio_session_selected()
+                        session_knobs = self._audio_session_knob_ids()
+                        for kid in applied_ids:
+                            if kid in session_knobs:
+                                selected.add(kid)
+                        for kid in restored_ids:
+                            if kid in session_knobs:
+                                selected.discard(kid)
+                        self._set_audio_session_selected(selected)
+            self._audio_session_toggle_inflight = False
 
             queue_reboot = self._queue_needs_reboot
             self._queue_needs_reboot = False

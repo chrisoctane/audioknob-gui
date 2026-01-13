@@ -122,6 +122,32 @@
         "read": true,
         "restore": true
       },
+      "category": "irq",
+      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning.",
+      "depends_on": [
+        "irqbalance_disable"
+      ],
+      "id": "irq_pinning",
+      "impl": {
+        "kind": "irq_affinity",
+        "params": {
+          "cpu_cores": "0,1",
+          "device_keys": []
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "IRQ Pinning"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "cpu",
       "description": "Sets CPU frequency governor to 'performance' (until reboot). Prevents CPU frequency scaling which can cause latency spikes. File: /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
       "id": "cpu_governor_performance_temp",
@@ -333,6 +359,94 @@
       "requires_root": true,
       "risk_level": "medium",
       "title": "Threaded IRQs"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds isolcpus=<cores> to the kernel cmdline. Isolates selected cores from the scheduler (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "id": "kernel_isolcpus",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": ""
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "CPU Isolation (isolcpus)"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds nohz_full=<cores> to the kernel cmdline. Enables full tickless mode on selected cores (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "id": "kernel_nohz_full",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": ""
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "Full Tickless (nohz_full)"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds rcu_nocbs=<cores> to the kernel cmdline. Offloads RCU callbacks from selected cores (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "id": "kernel_rcu_nocbs",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": ""
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "RCU Offload (rcu_nocbs)"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds irqaffinity=<cores> to the kernel cmdline. Pins default IRQ handling to the selected housekeeping cores (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "id": "kernel_irqaffinity",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": ""
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "IRQ Housekeeping (irqaffinity)"
     },
     {
       "capabilities": {

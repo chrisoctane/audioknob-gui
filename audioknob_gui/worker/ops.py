@@ -202,6 +202,8 @@ def build_knob_paths(
             targets.append({"type": "path", "value": cfg_path})
             unit = str(params.get("unit", "rtirq.service"))
             targets.append({"type": "systemd_unit", "value": unit})
+        elif kind == "irq_affinity":
+            targets.append({"type": "proc_irq", "value": "/proc/irq"})
         elif kind == "sysfs_glob_kv":
             glob_pat = str(params.get("glob", ""))
             if glob_pat:
@@ -598,6 +600,52 @@ def _rtirq_config_preview(params: dict[str, Any]) -> tuple[list[FileChange], lis
     unit = str(params.get("unit", "rtirq.service"))
     cmds = [["systemctl", "enable", "--now", unit]]
     return changes, cmds
+
+
+def _irq_affinity_preview(params: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    from audioknob_gui.core.irq import collect_target_irqs, resolve_selected_devices
+
+    device_keys = params.get("device_keys") or []
+    cpu_cores = str(params.get("cpu_cores", "")).strip()
+    notes: list[str] = []
+    would_write: list[dict[str, Any]] = []
+    try:
+        active = run(["systemctl", "is-active", "irqbalance.service"]).stdout.strip()
+        if active == "active":
+            notes.append("irqbalance is active and can override IRQ pinning.")
+    except Exception:
+        pass
+
+    if not device_keys:
+        notes.append("No IRQ pinning devices selected. Configure devices before applying.")
+        return would_write, notes
+    if not cpu_cores:
+        notes.append("No CPU cores configured for IRQ pinning.")
+        return would_write, notes
+
+    selected, missing = resolve_selected_devices(device_keys)
+    if missing:
+        notes.append(f"Missing devices: {', '.join(missing)}")
+    if not selected:
+        notes.append("No selected audio devices found.")
+        return would_write, notes
+
+    target_irqs = collect_target_irqs(selected)
+    if not target_irqs:
+        notes.append("No IRQs found for selected devices.")
+        return would_write, notes
+
+    for irq in target_irqs:
+        would_write.append(
+            {"path": f"/proc/irq/{irq}/smp_affinity_list", "value": cpu_cores}
+        )
+
+    for device in selected:
+        warning = device.get("warning")
+        if warning:
+            notes.append(str(warning))
+
+    return would_write, notes
 
 
 def _sysfs_glob_preview(params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1021,6 +1069,10 @@ def preview(knob: Any, action: str) -> PreviewItem:
             file_changes.extend(changes)
             would_run.extend(cmds)
             notes.append("Writes rtirq config and enables the rtirq service.")
+        elif kind == "irq_affinity":
+            writes, more_notes = _irq_affinity_preview(params)
+            would_write.extend(writes)
+            notes.extend(more_notes)
         elif kind == "sysfs_glob_kv":
             would_write.extend(_sysfs_glob_preview(params))
         elif kind == "qjackctl_server_prefix":
@@ -1177,6 +1229,20 @@ def restore_sysfs(effects: list[dict[str, Any]]) -> None:
         if before is None:
             continue
         Path(str(e["path"])).write_text(str(before) + "\n", encoding="utf-8")
+
+
+def restore_irq_affinity(effects: list[dict[str, Any]]) -> None:
+    for e in effects:
+        if e.get("kind") != "irq_affinity":
+            continue
+        irq = e.get("irq")
+        before = e.get("before")
+        if irq is None or before is None:
+            continue
+        path = Path(f"/proc/irq/{irq}/smp_affinity_list")
+        if not path.exists():
+            continue
+        path.write_text(str(before).strip() + "\n", encoding="utf-8")
 
 
 def user_service_unmask(services: list[str]) -> None:
@@ -1343,6 +1409,44 @@ def check_knob_status(knob: Any) -> str:
         if cfg_ok and service_ok:
             return "applied"
         if cfg_ok or service_ok or service_partial:
+            return "partial"
+        return "not_applied"
+
+    if kind == "irq_affinity":
+        from audioknob_gui.core.irq import collect_target_irqs, parse_cpu_list, resolve_selected_devices
+
+        device_keys = params.get("device_keys") or []
+        cpu_cores = str(params.get("cpu_cores", "")).strip()
+        if not device_keys or not cpu_cores:
+            return "not_applied"
+
+        expected_set = parse_cpu_list(cpu_cores)
+        if not expected_set:
+            return "not_applied"
+
+        selected, missing = resolve_selected_devices(device_keys)
+        if not selected:
+            return "not_applied"
+
+        target_irqs = collect_target_irqs(selected)
+        if not target_irqs:
+            return "not_applied"
+
+        matched = 0
+        for irq in target_irqs:
+            path = Path(f"/proc/irq/{irq}/smp_affinity_list")
+            if not path.exists():
+                continue
+            try:
+                current = path.read_text(encoding="utf-8").strip()
+            except Exception:
+                continue
+            if parse_cpu_list(current) == expected_set:
+                matched += 1
+
+        if matched == len(target_irqs) and not missing:
+            return "applied"
+        if matched > 0 or missing:
             return "partial"
         return "not_applied"
     

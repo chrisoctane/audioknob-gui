@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import pwd
 import shlex
 import shutil
 import subprocess
@@ -31,6 +32,7 @@ from audioknob_gui.worker.ops import (
     apply_jackd_affinity,
     check_knob_status,
     preview,
+    restore_irq_affinity,
     restore_sysfs,
     systemd_restore,
     resolve_user_services,
@@ -73,15 +75,55 @@ def _registry_default_path() -> str:
 
 def _load_gui_state() -> dict:
     """Best-effort load of GUI state.json (user-scope)."""
+    candidates: list[Path] = []
+    env_state = os.environ.get("AUDIOKNOB_STATE_DIR")
+    if env_state:
+        candidates.append(Path(env_state))
+
+    xdg_state = os.environ.get("XDG_STATE_HOME")
+    if xdg_state:
+        candidates.append(Path(xdg_state) / "audioknob-gui")
+
     paths = default_paths()
-    p = Path(paths.user_state_dir) / "state.json"
-    try:
-        if not p.exists():
-            return {}
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    candidates.append(Path(paths.user_state_dir))
+
+    if os.geteuid() == 0:
+        uid = None
+        for key in ("PKEXEC_UID", "SUDO_UID"):
+            raw = os.environ.get(key, "")
+            if raw.isdigit():
+                uid = int(raw)
+                break
+        if uid is None:
+            user = os.environ.get("SUDO_USER") or os.environ.get("PKEXEC_USER")
+            if user:
+                try:
+                    uid = pwd.getpwnam(user).pw_uid
+                except KeyError:
+                    uid = None
+        if uid is not None:
+            try:
+                home = pwd.getpwuid(uid).pw_dir
+            except KeyError:
+                home = None
+            if home:
+                candidates.insert(0, Path(home) / ".local" / "state" / "audioknob-gui")
+
+    seen: set[str] = set()
+    for base in candidates:
+        key = str(base)
+        if key in seen:
+            continue
+        seen.add(key)
+        p = base / "state.json"
+        try:
+            if not p.exists():
+                continue
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            continue
+    return {}
 
 
 def _is_qjackctl_running() -> bool:
@@ -141,6 +183,64 @@ def _pipewire_sample_rate_override(state: dict) -> int | None:
     return None
 
 
+def _irq_pinning_override(state: dict) -> tuple[list[str] | None, str | None]:
+    devices_raw = state.get("irq_pinning_devices")
+    devices: list[str] | None = None
+    if isinstance(devices_raw, list):
+        devices = [str(x) for x in devices_raw if isinstance(x, (str, int)) and str(x).strip()]
+
+    cores_raw = state.get("irq_pinning_cpu_cores")
+    cpu_list: str | None = None
+    if isinstance(cores_raw, list) and all(isinstance(x, int) for x in cores_raw):
+        from audioknob_gui.core.irq import cpu_list_from_cores
+
+        cpu_list = cpu_list_from_cores(cores_raw)
+    return devices, cpu_list
+
+
+def _kernel_cmdline_override(state: dict, knob_id: str) -> str | None:
+    mapping = {
+        "kernel_isolcpus": ("kernel_isolcpus_cores", "isolcpus"),
+        "kernel_nohz_full": ("kernel_nohz_full_cores", "nohz_full"),
+        "kernel_rcu_nocbs": ("kernel_rcu_nocbs_cores", "rcu_nocbs"),
+        "kernel_irqaffinity": ("kernel_irqaffinity_cores", "irqaffinity"),
+    }
+    meta = mapping.get(knob_id)
+    if not meta:
+        return None
+    key, prefix = meta
+    cores_raw = state.get(key)
+    if not (isinstance(cores_raw, list) and all(isinstance(x, int) for x in cores_raw)):
+        return None
+    from audioknob_gui.core.irq import cpu_list_from_cores
+
+    cpu_list = cpu_list_from_cores(cores_raw)
+    if not cpu_list:
+        return None
+    return f"{prefix}={cpu_list}"
+
+
+def _kernel_cmdline_param_from_manifest(manifest: dict, knob_id: str) -> str | None:
+    prefix_map = {
+        "kernel_isolcpus": "isolcpus",
+        "kernel_nohz_full": "nohz_full",
+        "kernel_rcu_nocbs": "rcu_nocbs",
+        "kernel_irqaffinity": "irqaffinity",
+    }
+    prefix = prefix_map.get(knob_id)
+    if not prefix:
+        return None
+    for entry in manifest.get("effects", []):
+        if entry.get("kind") != "kernel_cmdline":
+            continue
+        param = str(entry.get("param", "")).strip()
+        if not param:
+            continue
+        if param == prefix or param.startswith(prefix + "="):
+            return param
+    return None
+
+
 def _backup_once(tx, backups: list[dict], path: str, *, we_created: bool = False) -> dict:
     for meta in backups:
         if meta.get("path") == path:
@@ -163,6 +263,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
     qjackctl_override = _qjackctl_cpu_cores_override(state)
     pipewire_quantum = _pipewire_quantum_override(state)
     pipewire_sample_rate = _pipewire_sample_rate_override(state)
+    irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
 
     items = []
     for kid in args.knob:
@@ -199,7 +300,22 @@ def cmd_preview(args: argparse.Namespace) -> int:
             new_params = dict(k.impl.params)
             new_params["rate"] = pipewire_sample_rate
             k = replace(k, impl=replace(k.impl, params=new_params))
-
+        kernel_override = _kernel_cmdline_override(state, k.id)
+        if kernel_override and k.impl is not None and k.impl.kind == "kernel_cmdline":
+            new_params = dict(k.impl.params)
+            new_params["param"] = kernel_override
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if (
+            (irq_devices_override or irq_cpu_override)
+            and k.impl is not None
+            and k.impl.kind == "irq_affinity"
+        ):
+            new_params = dict(k.impl.params)
+            if irq_devices_override is not None:
+                new_params["device_keys"] = irq_devices_override
+            if irq_cpu_override is not None:
+                new_params["cpu_cores"] = irq_cpu_override
+            k = replace(k, impl=replace(k.impl, params=new_params))
         items.append(preview(k, action=args.action))
 
     payload = {
@@ -503,6 +619,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
     paths = default_paths()
     tx = new_tx(paths.var_lib_dir)
 
+    state = _load_gui_state()
+    irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
+
     effects: list[dict] = []
     backups: list[dict] = []
     applied: list[str] = []
@@ -521,6 +640,31 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         kind = k.impl.kind
         params = k.impl.params
+
+        kernel_override = _kernel_cmdline_override(state, k.id)
+        if k.impl.kind == "kernel_cmdline" and k.id in (
+            "kernel_isolcpus",
+            "kernel_nohz_full",
+            "kernel_rcu_nocbs",
+            "kernel_irqaffinity",
+        ):
+            if not kernel_override:
+                raise SystemExit(f"{k.title} requires CPU cores. Configure cores first.")
+            new_params = dict(k.impl.params)
+            new_params["param"] = kernel_override
+            params = new_params
+
+        if (
+            (irq_devices_override or irq_cpu_override)
+            and k.impl is not None
+            and k.impl.kind == "irq_affinity"
+        ):
+            new_params = dict(k.impl.params)
+            if irq_devices_override is not None:
+                new_params["device_keys"] = irq_devices_override
+            if irq_cpu_override is not None:
+                new_params["cpu_cores"] = irq_cpu_override
+            params = new_params
 
         if kind == "pam_limits_audio_group":
             path = str(params["path"])
@@ -616,6 +760,76 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     subprocess.run(["systemctl", "restart", unit], check=False, capture_output=True, text=True)
                 except Exception:
                     pass
+
+        elif kind == "irq_affinity":
+            from audioknob_gui.core.irq import (
+                collect_target_irqs,
+                parse_cpu_list,
+                resolve_selected_devices,
+            )
+
+            device_keys = params.get("device_keys") or []
+            cpu_cores = str(params.get("cpu_cores", "")).strip()
+            if not device_keys:
+                raise SystemExit("IRQ pinning requires device selection. Configure devices first.")
+            if not cpu_cores:
+                raise SystemExit("IRQ pinning requires CPU cores. Configure cores first.")
+
+            expected_set = parse_cpu_list(cpu_cores)
+            if not expected_set:
+                raise SystemExit("IRQ pinning CPU list is invalid or empty.")
+
+            selected, missing = resolve_selected_devices(device_keys)
+            if missing:
+                warnings.append(f"Missing devices: {', '.join(missing)}")
+            if not selected:
+                raise SystemExit("No selected audio devices found. Connect devices or update selection.")
+
+            target_irqs = collect_target_irqs(selected)
+            if not target_irqs:
+                raise SystemExit("No IRQs found for selected devices.")
+
+            for device in selected:
+                warning = device.get("warning")
+                if warning:
+                    warnings.append(str(warning))
+
+            try:
+                active = subprocess.run(
+                    ["systemctl", "is-active", "irqbalance.service"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip()
+                if active == "active":
+                    warnings.append("irqbalance is active and can override IRQ pinning.")
+            except Exception:
+                pass
+
+            errors: list[str] = []
+            for irq in target_irqs:
+                path = Path(f"/proc/irq/{irq}/smp_affinity_list")
+                if not path.exists():
+                    errors.append(f"Missing {path}")
+                    continue
+                try:
+                    before = path.read_text(encoding="utf-8").strip()
+                except Exception as exc:
+                    errors.append(f"Failed to read {path}: {exc}")
+                    continue
+                if parse_cpu_list(before) == expected_set:
+                    continue
+                try:
+                    path.write_text(cpu_cores + "\n", encoding="utf-8")
+                except Exception as exc:
+                    errors.append(f"Failed to write {path}: {exc}")
+                    continue
+                effects.append(
+                    {"kind": "irq_affinity", "irq": irq, "before": before, "after": cpu_cores}
+                )
+
+            if errors:
+                raise SystemExit("IRQ affinity update failed: " + "; ".join(errors))
 
         elif kind == "sysfs_glob_kv":
             from audioknob_gui.worker.ops import write_sysfs_values
@@ -864,10 +1078,12 @@ def cmd_restore(args: argparse.Namespace) -> int:
         _require_root()
         sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
         systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+        irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
 
         restore_sysfs(sysfs)
         for e in systemd:
             systemd_restore(e)
+        restore_irq_affinity(irq_affinity)
     
     # User-scope effects
     from audioknob_gui.worker.ops import user_service_restore, baloo_enable
@@ -1063,17 +1279,22 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         if scope == "root" and effects and os.geteuid() == 0:
             sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
             systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+            irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
 
             try:
                 restore_sysfs(sysfs)
                 for e in systemd:
                     systemd_restore(e)
-                if sysfs or systemd:
+                restore_irq_affinity(irq_affinity)
+                if sysfs or systemd or irq_affinity:
                     results.append({
                         "path": "(root effects)",
                         "strategy": "effects",
                         "success": True,
-                        "message": f"Restored {len(sysfs)} sysfs + {len(systemd)} systemd effects",
+                        "message": (
+                            f"Restored {len(sysfs)} sysfs + {len(systemd)} systemd + "
+                            f"{len(irq_affinity)} irq effects"
+                        ),
                     })
             except Exception as ex:
                 errors.append(f"Failed to restore root effects: {ex}")
@@ -1451,6 +1672,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     qjackctl_override = _qjackctl_cpu_cores_override(state)
     pipewire_quantum = _pipewire_quantum_override(state)
     pipewire_sample_rate = _pipewire_sample_rate_override(state)
+    irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
     
     statuses = []
     for k in reg:
@@ -1479,6 +1701,22 @@ def cmd_status(args: argparse.Namespace) -> int:
         ):
             new_params = dict(k.impl.params)
             new_params["rate"] = pipewire_sample_rate
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        kernel_override = _kernel_cmdline_override(state, k.id)
+        if kernel_override and k.impl is not None and k.impl.kind == "kernel_cmdline":
+            new_params = dict(k.impl.params)
+            new_params["param"] = kernel_override
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if (
+            (irq_devices_override or irq_cpu_override)
+            and k.impl is not None
+            and k.impl.kind == "irq_affinity"
+        ):
+            new_params = dict(k.impl.params)
+            if irq_devices_override is not None:
+                new_params["device_keys"] = irq_devices_override
+            if irq_cpu_override is not None:
+                new_params["cpu_cores"] = irq_cpu_override
             k = replace(k, impl=replace(k.impl, params=new_params))
         status = check_knob_status(k)
         statuses.append({
@@ -1555,6 +1793,10 @@ def _restore_knob_once(knob_id: str) -> dict:
         from audioknob_gui.worker.ops import detect_distro
 
         param = str(knob.impl.params.get("param", ""))
+        if not param:
+            param = _kernel_cmdline_param_from_manifest(manifest, knob_id) or ""
+        if not param:
+            param = _kernel_cmdline_override(_load_gui_state(), knob_id) or ""
         if not param:
             return {
                 "schema": 1,
@@ -1825,13 +2067,17 @@ def _restore_knob_once(knob_id: str) -> dict:
     if scope == "root" and os.geteuid() == 0:
         sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
         systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+        irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
 
         try:
             restore_sysfs(sysfs)
             for e in systemd:
                 systemd_restore(e)
-            if sysfs or systemd:
-                restored.append(f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd)")
+            restore_irq_affinity(irq_affinity)
+            if sysfs or systemd or irq_affinity:
+                restored.append(
+                    f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd, {len(irq_affinity)} irq)"
+                )
         except Exception as ex:
             errors.append(f"Failed to restore effects: {ex}")
 

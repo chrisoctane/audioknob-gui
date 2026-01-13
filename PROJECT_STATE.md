@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **23 knobs defined** (ALL 23 IMPLEMENTED)
+- **28 knobs defined** (ALL 28 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
@@ -17,6 +17,7 @@
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
 - **Info popup** - Info column with "i" button shows details + config options
+- **Audio Session tab** - advanced, performance-impacting knobs with a global on/off toggle
 - **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
 - **Info popup status check** - Run a live per-knob diagnostic snapshot
 - **Transaction system** - backups + smart restore
@@ -28,6 +29,7 @@
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
+- **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in)
 
 ### GUI Layout
 ```
@@ -35,10 +37,13 @@ Columns: Info | Knob | Action | Config | Status | Check | Category | Risk
          (0)  (1)    (2)      (3)      (4)     (5)    (6)       (7)
 
 Notes:
+- Tabs: Main (default knobs) and Audio Session (advanced knobs with session toggle).
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
+- Audio Session toggle disables advanced knobs while preserving their configuration.
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
+- IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
 - Header row includes a Re-check State button to refresh current status.
 - Main window title includes app version and git short SHA when available.
@@ -59,6 +64,7 @@ Notes:
 - QjackCtl RT uses QjackCtl Realtime/Priority settings instead of embedding -R/-P90 in Server.
 - QjackCtl ServerConfig detection reads the Options section (where QjackCtl stores it).
 - QjackCtl info popup now reports the active preset explicitly and suppresses default/preserved preset noise when none are active.
+- Root worker reads GUI state from the invoking user when run via pkexec, so root knobs with per-user config (IRQ pinning) apply correctly.
 - RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - RTIRQ knob now writes an audioknob config block (name/high lists + priorities) and enables the rtirq service.
@@ -83,6 +89,9 @@ Notes:
 - Resetting a knob that others depend on now prompts and cascades dependent resets when accepted.
 - Baseline-aware status now labels knobs as “Sys Default” when current matches the initial scan.
 - System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
+- Main window can be resized up to the screen size (no max-height clamp to content).
+- Separator rows no longer show stale info buttons after table refresh.
+- Audio Session warning text now refers to "intensive workloads" (no games mention).
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
@@ -387,6 +396,9 @@ audioknob-gui/
       - "backup": Copy backup file back to original location
       - "package": Restore via package manager (best-effort; see notes below)
    d. For effects (sysfs, systemd): restore previous state
+   e. For kernel cmdline knobs with UI-configured params (isolcpus/nohz_full/rcu_nocbs/irqaffinity),
+      resolve the applied param from the transaction effects (fallback to current GUI state)
+      so only that param is adjusted.
 4. GUI refreshes status display
 ```
 

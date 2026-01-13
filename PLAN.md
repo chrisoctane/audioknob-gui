@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.6)
+### Install on openSUSE Tumbleweed (RPM, v0.3.7)
 
-For v0.3.6 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.3.7 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -184,6 +184,7 @@ Both files must be committed together. See "Registry Sync Policy" below.
 | `sysfs_glob_kv` | Write to /sys | cpu_governor, thp |
 | `systemd_unit_toggle` | Enable/disable service | irqbalance |
 | `rtirq_config` | Configure rtirq priorities + enable service | rtirq |
+| `irq_affinity` | Pin IRQs for selected devices | irq_pinning |
 | `qjackctl_server_prefix` | QjackCtl config | jackd flags |
 | `udev_rule` | Create udev rule | cpu_dma_latency, usb_autosuspend |
 | `kernel_cmdline` | Kernel cmdline param (distro-aware) | threadirqs, audit=0 |
@@ -215,6 +216,8 @@ In `gui/app.py` → `_populate()`:
 | Group join knob | — | "Join/Leave" button (immediate) | "i" button |
 
 **Columns**: Info | Knob | Action | Config | Status | Check | Category | Risk
+
+**Tabs**: Main | Audio Session (advanced, performance tradeoffs; global toggle disables advanced knobs)
 
 **Sorting**: Click any column header to sort
 
@@ -275,11 +278,11 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying PipeWire knobs restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Kernel isolation knobs also use the Config column core selector. Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying PipeWire knobs restarts PipeWire services automatically.
 
 ---
 
-## Current Knobs (23) - ALL IMPLEMENTED ✓
+## Current Knobs (28) - ALL IMPLEMENTED ✓
 
 ### Permissions
 | Knob | Kind | Status |
@@ -294,6 +297,7 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 |------|------|--------|
 | Disable irqbalance | systemd_unit_toggle | ✓ |
 | RTIRQ priorities + service | rtirq_config | ✓ |
+| IRQ pinning | irq_affinity | ✓ |
 
 ### CPU
 | Knob | Kind | Status |
@@ -319,6 +323,10 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 | Knob | Kind | Status |
 |------|------|--------|
 | Enable threaded IRQs | kernel_cmdline | ✓ |
+| Isolate CPU cores (isolcpus) | kernel_cmdline | ✓ |
+| Full tickless cores (nohz_full) | kernel_cmdline | ✓ |
+| RCU offload (rcu_nocbs) | kernel_cmdline | ✓ |
+| IRQ housekeeping (irqaffinity) | kernel_cmdline | ✓ |
 | Disable kernel audit | kernel_cmdline | ✓ |
 | Disable CPU mitigations | kernel_cmdline | ✓ (HIGH RISK) |
 
@@ -456,6 +464,7 @@ Verify:
 
 Only after non-root testing is stable:
 - systemd toggles (irqbalance) + rtirq config/service
+- IRQ pinning (affinity changes)
 - sysfs knobs (CPU governor, THP)
 - udev rule knobs
 - kernel cmdline knobs (require reboot; do last)
