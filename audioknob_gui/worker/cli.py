@@ -721,8 +721,6 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 raise SystemExit(f"Unsupported systemd action: {action}")
 
         elif kind == "rtirq_config":
-            import subprocess
-
             from audioknob_gui.core.rtirq import apply_rtirq_block, normalize_rtirq_list
             from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path, systemd_enable_now
 
@@ -927,7 +925,6 @@ def cmd_apply(args: argparse.Namespace) -> int:
             Path(path).write_text(content.rstrip("\n") + "\n", encoding="utf-8")
             
             # Reload udev rules
-            import subprocess
             subprocess.run(["udevadm", "control", "--reload-rules"], check=False)
             subprocess.run(["udevadm", "trigger"], check=False)
 
@@ -1007,7 +1004,6 @@ def cmd_apply(args: argparse.Namespace) -> int:
             
             # Run bootloader update command
             if distro.kernel_cmdline_update_cmd:
-                import subprocess
                 result = subprocess.run(distro.kernel_cmdline_update_cmd, capture_output=True, text=True)
                 effects.append({
                     "kind": "kernel_cmdline",
