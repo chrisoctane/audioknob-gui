@@ -439,6 +439,7 @@ def load_state() -> dict:
         "kernel_nohz_full_cores": None,  # list[int] or None
         "kernel_rcu_nocbs_cores": None,  # list[int] or None
         "kernel_irqaffinity_cores": None,  # list[int] or None
+        "irq_housekeeping_auto": True,  # bool
         "irq_pinning_devices": [],  # list[str]
         "irq_pinning_cpu_cores": None,  # list[int] or None
         "advanced_mode_enabled": False,  # bool
@@ -472,6 +473,10 @@ def load_state() -> dict:
             data["kernel_rcu_nocbs_cores"] = None
         if "kernel_irqaffinity_cores" not in data:
             data["kernel_irqaffinity_cores"] = None
+        if "irq_housekeeping_auto" not in data:
+            manual = data.get("kernel_irqaffinity_cores")
+            has_manual = isinstance(manual, list) and any(isinstance(x, int) for x in manual)
+            data["irq_housekeeping_auto"] = not has_manual
         if "irq_pinning_devices" not in data:
             data["irq_pinning_devices"] = []
         if "irq_pinning_cpu_cores" not in data:
@@ -553,6 +558,8 @@ def load_state() -> dict:
                     data[key] = None
         if data.get("advanced_mode_enabled") is not None and not isinstance(data.get("advanced_mode_enabled"), bool):
             data["advanced_mode_enabled"] = False
+        if data.get("irq_housekeeping_auto") is not None and not isinstance(data.get("irq_housekeeping_auto"), bool):
+            data["irq_housekeeping_auto"] = True
         if data.get("system_profile") is not None and not isinstance(data.get("system_profile"), dict):
             data["system_profile"] = None
         if data.get("baseline_statuses") is not None and not isinstance(data.get("baseline_statuses"), dict):
@@ -689,6 +696,10 @@ def main() -> int:
             *,
             cpu_count: int,
             selected: set[int],
+            allow_auto: bool = False,
+            auto_enabled: bool = False,
+            auto_label: str | None = None,
+            auto_hint: str | None = None,
             title: str | None = None,
             lines: list[str] | None = None,
             parent: QWidget | None = None,
@@ -699,6 +710,8 @@ def main() -> int:
 
             self._cpu_count = max(1, int(cpu_count))
             self._checks: list[QCheckBox] = []
+            self._auto_cb: QCheckBox | None = None
+            self._auto_hint: QLabel | None = None
 
             root = QVBoxLayout(self)
             if lines is None:
@@ -708,6 +721,16 @@ def main() -> int:
                 ]
             for line in lines:
                 root.addWidget(QLabel(line))
+
+            if allow_auto:
+                label = auto_label or "Auto"
+                hint = auto_hint or "Auto uses all cores except selected audio cores."
+                self._auto_cb = QCheckBox(label)
+                self._auto_cb.setChecked(bool(auto_enabled))
+                root.addWidget(self._auto_cb)
+                self._auto_hint = QLabel(hint)
+                self._auto_hint.setWordWrap(True)
+                root.addWidget(self._auto_hint)
 
             grid_wrap = QWidget()
             grid = QGridLayout(grid_wrap)
@@ -736,6 +759,16 @@ def main() -> int:
             btn_all.clicked.connect(lambda: _set_all(True))
             btn_none.clicked.connect(lambda: _set_all(False))
 
+            if self._auto_cb is not None:
+                def _apply_auto(enabled: bool) -> None:
+                    for cb in self._checks:
+                        cb.setEnabled(not enabled)
+                    btn_all.setEnabled(not enabled)
+                    btn_none.setEnabled(not enabled)
+
+                self._auto_cb.toggled.connect(_apply_auto)
+                _apply_auto(self._auto_cb.isChecked())
+
             btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
             btns.accepted.connect(self.accept)
             btns.rejected.connect(self.reject)
@@ -747,6 +780,11 @@ def main() -> int:
                 if cb.isChecked():
                     out.append(i)
             return out
+
+        def auto_enabled(self) -> bool:
+            if self._auto_cb is None:
+                return False
+            return self._auto_cb.isChecked()
 
     class IrqPinningDialog(QDialog):
         def __init__(
@@ -3365,14 +3403,26 @@ def main() -> int:
             key = self._kernel_core_key(knob_id)
             if not key:
                 return None
-            cores = self._kernel_cores_from_state(knob_id)
-            if not cores:
-                return None
-            try:
-                from audioknob_gui.core.irq import cpu_list_from_cores
-            except Exception:
-                return None
-            cpu_list = cpu_list_from_cores(cores)
+            cores = None
+            if knob_id == "kernel_irqaffinity" and self.state.get("irq_housekeeping_auto", True):
+                try:
+                    from audioknob_gui.core.irq import cpu_list_from_cores, read_cpu_present
+                except Exception:
+                    return None
+                audio = set(self._irq_pinning_cpu_cores_from_state() or [])
+                housekeeping = read_cpu_present() - audio
+                if not housekeeping:
+                    return None
+                cpu_list = cpu_list_from_cores(sorted(housekeeping))
+            else:
+                cores = self._kernel_cores_from_state(knob_id)
+                if not cores:
+                    return None
+                try:
+                    from audioknob_gui.core.irq import cpu_list_from_cores
+                except Exception:
+                    return None
+                cpu_list = cpu_list_from_cores(cores)
             if not cpu_list:
                 return None
             prefixes = {
@@ -3466,6 +3516,8 @@ def main() -> int:
 
                 cpu_count = get_cpu_count()
                 selected = set(self._kernel_cores_from_state(knob_id) or [])
+                allow_auto = knob_id == "kernel_irqaffinity"
+                auto_enabled = bool(self.state.get("irq_housekeeping_auto", True))
                 titles = {
                     "kernel_isolcpus": "Configure isolcpus cores",
                     "kernel_nohz_full": "Configure nohz_full cores",
@@ -3490,9 +3542,26 @@ def main() -> int:
                         "Use non-isolated cores to keep IRQs off audio cores.",
                     ],
                 }
+                auto_hint = None
+                auto_label = None
+                if allow_auto:
+                    audio_cores = set(self._irq_pinning_cpu_cores_from_state() or [])
+                    auto_label = "Auto housekeeping (invert audio cores)"
+                    auto_hint = "Auto uses IRQ Pinning audio cores to remove them from housekeeping."
+                    if audio_cores:
+                        audio_list = ",".join(str(c) for c in sorted(audio_cores))
+                        auto_hint += f" Audio cores: {audio_list}."
+                        housekeeping = sorted(set(range(cpu_count)) - audio_cores)
+                        if housekeeping:
+                            hk_list = ",".join(str(c) for c in housekeeping)
+                            auto_hint += f" Housekeeping: {hk_list}."
                 d = CpuCoreDialog(
                     cpu_count=cpu_count,
                     selected=selected,
+                    allow_auto=allow_auto,
+                    auto_enabled=auto_enabled,
+                    auto_label=auto_label,
+                    auto_hint=auto_hint,
                     title=titles.get(knob_id, "Configure CPU cores"),
                     lines=lines.get(knob_id),
                     parent=self,
@@ -3501,6 +3570,8 @@ def main() -> int:
                     return
 
                 chosen = d.selected_cores()
+                if allow_auto:
+                    self.state["irq_housekeeping_auto"] = d.auto_enabled()
                 key = self._kernel_core_key(knob_id)
                 if key:
                     self.state[key] = chosen
@@ -3510,6 +3581,9 @@ def main() -> int:
                 if status in ("applied", "pending_reboot"):
                     _get_gui_logger().info("%s cores updated; reapplying", knob_id)
                     self._on_apply_knob(knob_id)
+                    return
+                if allow_auto and self.state.get("irq_housekeeping_auto"):
+                    QMessageBox.information(self, "Saved", "Saved IRQ housekeeping configuration (auto).")
                     return
                 QMessageBox.information(
                     self,
@@ -4083,6 +4157,21 @@ def main() -> int:
                 cpu_list = ",".join(str(c) for c in (cores or []))
                 lines.append(f"cpu_cores: {cpu_list or 'unset'}")
                 lines.append(f"device_keys: {', '.join(device_keys) if device_keys else 'unset'}")
+                auto_housekeeping = bool(self.state.get("irq_housekeeping_auto", True))
+                lines.append(f"housekeeping_auto: {auto_housekeeping}")
+                if auto_housekeeping:
+                    try:
+                        from audioknob_gui.core.irq import read_cpu_present
+                        audio_set = set(cores or [])
+                        housekeeping = sorted(read_cpu_present() - audio_set)
+                        hk_list = ",".join(str(c) for c in housekeeping)
+                        lines.append(f"housekeeping_cores: {hk_list or 'unset'}")
+                    except Exception:
+                        lines.append("housekeeping_cores: unknown")
+                else:
+                    manual = self._kernel_cores_from_state("kernel_irqaffinity") or []
+                    manual_list = ",".join(str(c) for c in manual)
+                    lines.append(f"housekeeping_cores: {manual_list or 'unset'}")
 
                 selected, missing = resolve_selected_devices(device_keys)
                 if missing:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Iterable
 
@@ -51,6 +53,57 @@ def parse_cpu_list(raw: str) -> set[int]:
             except Exception:
                 continue
     return out
+
+
+def read_cpu_present() -> set[int]:
+    for path_str in (
+        "/sys/devices/system/cpu/present",
+        "/sys/devices/system/cpu/possible",
+    ):
+        path = Path(path_str)
+        if not path.exists():
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        parsed = parse_cpu_list(raw)
+        if parsed:
+            return parsed
+    count = os.cpu_count() or 1
+    return set(range(count))
+
+
+def list_irqs() -> list[int]:
+    base = Path("/proc/irq")
+    if not base.exists():
+        return []
+    irqs: list[int] = []
+    for entry in base.iterdir():
+        if not entry.is_dir():
+            continue
+        if _IRQ_RE.match(entry.name):
+            irqs.append(int(entry.name))
+    return sorted(irqs)
+
+
+def read_irq_affinity_list(irq: int) -> str | None:
+    path = Path(f"/proc/irq/{irq}/smp_affinity_list")
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+
+
+def is_irq_affinity_writable(irq: int) -> bool:
+    path = Path(f"/proc/irq/{irq}/smp_affinity_list")
+    try:
+        mode = path.stat().st_mode
+    except Exception:
+        return False
+    return bool(mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
 
 
 def build_irq_pinning_unit(state_dir: str) -> str:

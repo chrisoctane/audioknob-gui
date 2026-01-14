@@ -1429,7 +1429,13 @@ def check_knob_status(knob: Any) -> str:
         return "not_applied"
 
     if kind == "irq_affinity":
-        from audioknob_gui.core.irq import collect_target_irqs, parse_cpu_list, resolve_selected_devices
+        from audioknob_gui.core.irq import (
+            collect_target_irqs,
+            list_irqs,
+            parse_cpu_list,
+            read_irq_affinity_list,
+            resolve_selected_devices,
+        )
 
         device_keys = params.get("device_keys") or []
         cpu_cores = str(params.get("cpu_cores", "")).strip()
@@ -1460,6 +1466,22 @@ def check_knob_status(knob: Any) -> str:
             if parse_cpu_list(current) == expected_set:
                 matched += 1
 
+        sweep_ok = True
+        housekeeping_raw = str(params.get("housekeeping_cores", "")).strip()
+        if housekeeping_raw:
+            housekeeping_set = parse_cpu_list(housekeeping_raw) - expected_set
+            if housekeeping_set:
+                for irq in list_irqs():
+                    if irq in target_irqs:
+                        continue
+                    current = read_irq_affinity_list(irq)
+                    if current is None:
+                        continue
+                    current_set = parse_cpu_list(current)
+                    if current_set & expected_set:
+                        sweep_ok = False
+                        break
+
         state_path = str(params.get("persist_state_path", "")).strip()
         unit = str(params.get("persist_unit", "")).strip()
         config_ok = False
@@ -1484,9 +1506,9 @@ def check_knob_status(knob: Any) -> str:
                 service_partial = True
 
         persistent_ok = (not state_path or config_ok) and (not unit or service_ok) and not service_partial
-        if matched == len(target_irqs) and not missing and persistent_ok:
+        if matched == len(target_irqs) and not missing and persistent_ok and sweep_ok:
             return "applied"
-        if matched > 0 or missing or config_ok or service_ok or service_partial:
+        if matched > 0 or missing or config_ok or service_ok or service_partial or not sweep_ok:
             return "partial"
         return "not_applied"
     

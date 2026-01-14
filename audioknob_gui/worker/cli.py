@@ -198,7 +198,69 @@ def _irq_pinning_override(state: dict) -> tuple[list[str] | None, str | None]:
     return devices, cpu_list
 
 
+def _resolve_housekeeping_cores(state: dict, audio_set: set[int], warnings: list[str] | None = None) -> set[int] | None:
+    warn = warnings if warnings is not None else []
+    auto = state.get("irq_housekeeping_auto")
+    if not isinstance(auto, bool):
+        auto = True
+
+    housekeeping: set[int] | None = None
+    if auto:
+        from audioknob_gui.core.irq import read_cpu_present
+
+        housekeeping = read_cpu_present() - set(audio_set)
+    else:
+        raw = state.get("irq_housekeeping_cores")
+        if isinstance(raw, list) and all(isinstance(x, int) for x in raw):
+            housekeeping = {int(x) for x in raw} or None
+        if housekeeping is None:
+            raw = state.get("kernel_irqaffinity_cores")
+            if isinstance(raw, list) and all(isinstance(x, int) for x in raw):
+                housekeeping = {int(x) for x in raw}
+        if housekeeping is None:
+            warn.append("Housekeeping cores not set; skipping non-audio IRQ sweep.")
+            return None
+
+    if audio_set & housekeeping:
+        housekeeping = housekeeping - set(audio_set)
+        warn.append("Housekeeping cores overlap audio cores; removing audio cores from housekeeping set.")
+
+    if not housekeeping:
+        warn.append("Housekeeping core list is empty; skipping non-audio IRQ sweep.")
+        return None
+
+    return housekeeping
+
+
+def _irq_housekeeping_override(state: dict, audio_cpu_list: str | None) -> str | None:
+    if not audio_cpu_list:
+        return None
+    from audioknob_gui.core.irq import cpu_list_from_cores, parse_cpu_list
+
+    audio_set = parse_cpu_list(audio_cpu_list)
+    if not audio_set:
+        return None
+    housekeeping = _resolve_housekeeping_cores(state, audio_set)
+    if not housekeeping:
+        return None
+    return cpu_list_from_cores(housekeeping)
+
+
 def _kernel_cmdline_override(state: dict, knob_id: str) -> str | None:
+    if knob_id == "kernel_irqaffinity" and state.get("irq_housekeeping_auto", True):
+        audio_raw = state.get("irq_pinning_cpu_cores")
+        audio_set: set[int] = set()
+        if isinstance(audio_raw, list) and all(isinstance(x, int) for x in audio_raw):
+            audio_set = {int(x) for x in audio_raw}
+        from audioknob_gui.core.irq import cpu_list_from_cores, read_cpu_present
+
+        housekeeping = read_cpu_present() - audio_set
+        if not housekeeping:
+            return None
+        cpu_list = cpu_list_from_cores(sorted(housekeeping))
+        if not cpu_list:
+            return None
+        return f"irqaffinity={cpu_list}"
     mapping = {
         "kernel_isolcpus": ("kernel_isolcpus_cores", "isolcpus"),
         "kernel_nohz_full": ("kernel_nohz_full_cores", "nohz_full"),
@@ -763,7 +825,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
             from audioknob_gui.core.irq import (
                 build_irq_pinning_unit,
                 collect_target_irqs,
+                cpu_list_from_cores,
+                is_irq_affinity_writable,
+                list_irqs,
                 parse_cpu_list,
+                read_irq_affinity_list,
                 resolve_selected_devices,
             )
 
@@ -811,6 +877,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 if not path.exists():
                     errors.append(f"Missing {path}")
                     continue
+                if not is_irq_affinity_writable(irq):
+                    errors.append(f"IRQ {irq} affinity is read-only (managed by kernel)")
+                    continue
                 try:
                     before = path.read_text(encoding="utf-8").strip()
                 except Exception as exc:
@@ -829,6 +898,40 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
             if errors:
                 raise SystemExit("IRQ affinity update failed: " + "; ".join(errors))
+
+            housekeeping_set = _resolve_housekeeping_cores(state, expected_set, warnings)
+            if housekeeping_set:
+                housekeeping_list = cpu_list_from_cores(housekeeping_set)
+                readonly_irqs: list[int] = []
+                for irq in list_irqs():
+                    if irq in target_irqs:
+                        continue
+                    current = read_irq_affinity_list(irq)
+                    if current is None:
+                        continue
+                    current_set = parse_cpu_list(current)
+                    if not current_set or not (current_set & expected_set):
+                        continue
+                    if current_set == housekeeping_set:
+                        continue
+                    if not is_irq_affinity_writable(irq):
+                        readonly_irqs.append(irq)
+                        continue
+                    path = Path(f"/proc/irq/{irq}/smp_affinity_list")
+                    try:
+                        path.write_text(housekeeping_list + "\n", encoding="utf-8")
+                    except Exception as exc:
+                        warnings.append(f"Failed to move IRQ {irq} to housekeeping cores: {exc}")
+                        continue
+                    effects.append(
+                        {"kind": "irq_affinity", "irq": irq, "before": current, "after": housekeeping_list}
+                    )
+                if readonly_irqs:
+                    preview = ",".join(str(x) for x in readonly_irqs[:12])
+                    suffix = f" (+{len(readonly_irqs) - 12} more)" if len(readonly_irqs) > 12 else ""
+                    warnings.append(
+                        "Skipped read-only IRQs (kernel-managed): " + preview + suffix
+                    )
 
             if os.environ.get("AUDIOKNOB_IRQ_PINNING_SERVICE") != "1":
                 persist_state_path = str(params.get("persist_state_path", "")).strip()
@@ -849,6 +952,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
                             state_payload = {}
                     state_payload["irq_pinning_devices"] = [str(x) for x in device_keys]
                     state_payload["irq_pinning_cpu_cores"] = sorted(expected_set)
+                    auto_housekeeping = state.get("irq_housekeeping_auto")
+                    if not isinstance(auto_housekeeping, bool):
+                        auto_housekeeping = True
+                    state_payload["irq_housekeeping_auto"] = bool(auto_housekeeping)
+                    if auto_housekeeping:
+                        state_payload.pop("irq_housekeeping_cores", None)
+                    else:
+                        state_payload["irq_housekeeping_cores"] = sorted(housekeeping_set) if housekeeping_set else []
                     state_path.parent.mkdir(parents=True, exist_ok=True)
                     state_path.write_text(json.dumps(state_payload, indent=2) + "\n", encoding="utf-8")
                 except Exception as exc:
@@ -1739,16 +1850,15 @@ def cmd_status(args: argparse.Namespace) -> int:
             new_params = dict(k.impl.params)
             new_params["param"] = kernel_override
             k = replace(k, impl=replace(k.impl, params=new_params))
-        if (
-            (irq_devices_override or irq_cpu_override)
-            and k.impl is not None
-            and k.impl.kind == "irq_affinity"
-        ):
+        if k.impl is not None and k.impl.kind == "irq_affinity":
             new_params = dict(k.impl.params)
             if irq_devices_override is not None:
                 new_params["device_keys"] = irq_devices_override
             if irq_cpu_override is not None:
                 new_params["cpu_cores"] = irq_cpu_override
+            housekeeping_override = _irq_housekeeping_override(state, str(new_params.get("cpu_cores", "")).strip())
+            if housekeeping_override:
+                new_params["housekeeping_cores"] = housekeeping_override
             k = replace(k, impl=replace(k.impl, params=new_params))
         status = check_knob_status(k)
         statuses.append({

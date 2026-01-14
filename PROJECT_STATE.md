@@ -29,7 +29,7 @@
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
-- **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in), persisted via a boot-time systemd oneshot
+- **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 
 ### GUI Layout
 ```
@@ -45,7 +45,7 @@ Notes:
 - "Sys" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Requirements/Status/Risk keeps grouped headers; other columns sort flat.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
-- IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also writes a system config + enables `audioknob-irq-pinning.service` so pinning persists across reboots.
+- IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also sweeps non-audio IRQs off the selected audio cores (using IRQ Housekeeping cores if set, otherwise all cores minus audio cores) and enables `audioknob-irq-pinning.service` so pinning persists across reboots. IRQ Housekeeping supports an Auto mode that inverts selected audio cores.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
 - Header row includes a Re-check State button to refresh current status.
 - Reboot-required banner appears below the header row (wraps to avoid widening the window).
@@ -96,6 +96,7 @@ Notes:
 - Main window can be resized up to the screen size (no max-height clamp to content).
 - Category headers and separators clear all cell widgets so no stray info buttons appear.
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
+- IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

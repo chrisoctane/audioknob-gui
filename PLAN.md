@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.8.1)
+### Install on openSUSE Tumbleweed (RPM, v0.3.8.2)
 
-For v0.3.8.1 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.3.8.2 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -83,6 +83,14 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - Applying **QjackCtl RT** updates the QjackCtl config (active preset if set, plus unscoped mirror), sets **Realtime=true** and **Priority=90**, preserves existing presets, disables **ServerConfig**, and configures a **PostStartupScript** so JACK is re-pinned on each start. It also attempts to pin any running `jackd` process immediately. If JACK is not running, the CPU pinning takes effect the next time you start it.
 - **Important:** Quit QjackCtl before applying this knob; QjackCtl rewrites its config on exit.
+
+### IRQ pinning behavior
+
+- **IRQ Pinning** pins IRQs for the selected audio devices to the chosen audio cores.
+- It also performs a **housekeeping sweep** to move other IRQs off those audio cores.
+- Housekeeping cores come from **IRQ Housekeeping (irqaffinity)** if configured; otherwise they default to **all cores minus the selected audio cores**.
+- **IRQ Housekeeping** supports an **Auto** mode that inverts the selected audio cores.
+- Pinning persists across reboots via `/var/lib/audioknob-gui/state.json` and `audioknob-irq-pinning.service`.
 
 ### Logs (what the app did and where it failed)
 

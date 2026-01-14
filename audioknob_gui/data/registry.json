@@ -123,7 +123,7 @@
         "restore": true
       },
       "category": "irq",
-      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning. Persists via /var/lib/audioknob-gui/state.json + audioknob-irq-pinning.service.",
+      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Also moves non-audio IRQs off the selected audio cores (housekeeping sweep). Housekeeping cores come from IRQ Housekeeping (irqaffinity) if set; otherwise, all cores minus the selected audio cores. Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning. Persists via /var/lib/audioknob-gui/state.json + audioknob-irq-pinning.service.",
       "depends_on": [
         "irqbalance_disable"
       ],
@@ -412,7 +412,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds irqaffinity=<cores> to the kernel cmdline. Pins default IRQ handling to the selected housekeeping cores (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "description": "Adds irqaffinity=<cores> to the kernel cmdline. Pins default IRQ handling to the selected housekeeping cores (advanced). Configure cores in the UI or enable Auto to invert selected audio cores. Requires reboot. Can reduce performance for general workloads.",
       "id": "kernel_irqaffinity",
       "impl": {
         "kind": "kernel_cmdline",
