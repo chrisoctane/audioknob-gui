@@ -49,6 +49,7 @@ Notes:
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
 - Header row includes a Re-check State button to refresh current status.
 - Reboot-required banner appears below the header row (wraps to avoid widening the window).
+- Category headers, separators, and the empty table background use the same dark gray as the main window header; knob rows use a lighter gray so each group floats on the backdrop.
 - Main window title includes app version and git short SHA when available.
 ```
 

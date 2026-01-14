@@ -6,7 +6,7 @@ GUI-first realtime audio tuning tool for Linux.
 
 ## Install
 
-The **v0.3.8** RPM install path is validated on openSUSE Tumbleweed.
+The **v0.3.8.1** RPM install path is validated on openSUSE Tumbleweed.
 
 ### openSUSE Tumbleweed (local RPM)
 
@@ -39,7 +39,7 @@ cd audioknob-gui
 Expected output includes:
 
 - `Built RPM(s):`
-- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.3.8-0.noarch.rpm`
+- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.3.8.1-0.noarch.rpm`
 
 ### 4) Install the RPM (unsigned local build)
 

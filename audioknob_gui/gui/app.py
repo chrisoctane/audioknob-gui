@@ -2468,12 +2468,14 @@ def main() -> int:
                 if isinstance(k, tuple) and k and k[0] is CATEGORY_HEADER:
                     label = str(k[1])
                     tooltip = str(k[2]) if len(k) > 2 and k[2] else ""
+                    header_bg = QColor("#1f1f1f")
                     for c in range(self.table.columnCount()):
                         self.table.removeCellWidget(r, c)
                     self.table.setSpan(r, 0, 1, self.table.columnCount())
                     header_item = QTableWidgetItem(label)
                     header_item.setFlags(Qt.ItemIsEnabled)
                     header_item.setForeground(QColor("#cfcfcf"))
+                    header_item.setBackground(header_bg)
                     header_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                     header_font = header_item.font()
                     header_font.setBold(True)
@@ -2482,19 +2484,27 @@ def main() -> int:
                         header_item.setToolTip(tooltip)
                     self.table.setItem(r, 0, header_item)
                     for c in range(1, self.table.columnCount()):
-                        self.table.setItem(r, c, QTableWidgetItem(""))
+                        filler = QTableWidgetItem("")
+                        filler.setFlags(Qt.ItemIsEnabled)
+                        filler.setBackground(header_bg)
+                        self.table.setItem(r, c, filler)
                     continue
                 if k is CATEGORY_SEPARATOR:
+                    sep_bg = QColor("#1f1f1f")
                     for c in range(self.table.columnCount()):
                         self.table.removeCellWidget(r, c)
                     sep = QTableWidgetItem("")
                     sep.setFlags(Qt.ItemIsEnabled)
                     sep.setForeground(QColor("#9e9e9e"))
+                    sep.setBackground(sep_bg)
                     sep.setTextAlignment(Qt.AlignCenter)
                     self.table.setSpan(r, 0, 1, self.table.columnCount())
                     self.table.setItem(r, 0, sep)
                     for c in range(1, self.table.columnCount()):
-                        self.table.setItem(r, c, QTableWidgetItem(""))
+                        filler = QTableWidgetItem("")
+                        filler.setFlags(Qt.ItemIsEnabled)
+                        filler.setBackground(sep_bg)
+                        self.table.setItem(r, c, filler)
                     try:
                         self.table.setRowHeight(r, 10)
                     except Exception:
@@ -2511,12 +2521,12 @@ def main() -> int:
                 elif k.id == "disable_baloo" and desktop_kind == "gnome":
                     not_applicable = True
                     not_applicable_reason = "Requires KDE desktop"
-                locked_bg = QColor("#2f2f2f")
+                locked_bg = QColor("#1f1f1f")
                 locked_fg = QColor("#7a7a7a")
                 locked_style = (
-                    "QPushButton { background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a; }"
-                    "QPushButton:hover { background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a; }"
-                    "QPushButton:pressed { background-color: #2f2f2f; color: #7a7a7a; border: 1px solid #3a3a3a; }"
+                    "QPushButton { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                    "QPushButton:hover { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                    "QPushButton:pressed { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
                 )
 
                 # Check requirements
@@ -3074,30 +3084,34 @@ def main() -> int:
             """Apply clean dark theme."""
             self.setStyleSheet("""
                 QMainWindow, QWidget {
-                    background-color: #2b2b2b;
+                    background-color: #1f1f1f;
                     color: #e0e0e0;
                 }
                 QTableWidget {
-                    background-color: #333333;
-                    alternate-background-color: #3a3a3a;
-                    gridline-color: #444444;
-                    border: 1px solid #444444;
+                    background-color: #1f1f1f;
+                    alternate-background-color: #353535;
+                    gridline-color: #1f1f1f;
+                    border: 1px solid #1f1f1f;
                 }
                 QTableWidget::item {
+                    background-color: #2f2f2f;
                     padding: 4px;
                     font-weight: normal;
+                }
+                QTableWidget::item:alternate {
+                    background-color: #353535;
                 }
                 QTableWidget::item:selected {
                     background-color: #46525d;
                     color: #e0e0e0;
                 }
                 QHeaderView::section {
-                    background-color: #404040;
+                    background-color: #1f1f1f;
                     color: #e0e0e0;
                     padding: 6px;
                     font-weight: normal;
                     border: none;
-                    border-bottom: 1px solid #555555;
+                    border-bottom: 1px solid #2a2a2a;
                 }
                 QPushButton {
                     background-color: #4a4a4a;
