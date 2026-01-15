@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.3.8.2)
+### Install on openSUSE Tumbleweed (RPM, v0.4.0.0)
 
-For v0.3.8.2 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.4.0.0 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -88,9 +88,39 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - **IRQ Pinning** pins IRQs for the selected audio devices to the chosen audio cores.
 - It also performs a **housekeeping sweep** to move other IRQs off those audio cores.
-- Housekeeping cores come from **IRQ Housekeeping (irqaffinity)** if configured; otherwise they default to **all cores minus the selected audio cores**.
+- Housekeeping cores come from **IRQ Housekeeping** if configured; otherwise they default to **all cores minus the selected audio cores**.
 - **IRQ Housekeeping** supports an **Auto** mode that inverts the selected audio cores.
 - Pinning persists across reboots via `/var/lib/audioknob-gui/state.json` and `audioknob-irq-pinning.service`.
+
+### Threaded IRQs + RTIRQ
+
+- **Threaded IRQs** (kernel `threadirqs`) makes IRQ handlers schedulable threads on generic kernels.
+- **RTIRQ** raises IRQ thread priorities; it only has effect when IRQs are threaded (RT kernel or `threadirqs`).
+
+### RT throttling
+
+- **RT Throttling** disables `kernel.sched_rt_runtime_us` (sets to `-1`), which prevents periodic throttling of RT threads.
+- This can reduce xruns but risks a runaway RT thread starving the system; use with care and reset if needed.
+
+### CPU C-States
+
+- **CPU C-States** adds `processor.max_cstate=1` to the kernel cmdline to limit idle states (higher power/heat, lower latency jitter).
+- **Intel C-States** adds `intel_idle.max_cstate=1` for systems using the Intel `intel_idle` driver.
+
+### Power profile
+
+- **Power Profile** sets the system power profile to performance via power-profiles-daemon or tuned (latency-performance).
+- Reset restores the previous profile.
+
+### Main + Cores/IRQ views
+
+- The **Main** tab shows all knobs except the core/IRQ set (to avoid duplicates).
+- Use the **Cores/IRQ** tab to focus on core/IRQ knobs only.
+- The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
+- Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.
+- **Auto housekeeping** inverts the selected audio cores to derive IRQ housekeeping cores; manual mode uses the IRQ housekeeping core selection.
+- Auto-set updates knob configuration only; apply the relevant knobs to make changes.
+- **IRQ Overview** shows a core map (housekeeping vs audio cores) and a live list of IRQ affinity assignments.
 
 ### Logs (what the app did and where it failed)
 
@@ -223,7 +253,7 @@ In `gui/app.py` → `_populate()`:
 | Read-only test | — | "Test"/"Scan" button | "i" button |
 | Group join knob | — | "Join/Leave" button (immediate) | "i" button |
 
-**Columns**: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | Sys
+**Columns**: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | CLI
 
 **Advanced mode**: Single table; advanced knobs are gated by the "Enable advanced knobs" checkbox.
 
@@ -231,7 +261,7 @@ In `gui/app.py` → `_populate()`:
 
 **Requirements column**: Shows A/R/G markers for Advanced/Reboot/Groups (tooltip includes the key).
 
-**Sys column**: Shows the target command/file/parameter shorthand for each knob.
+**CLI column**: Shows the target command/file/parameter shorthand for each knob.
 
 **Header row**: Font size control on the left, queue status + Apply/Apply & Reboot + Re-check State + Logs + Reset All on the right
 
@@ -329,15 +359,19 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 | Knob | Kind | Status |
 |------|------|--------|
 | Disable USB autosuspend | udev_rule | ✓ |
+| Power profile (performance) | power_profile | ✓ |
 
 ### Kernel (requires reboot)
 | Knob | Kind | Status |
 |------|------|--------|
 | Enable threaded IRQs | kernel_cmdline | ✓ |
-| Isolate CPU cores (isolcpus) | kernel_cmdline | ✓ |
-| Full tickless cores (nohz_full) | kernel_cmdline | ✓ |
-| RCU offload (rcu_nocbs) | kernel_cmdline | ✓ |
-| IRQ housekeeping (irqaffinity) | kernel_cmdline | ✓ |
+| CPU C-States | kernel_cmdline | ✓ |
+| Intel C-States | kernel_cmdline | ✓ |
+| CPU Isolation | kernel_cmdline | ✓ |
+| Full Tickless | kernel_cmdline | ✓ |
+| RCU Offload | kernel_cmdline | ✓ |
+| IRQ Housekeeping | kernel_cmdline | ✓ |
+| RT Throttling | sysctl_conf | ✓ (HIGH RISK) |
 | Disable kernel audit | kernel_cmdline | ✓ |
 | Disable CPU mitigations | kernel_cmdline | ✓ (HIGH RISK) |
 

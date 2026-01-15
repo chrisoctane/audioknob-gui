@@ -312,6 +312,35 @@ def _backup_once(tx, backups: list[dict], path: str, *, we_created: bool = False
     return meta
 
 
+def _restore_power_profile_effects(effects: list[dict[str, Any]], errors: list[str]) -> int:
+    from audioknob_gui.platform.packages import which_command
+
+    restored = 0
+    for effect in effects:
+        if effect.get("kind") != "power_profile":
+            continue
+        backend = str(effect.get("backend", "")).strip()
+        before = str(effect.get("before", "")).strip()
+        if not backend or not before:
+            continue
+        if backend == "powerprofilesctl":
+            cmd = which_command("powerprofilesctl") or "powerprofilesctl"
+            argv = [cmd, "set", before]
+        elif backend == "tuned":
+            cmd = which_command("tuned-adm") or "tuned-adm"
+            argv = [cmd, "profile", before]
+        else:
+            errors.append(f"Unknown power profile backend: {backend}")
+            continue
+        result = subprocess.run(argv, capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            errors.append(f"Failed to restore power profile ({backend}): {detail}")
+            continue
+        restored += 1
+    return restored
+
+
 def cmd_detect(_: argparse.Namespace) -> int:
     print(json.dumps(dump_detect(), indent=2, sort_keys=True))
     return 0
@@ -1027,6 +1056,48 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 # Best-effort: ensure cpupower.service is enabled so setting persists.
                 effects.append(systemd_enable_now("cpupower.service"))
 
+        elif kind == "power_profile":
+            from audioknob_gui.worker.ops import detect_power_profile_backend, read_power_profile, systemd_enable_now
+
+            backend = detect_power_profile_backend()
+            if not backend:
+                raise SystemExit("No power profile backend found (powerprofilesctl or tuned-adm).")
+
+            service = backend.get("service")
+            if service:
+                svc_effect = systemd_enable_now(service)
+                effects.append(svc_effect)
+                if svc_effect.get("result", {}).get("returncode") not in (0, None):
+                    detail = svc_effect.get("result", {}).get("stderr") or svc_effect.get("result", {}).get("stdout")
+                    if detail:
+                        warnings.append(f"Failed to enable {service}: {detail.strip()}")
+
+            current = read_power_profile(backend["backend"], backend["cmd"])
+            if current is None:
+                raise SystemExit("Failed to read current power profile")
+
+            if backend["backend"] == "powerprofilesctl":
+                target = str(params.get("ppd_profile", "performance")).strip() or "performance"
+                cmd = [backend["cmd"], "set", target]
+            else:
+                target = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
+                cmd = [backend["cmd"], "profile", target]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            effects.append(
+                {
+                    "kind": "power_profile",
+                    "backend": backend["backend"],
+                    "before": current,
+                    "after": target,
+                    "cmd": cmd,
+                    "result": {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
+                }
+            )
+            if result.returncode != 0:
+                detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                raise SystemExit(f"Failed to set power profile: {detail}")
+
         elif kind == "udev_rule":
             path = str(params["path"])
             content = str(params["content"])
@@ -1227,6 +1298,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
         for e in systemd:
             systemd_restore(e)
         restore_irq_affinity(irq_affinity)
+        power_errors: list[str] = []
+        _restore_power_profile_effects(effects, power_errors)
     
     # User-scope effects
     from audioknob_gui.worker.ops import user_service_restore, baloo_enable
@@ -1245,6 +1318,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
             "backups": manifest.get("backups", []),
             "effects": effects,
             "manifest": str(manifest_path),
+            "errors": power_errors if is_root else [],
         },
     )
     print(json.dumps({"schema": 1, "restored": args.txid, "was_root": is_root}, indent=2))
@@ -1340,7 +1414,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             # Pending effects: restorable effects
             for effect in tx_info.get("effects", []):
                 kind = effect.get("kind", "")
-                if kind in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline"):
+                if kind in ("sysfs_write", "systemd_unit_toggle", "kernel_cmdline", "power_profile"):
                     needs_root_reset = True
                     break
             if needs_root_reset:
@@ -1429,16 +1503,20 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                 for e in systemd:
                     systemd_restore(e)
                 restore_irq_affinity(irq_affinity)
-                if sysfs or systemd or irq_affinity:
+                power_errors: list[str] = []
+                power_restored = _restore_power_profile_effects(effects, power_errors)
+                if sysfs or systemd or irq_affinity or power_restored:
                     results.append({
                         "path": "(root effects)",
                         "strategy": "effects",
                         "success": True,
                         "message": (
                             f"Restored {len(sysfs)} sysfs + {len(systemd)} systemd + "
-                            f"{len(irq_affinity)} irq effects"
+                            f"{len(irq_affinity)} irq + {power_restored} power profile effects"
                         ),
                     })
+                if power_errors:
+                    errors.extend(power_errors)
             except Exception as ex:
                 errors.append(f"Failed to restore root effects: {ex}")
         
@@ -2216,10 +2294,14 @@ def _restore_knob_once(knob_id: str) -> dict:
             for e in systemd:
                 systemd_restore(e)
             restore_irq_affinity(irq_affinity)
-            if sysfs or systemd or irq_affinity:
+            power_errors: list[str] = []
+            power_restored = _restore_power_profile_effects(effects, power_errors)
+            if sysfs or systemd or irq_affinity or power_restored:
                 restored.append(
-                    f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd, {len(irq_affinity)} irq)"
+                    f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd, {len(irq_affinity)} irq, {power_restored} power)"
                 )
+            if power_errors:
+                errors.extend(power_errors)
         except Exception as ex:
             errors.append(f"Failed to restore effects: {ex}")
 

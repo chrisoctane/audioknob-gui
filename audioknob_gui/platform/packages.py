@@ -310,6 +310,16 @@ PACKAGE_MAPPINGS: dict[str, dict[PackageManager, str]] = {
         PackageManager.DPKG: "baloo-kf5",
         PackageManager.PACMAN: "baloo",
     },
+    "powerprofilesctl": {
+        PackageManager.RPM: "power-profiles-daemon",
+        PackageManager.DPKG: "power-profiles-daemon",
+        PackageManager.PACMAN: "power-profiles-daemon",
+    },
+    "tuned-adm": {
+        PackageManager.RPM: "tuned",
+        PackageManager.DPKG: "tuned",
+        PackageManager.PACMAN: "tuned",
+    },
 }
 
 

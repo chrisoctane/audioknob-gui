@@ -74,6 +74,39 @@ def read_cpu_present() -> set[int]:
     return set(range(count))
 
 
+def read_thread_sibling_groups() -> list[list[int]]:
+    cores = sorted(read_cpu_present())
+    if not cores:
+        return []
+    base = Path("/sys/devices/system/cpu")
+    groups: list[list[int]] = []
+    seen: set[frozenset[int]] = set()
+    for core in cores:
+        path = base / f"cpu{core}" / "topology" / "thread_siblings_list"
+        group: list[int] = []
+        if path.exists():
+            try:
+                raw = path.read_text(encoding="utf-8").strip()
+                group = sorted(parse_cpu_list(raw))
+            except Exception:
+                group = []
+        if not group:
+            group = [core]
+        key = frozenset(group)
+        if key in seen:
+            continue
+        seen.add(key)
+        groups.append(group)
+    covered: set[int] = set()
+    for group in groups:
+        covered.update(group)
+    for core in cores:
+        if core not in covered:
+            groups.append([core])
+    groups.sort(key=lambda g: (min(g), len(g)))
+    return groups
+
+
 def list_irqs() -> list[int]:
     base = Path("/proc/irq")
     if not base.exists():
@@ -95,6 +128,16 @@ def read_irq_affinity_list(irq: int) -> str | None:
         return path.read_text(encoding="utf-8").strip()
     except Exception:
         return None
+
+
+def read_irq_effective_affinity_list(irq: int) -> str | None:
+    path = Path(f"/proc/irq/{irq}/effective_affinity_list")
+    if path.exists():
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except Exception:
+            return None
+    return read_irq_affinity_list(irq)
 
 
 def is_irq_affinity_writable(irq: int) -> bool:

@@ -18,6 +18,10 @@
   - Content provided by user paste (thread on rtcirqus vs rtirq).
   - Notes: rtcirqus focuses on audio IRQs (USB + onboard), rtirq is broader but
     not udev-aware; threadirqs + PREEMPT_DYNAMIC + preempt=full interplay.
+- https://linuxmusicians.com/viewtopic.php?t=27121
+  - Fedora PipeWire low-latency reference guide (PDF pages in `docs/research/forum/`).
+  - Notes: tuned became default power profile daemon in Fedora 41; users often
+    tune for JACK/PipeWire-JACK first; mentions Pro Audio profile via wpctl.
 - https://pipewire.pages.freedesktop.org/pipewire/page_man_pipewire_conf_5.html
   - PipeWire config properties: default clock rates/quantums, allowed rates,
     data loop RT priority and CPU affinity, mlock settings, node/device rules.

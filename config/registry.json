@@ -33,6 +33,9 @@
         "restore": true
       },
       "category": "permissions",
+      "depends_on": [
+        "audio_group_membership"
+      ],
       "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio. Log out/in or reboot required to take effect.",
       "id": "rt_limits_audio_group",
       "impl": {
@@ -46,9 +49,6 @@
           "path": "/etc/security/limits.d/99-audioknob-gui.conf"
         }
       },
-      "depends_on": [
-        "audio_group_membership"
-      ],
       "requires_commands": [],
       "requires_groups": [
         "audio",
@@ -123,10 +123,10 @@
         "restore": true
       },
       "category": "irq",
-      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Also moves non-audio IRQs off the selected audio cores (housekeeping sweep). Housekeeping cores come from IRQ Housekeeping (irqaffinity) if set; otherwise, all cores minus the selected audio cores. Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning. Persists via /var/lib/audioknob-gui/state.json + audioknob-irq-pinning.service.",
       "depends_on": [
         "irqbalance_disable"
       ],
+      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Also moves non-audio IRQs off the selected audio cores (housekeeping sweep). Housekeeping cores come from IRQ Housekeeping (irqaffinity) if set; otherwise, all cores minus the selected audio cores. Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning. Persists via /var/lib/audioknob-gui/state.json + audioknob-irq-pinning.service.",
       "id": "irq_pinning",
       "impl": {
         "kind": "irq_affinity",
@@ -323,6 +323,76 @@
         "read": true,
         "restore": true
       },
+      "category": "power",
+      "description": "Sets the system power profile to performance using power-profiles-daemon (performance) or tuned (latency-performance). Uses the active/available backend and restores the previous profile on reset.",
+      "id": "power_profile_performance",
+      "impl": {
+        "kind": "power_profile",
+        "params": {
+          "ppd_profile": "performance",
+          "tuned_profile": "latency-performance"
+        }
+      },
+      "requires_commands": [
+        "powerprofilesctl",
+        "tuned-adm"
+      ],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "Power Profile"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds processor.max_cstate=1 to kernel cmdline. Limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat. Requires reboot.",
+      "id": "kernel_cstate_limit",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "processor.max_cstate=1"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "CPU C-States"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "Adds intel_idle.max_cstate=1 to kernel cmdline. Intel-only (intel_idle driver). Limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat. Requires reboot.",
+      "id": "kernel_intel_idle_cstate_limit",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "intel_idle.max_cstate=1"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "Intel C-States"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "kernel",
       "description": "Adds 'threadirqs' to kernel cmdline. Makes IRQ handlers schedulable for better RT performance. Requires reboot. File: /etc/kernel/cmdline (openSUSE TW) or /etc/default/grub",
       "id": "kernel_threadirqs",
@@ -346,6 +416,31 @@
         "restore": true
       },
       "category": "kernel",
+      "description": "Disables RT throttling (kernel.sched_rt_runtime_us=-1). Prevents periodic throttling of RT threads but can allow runaway RT tasks to starve the system. Apply requires reboot or sysctl reload.",
+      "id": "kernel_rt_throttling_off",
+      "impl": {
+        "kind": "sysctl_conf",
+        "params": {
+          "lines": [
+            "kernel.sched_rt_runtime_us=-1"
+          ],
+          "path": "/etc/sysctl.d/99-audioknob-rt.conf"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "RT Throttling"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
       "description": "Adds isolcpus=<cores> to the kernel cmdline. Isolates selected cores from the scheduler (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
       "id": "kernel_isolcpus",
       "impl": {
@@ -359,7 +454,7 @@
       "requires_reboot": true,
       "requires_root": true,
       "risk_level": "high",
-      "title": "CPU Isolation (isolcpus)"
+      "title": "CPU Isolation"
     },
     {
       "capabilities": {
@@ -381,7 +476,7 @@
       "requires_reboot": true,
       "requires_root": true,
       "risk_level": "high",
-      "title": "Full Tickless (nohz_full)"
+      "title": "Full Tickless"
     },
     {
       "capabilities": {
@@ -403,7 +498,7 @@
       "requires_reboot": true,
       "requires_root": true,
       "risk_level": "high",
-      "title": "RCU Offload (rcu_nocbs)"
+      "title": "RCU Offload"
     },
     {
       "capabilities": {
@@ -425,7 +520,7 @@
       "requires_reboot": true,
       "requires_root": true,
       "risk_level": "high",
-      "title": "IRQ Housekeeping (irqaffinity)"
+      "title": "IRQ Housekeeping"
     },
     {
       "capabilities": {

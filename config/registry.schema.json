@@ -98,6 +98,7 @@
                     "rtirq_config",
                     "irq_affinity",
                     "kernel_cmdline",
+                    "power_profile",
                     "pipewire_conf",
                     "user_service_mask",
                     "baloo_disable",

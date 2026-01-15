@@ -70,6 +70,69 @@ def resolve_rtirq_config_path(distro_id: str) -> str:
     return primary
 
 
+def _systemd_is_active(unit: str) -> bool:
+    try:
+        result = run(["systemctl", "is-active", unit])
+    except Exception:
+        return False
+    return result.stdout.strip() == "active"
+
+
+def detect_power_profile_backend() -> dict[str, str] | None:
+    """Detect available power profile backend.
+
+    Prefers tuned when active; otherwise uses powerprofilesctl when available.
+    Returns dict with backend, cmd, and service keys, or None if unavailable.
+    """
+    from audioknob_gui.platform.packages import which_command
+
+    ppd_cmd = which_command("powerprofilesctl")
+    tuned_cmd = which_command("tuned-adm")
+
+    tuned_active = bool(tuned_cmd) and _systemd_is_active("tuned.service")
+
+    if tuned_active:
+        return {
+            "backend": "tuned",
+            "cmd": tuned_cmd or "tuned-adm",
+            "service": "tuned.service",
+        }
+
+    if ppd_cmd:
+        return {
+            "backend": "powerprofilesctl",
+            "cmd": ppd_cmd,
+            "service": "power-profiles-daemon.service",
+        }
+
+    if tuned_cmd:
+        return {
+            "backend": "tuned",
+            "cmd": tuned_cmd,
+            "service": "tuned.service",
+        }
+
+    return None
+
+
+def read_power_profile(backend: str, cmd: str) -> str | None:
+    """Read the current power profile name for the selected backend."""
+    if backend == "powerprofilesctl":
+        result = run([cmd, "get"])
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+    if backend == "tuned":
+        result = run([cmd, "active"])
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            if "current active profile" in line.lower() and ":" in line:
+                return line.split(":", 1)[1].strip() or None
+        return None
+    return None
+
+
 def detect_distro() -> DistroInfo:
     """Detect distribution and boot system configuration."""
     from audioknob_gui.platform.packages import which_command
@@ -213,6 +276,11 @@ def build_knob_paths(
             unit_path = str(params.get("persist_unit_path", ""))
             if unit_path:
                 targets.append({"type": "path", "value": unit_path})
+        elif kind == "power_profile":
+            targets.append({"type": "command", "value": "powerprofilesctl"})
+            targets.append({"type": "command", "value": "tuned-adm"})
+            targets.append({"type": "systemd_unit", "value": "power-profiles-daemon.service"})
+            targets.append({"type": "systemd_unit", "value": "tuned.service"})
         elif kind == "sysfs_glob_kv":
             glob_pat = str(params.get("glob", ""))
             if glob_pat:
@@ -578,6 +646,27 @@ def _systemd_unit_preview(params: dict[str, Any]) -> tuple[list[list[str]], list
     elif action == "disable":
         return [["systemctl", "disable", unit]], []
     return [], [f"Unsupported systemd action: {action}"]
+
+
+def _power_profile_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
+    notes: list[str] = []
+    cmds: list[list[str]] = []
+
+    backend = detect_power_profile_backend()
+    if not backend:
+        notes.append("No power profile backend found (powerprofilesctl or tuned-adm).")
+        return cmds, notes
+
+    if backend["backend"] == "powerprofilesctl":
+        profile = str(params.get("ppd_profile", "performance")).strip() or "performance"
+        cmds.append([backend["cmd"], "set", profile])
+        notes.append(f"Backend: power-profiles-daemon ({profile})")
+    else:
+        profile = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
+        cmds.append([backend["cmd"], "profile", profile])
+        notes.append(f"Backend: tuned ({profile})")
+    notes.append("Reset restores the previous profile.")
+    return cmds, notes
 
 
 def _rtirq_config_preview(params: dict[str, Any]) -> tuple[list[FileChange], list[list[str]]]:
@@ -1113,6 +1202,10 @@ def preview(knob: Any, action: str) -> PreviewItem:
             changes, more_notes = _kernel_cmdline_preview(params)
             file_changes.extend(changes)
             notes.extend(more_notes)
+        elif kind == "power_profile":
+            cmds, more_notes = _power_profile_preview(params)
+            would_run.extend(cmds)
+            notes.extend(more_notes)
         elif kind == "pipewire_conf":
             file_changes.extend(_pipewire_conf_preview(params))
             notes.append("Restart PipeWire to apply: systemctl --user restart pipewire")
@@ -1375,6 +1468,19 @@ def check_knob_status(knob: Any) -> str:
         elif found > 0:
             return "partial"
         return "not_applied"
+
+    if kind == "power_profile":
+        backend = detect_power_profile_backend()
+        if not backend:
+            return "not_applicable"
+        current = read_power_profile(backend["backend"], backend["cmd"])
+        if current is None:
+            return "unknown"
+        if backend["backend"] == "powerprofilesctl":
+            expected = str(params.get("ppd_profile", "performance")).strip() or "performance"
+        else:
+            expected = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
+        return "applied" if current == expected else "not_applied"
 
     if kind == "rtirq_config":
         from audioknob_gui.core.rtirq import normalize_rtirq_list, rtirq_block_present

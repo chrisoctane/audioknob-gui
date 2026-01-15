@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **27 knobs defined** (ALL 27 IMPLEMENTED)
+- **31 knobs defined** (ALL 31 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
@@ -30,19 +30,25 @@
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
+- **Cores/IRQ view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle) and an IRQ Overview popup
+- **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
+- **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
+- **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile
+- **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 
 ### GUI Layout
 ```
-Columns: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | Sys
+Columns: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | CLI
          (0)  (1)    (2)      (3)      (4)           (5)     (6)    (7)       (8)    (9)
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
+- Header tabs switch between **Main** and **Cores/IRQ**; Main hides core/IRQ knobs to avoid duplicates, and the Cores/IRQ view filters to core-related knobs and shows the Audio Core Plan panel.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Requirements" shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
 - "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
-- "Sys" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
+- "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Requirements/Status/Risk keeps grouped headers; other columns sort flat.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
 - IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also sweeps non-audio IRQs off the selected audio cores (using IRQ Housekeeping cores if set, otherwise all cores minus audio cores) and enables `audioknob-irq-pinning.service` so pinning persists across reboots. IRQ Housekeeping supports an Auto mode that inverts selected audio cores.
@@ -920,7 +926,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 10 columns (Info, Knob, Action, Config, Requirements, Status, Check, Category, Risk, Sys). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
+**Note:** Current UI has 10 columns (Info, Knob, Action, Config, Requirements, Status, Check, Category, Risk, CLI). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
 
 **Detection needed:**
 ```python

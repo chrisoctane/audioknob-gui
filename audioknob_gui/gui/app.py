@@ -4,6 +4,7 @@ import html as html_lib
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import shutil
@@ -442,6 +443,8 @@ def load_state() -> dict:
         "irq_housekeeping_auto": True,  # bool
         "irq_pinning_devices": [],  # list[str]
         "irq_pinning_cpu_cores": None,  # list[int] or None
+        "audio_core_plan_count": 4,  # int
+        "view_tab": "all",  # str
         "advanced_mode_enabled": False,  # bool
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
@@ -481,6 +484,10 @@ def load_state() -> dict:
             data["irq_pinning_devices"] = []
         if "irq_pinning_cpu_cores" not in data:
             data["irq_pinning_cpu_cores"] = None
+        if "audio_core_plan_count" not in data:
+            data["audio_core_plan_count"] = 4
+        if "view_tab" not in data:
+            data["view_tab"] = "all"
         if "advanced_mode_enabled" not in data:
             data["advanced_mode_enabled"] = bool(data.get("audio_session_enabled", False))
         data.pop("audio_session_enabled", None)
@@ -542,6 +549,10 @@ def load_state() -> dict:
                 data["irq_pinning_cpu_cores"] = cores
             else:
                 data["irq_pinning_cpu_cores"] = None
+        if data.get("audio_core_plan_count") is not None and not isinstance(data.get("audio_core_plan_count"), int):
+            data["audio_core_plan_count"] = 4
+        if data.get("view_tab") not in ("all", "cores"):
+            data["view_tab"] = "all"
         for key in (
             "kernel_isolcpus_cores",
             "kernel_nohz_full_cores",
@@ -618,6 +629,7 @@ def main() -> int:
             QSpinBox,
             QTableWidget,
             QTableWidgetItem,
+            QTabBar,
             QTextEdit,
             QVBoxLayout,
             QWidget,
@@ -807,6 +819,21 @@ def main() -> int:
             root = QVBoxLayout(self)
             root.addWidget(QLabel("Select audio devices to pin their IRQs."))
             root.addWidget(QLabel("USB devices pin the host controller IRQs (shared)."))
+            try:
+                from audioknob_gui.core.irq import read_cpu_present, read_thread_sibling_groups
+
+                groups = read_thread_sibling_groups()
+                if any(len(g) > 1 for g in groups):
+                    logical = len(read_cpu_present() or [])
+                    physical = len(groups)
+                    root.addWidget(
+                        QLabel(
+                            f"SMT detected: {physical} physical / {logical} logical. "
+                            "Select both siblings for best isolation."
+                        )
+                    )
+            except Exception:
+                pass
 
             device_box = QGroupBox("Devices")
             device_layout = QVBoxLayout(device_box)
@@ -1025,9 +1052,24 @@ def main() -> int:
             advanced_note.setWordWrap(True)
             root.addWidget(advanced_note)
 
+            self._view_mode = str(self.state.get("view_tab", "all"))
+            self.view_tabs = QTabBar()
+            self.view_tabs.addTab("Main")
+            self.view_tabs.addTab("Cores/IRQ")
+            if self._view_mode == "cores":
+                self.view_tabs.setCurrentIndex(1)
+            else:
+                self.view_tabs.setCurrentIndex(0)
+            self.view_tabs.currentChanged.connect(self._on_view_tab_changed)
+            root.addWidget(self.view_tabs)
+
+            self.cores_panel = self._build_cores_panel()
+            root.addWidget(self.cores_panel)
+            self._update_cores_panel_visibility()
+
             self.table = QTableWidget(0, 10)
             self.table.setHorizontalHeaderLabels(
-                ["Info", "Knob", "Action", "Config", "Requirements", "Status", "Check", "Category", "Risk", "Sys"]
+                ["Info", "Knob", "Action", "Config", "Requirements", "Status", "Check", "Category", "Risk", "CLI"]
             )
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(False)
@@ -1089,7 +1131,11 @@ def main() -> int:
                     "rtirq_enable",
                     "irq_pinning",
                     "cpu_governor_performance_persistent",
+                    "power_profile_performance",
                     "kernel_threadirqs",
+                    "kernel_rt_throttling_off",
+                    "kernel_cstate_limit",
+                    "kernel_intel_idle_cstate_limit",
                     "kernel_audit_off",
                     "kernel_mitigations_off",
                     "kernel_isolcpus",
@@ -1097,6 +1143,351 @@ def main() -> int:
                     "kernel_rcu_nocbs",
                     "kernel_irqaffinity",
                 ]
+            )
+
+        def _core_knob_ids(self) -> set[str]:
+            return {
+                "qjackctl_server_prefix_rt",
+                "irq_pinning",
+                "kernel_isolcpus",
+                "kernel_nohz_full",
+                "kernel_rcu_nocbs",
+                "kernel_irqaffinity",
+            }
+
+        def _on_view_tab_changed(self, index: int) -> None:
+            mode = "cores" if index == 1 else "all"
+            if mode == self._view_mode:
+                return
+            self._view_mode = mode
+            self.state["view_tab"] = mode
+            save_state(self.state)
+            self._update_cores_panel_visibility()
+            self._populate()
+
+        def _update_cores_panel_visibility(self) -> None:
+            if hasattr(self, "cores_panel") and self.cores_panel is not None:
+                self.cores_panel.setVisible(self._view_mode == "cores")
+            self._sync_core_plan_controls()
+
+        def _build_cores_panel(self) -> QWidget:
+            from audioknob_gui.platform.detect import get_cpu_count
+
+            cpu_count = get_cpu_count()
+            panel = QGroupBox("Audio Core Plan")
+            root = QVBoxLayout(panel)
+
+            hint = QLabel("Auto-set chooses audio cores and updates per-knob core selections. Apply knobs to take effect.")
+            hint.setWordWrap(True)
+            root.addWidget(hint)
+
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Audio cores"))
+            self.core_plan_count = QSpinBox()
+            self.core_plan_count.setRange(1, max(1, int(cpu_count)))
+            self.core_plan_count.setValue(int(self.state.get("audio_core_plan_count", 4)))
+            self.core_plan_count.valueChanged.connect(self._on_core_plan_count_changed)
+            row.addWidget(self.core_plan_count)
+            self.btn_core_plan_auto = QPushButton("Auto-set")
+            self.btn_core_plan_auto.clicked.connect(self._on_core_plan_auto)
+            row.addWidget(self.btn_core_plan_auto)
+            row.addStretch(1)
+            root.addLayout(row)
+
+            self.core_plan_auto_housekeeping = QCheckBox("Auto housekeeping (invert audio cores)")
+            self.core_plan_auto_housekeeping.setChecked(bool(self.state.get("irq_housekeeping_auto", True)))
+            self.core_plan_auto_housekeeping.setToolTip(
+                "Use IRQ Pinning audio cores to invert the housekeeping set for irqaffinity."
+            )
+            self.core_plan_auto_housekeeping.toggled.connect(self._on_housekeeping_auto_toggled)
+            root.addWidget(self.core_plan_auto_housekeeping)
+
+            self.core_plan_summary = QLabel("")
+            self.core_plan_summary.setWordWrap(True)
+            root.addWidget(self.core_plan_summary)
+
+            btn_row = QHBoxLayout()
+            self.btn_irq_overview = QPushButton("IRQ Overview")
+            self.btn_irq_overview.clicked.connect(self._show_irq_overview)
+            btn_row.addWidget(self.btn_irq_overview)
+            btn_row.addStretch(1)
+            root.addLayout(btn_row)
+
+            return panel
+
+        def _on_core_plan_count_changed(self, value: int) -> None:
+            self.state["audio_core_plan_count"] = int(value)
+            save_state(self.state)
+            self._sync_core_plan_controls()
+
+        def _on_housekeeping_auto_toggled(self, enabled: bool) -> None:
+            self.state["irq_housekeeping_auto"] = bool(enabled)
+            save_state(self.state)
+            self._sync_core_plan_controls()
+            status = self._knob_statuses.get("kernel_irqaffinity")
+            if status in ("applied", "pending_reboot"):
+                _get_gui_logger().info("irq housekeeping mode updated; reapplying")
+                self._on_apply_knob("kernel_irqaffinity")
+                return
+            QMessageBox.information(
+                self,
+                "Saved",
+                "Saved IRQ housekeeping mode. Apply IRQ Housekeeping (irqaffinity) to take effect.",
+            )
+
+        def _suggest_audio_cores(self, count: int) -> list[int]:
+            from audioknob_gui.core.irq import (
+                is_irq_affinity_writable,
+                list_irqs,
+                parse_cpu_list,
+                read_cpu_present,
+                read_irq_effective_affinity_list,
+                read_thread_sibling_groups,
+            )
+
+            desired = max(1, int(count))
+            cores = sorted(read_cpu_present())
+            if not cores:
+                return []
+            scores = {c: 0 for c in cores}
+            for irq in list_irqs():
+                if is_irq_affinity_writable(irq):
+                    continue
+                raw = read_irq_effective_affinity_list(irq)
+                if not raw:
+                    continue
+                for core in parse_cpu_list(raw):
+                    if core in scores:
+                        scores[core] += 1
+
+            groups = read_thread_sibling_groups() or [[c] for c in cores]
+            avoid = {0, 1}
+            groups_no01 = [g for g in groups if avoid.isdisjoint(g)]
+            filtered = False
+            if sum(len(g) for g in groups_no01) >= desired:
+                groups = groups_no01
+                filtered = True
+
+            entries: list[tuple[int, int, list[int]]] = []
+            for group in groups:
+                group_score = sum(scores.get(c, 0) for c in group)
+                entries.append((group_score, min(group), group))
+            entries.sort(key=lambda item: (item[0], item[1]))
+
+            selected: set[int] = set()
+            for _, _, group in entries:
+                selected.update(group)
+                if len(selected) >= desired:
+                    break
+
+            if len(selected) < desired and filtered:
+                entries = []
+                for group in read_thread_sibling_groups() or [[c] for c in cores]:
+                    group_score = sum(scores.get(c, 0) for c in group)
+                    entries.append((group_score, min(group), group))
+                entries.sort(key=lambda item: (item[0], item[1]))
+                selected.clear()
+                for _, _, group in entries:
+                    selected.update(group)
+                    if len(selected) >= desired:
+                        break
+
+            return sorted(selected)
+
+        def _on_core_plan_auto(self) -> None:
+            count = int(self.core_plan_count.value())
+            audio_cores = self._suggest_audio_cores(count)
+            if not audio_cores:
+                QMessageBox.warning(self, "Auto-set", "No audio cores could be selected.")
+                return
+            audio_cores = sorted(set(audio_cores))
+            selected_count = len(audio_cores)
+            self.state["irq_pinning_cpu_cores"] = audio_cores
+            self.state["qjackctl_cpu_cores"] = audio_cores
+            self.state["kernel_isolcpus_cores"] = audio_cores
+            self.state["kernel_nohz_full_cores"] = audio_cores
+            self.state["kernel_rcu_nocbs_cores"] = audio_cores
+            self.state["irq_housekeeping_auto"] = True
+            save_state(self.state)
+
+            for kid in (
+                "irq_pinning",
+                "qjackctl_server_prefix_rt",
+                "kernel_isolcpus",
+                "kernel_nohz_full",
+                "kernel_rcu_nocbs",
+                "kernel_irqaffinity",
+            ):
+                self._knob_statuses[kid] = "not_applied"
+            self._refresh_statuses()
+            self._populate()
+            extra = ""
+            if selected_count != count:
+                extra = (
+                    f"\n\nRequested {count} cores; selected {selected_count} to keep SMT siblings together."
+                )
+            QMessageBox.information(
+                self,
+                "Auto-set complete",
+                "Core selections updated. Apply the relevant knobs to take effect." + extra,
+            )
+
+        def _sync_core_plan_controls(self) -> None:
+            auto = bool(self.state.get("irq_housekeeping_auto", True))
+            if hasattr(self, "core_plan_auto_housekeeping") and self.core_plan_auto_housekeeping is not None:
+                if self.core_plan_auto_housekeeping.isChecked() != auto:
+                    self.core_plan_auto_housekeeping.blockSignals(True)
+                    self.core_plan_auto_housekeeping.setChecked(auto)
+                    self.core_plan_auto_housekeeping.blockSignals(False)
+            self._refresh_core_plan_summary()
+
+        def _refresh_core_plan_summary(self) -> None:
+            if not hasattr(self, "core_plan_summary") or self.core_plan_summary is None:
+                return
+            try:
+                from audioknob_gui.core.irq import read_cpu_present, read_thread_sibling_groups
+                from audioknob_gui.platform.detect import get_cpu_count
+            except Exception:
+                return
+            cpu_count = get_cpu_count()
+            audio = sorted(set(self._irq_pinning_cpu_cores_from_state() or []))
+            audio_text = ",".join(str(c) for c in audio) if audio else "unset"
+            auto = bool(self.state.get("irq_housekeeping_auto", True))
+            if auto:
+                housekeeping = sorted(set(range(cpu_count)) - set(audio))
+            else:
+                housekeeping = sorted(set(self._kernel_cores_from_state("kernel_irqaffinity") or []))
+            hk_text = ",".join(str(c) for c in housekeeping) if housekeeping else "unset"
+            mode = "auto" if auto else "manual"
+            summary = f"Audio cores: {audio_text} | Housekeeping ({mode}): {hk_text}"
+
+            groups = read_thread_sibling_groups()
+            logical = len(read_cpu_present() or [])
+            physical = len(groups)
+            smt = any(len(g) > 1 for g in groups)
+            if smt and logical:
+                summary += f"\nSMT detected: {physical} physical / {logical} logical. Auto-set keeps sibling cores together."
+            self.core_plan_summary.setText(summary)
+
+        def _show_irq_overview(self) -> None:
+            try:
+                from audioknob_gui.core.irq import (
+                    is_irq_affinity_writable,
+                    list_irqs,
+                    parse_cpu_list,
+                    read_cpu_present,
+                    read_irq_affinity_list,
+                    read_irq_effective_affinity_list,
+                )
+            except Exception as exc:
+                QMessageBox.warning(self, "IRQ Overview", f"Failed to load IRQ helpers: {exc}")
+                return
+
+            def _read_interrupts_map() -> dict[int, str]:
+                try:
+                    raw = Path("/proc/interrupts").read_text(encoding="utf-8")
+                except Exception:
+                    return {}
+                lines: dict[int, str] = {}
+                for line in raw.splitlines():
+                    stripped = line.strip()
+                    if not stripped or not stripped[:1].isdigit():
+                        continue
+                    if ":" not in stripped:
+                        continue
+                    irq_str, rest = stripped.split(":", 1)
+                    irq_str = irq_str.strip()
+                    if not irq_str.isdigit():
+                        continue
+                    try:
+                        irq = int(irq_str)
+                    except Exception:
+                        continue
+                    lines[irq] = rest.strip()
+                return lines
+
+            cores = sorted(read_cpu_present())
+            audio = sorted(set(self._irq_pinning_cpu_cores_from_state() or []))
+            auto = bool(self.state.get("irq_housekeeping_auto", True))
+            if auto:
+                housekeeping = sorted(set(cores) - set(audio))
+            else:
+                housekeeping = sorted(set(self._kernel_cores_from_state("kernel_irqaffinity") or []))
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("IRQ Overview")
+            dialog.resize(720, 520)
+            layout = QVBoxLayout(dialog)
+
+            audio_text = ",".join(str(c) for c in audio) if audio else "unset"
+            hk_text = ",".join(str(c) for c in housekeeping) if housekeeping else "unset"
+            mode = "auto" if auto else "manual"
+            summary = QLabel(
+                f"Audio cores: {audio_text} | Housekeeping ({mode}): {hk_text}"
+            )
+            summary.setWordWrap(True)
+            layout.addWidget(summary)
+
+            grid_box = QGroupBox("Core map")
+            grid_layout = QGridLayout(grid_box)
+            cols = 8
+            base_style = (
+                "padding: 4px 6px; border-radius: 3px; background-color: #2b2b2b; color: #e0e0e0;"
+            )
+            for idx, core in enumerate(cores):
+                label = QLabel(str(core))
+                label.setAlignment(Qt.AlignCenter)
+                style = base_style
+                if core in housekeeping:
+                    style += " background-color: #1f4f2b;"
+                if core in audio:
+                    style += " border: 2px solid #4a90e2;"
+                label.setStyleSheet(style)
+                grid_layout.addWidget(label, idx // cols, idx % cols)
+            layout.addWidget(grid_box)
+
+            legend = QLabel("Legend: green fill = housekeeping cores, blue outline = audio cores.")
+            legend.setWordWrap(True)
+            layout.addWidget(legend)
+
+            irq_lines = _read_interrupts_map()
+            rows: list[str] = []
+            for irq in list_irqs():
+                affinity = read_irq_effective_affinity_list(irq)
+                if not affinity:
+                    affinity = read_irq_affinity_list(irq) or "unknown"
+                ro = "ro" if not is_irq_affinity_writable(irq) else ""
+                desc = irq_lines.get(irq, "")
+                if desc:
+                    rows.append(f"IRQ {irq:>4}: {affinity:<12} {ro:<3} {desc}")
+                else:
+                    rows.append(f"IRQ {irq:>4}: {affinity:<12} {ro}".rstrip())
+
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setPlainText("\n".join(rows) if rows else "No IRQs found.")
+            layout.addWidget(text)
+
+            btns = QDialogButtonBox(QDialogButtonBox.Close)
+            btns.rejected.connect(dialog.reject)
+            btns.accepted.connect(dialog.accept)
+            layout.addWidget(btns)
+            dialog.exec()
+
+        def _smt_hint_line(self) -> str | None:
+            try:
+                from audioknob_gui.core.irq import read_cpu_present, read_thread_sibling_groups
+            except Exception:
+                return None
+            groups = read_thread_sibling_groups()
+            smt = any(len(g) > 1 for g in groups)
+            if not smt:
+                return None
+            logical = len(read_cpu_present() or [])
+            physical = len(groups)
+            return (
+                f"SMT detected: {physical} physical / {logical} logical. "
+                "Select both siblings of a physical core for best isolation."
             )
 
         def _requirements_label(self, k, advanced_knobs: set[str]) -> str:
@@ -1209,6 +1600,9 @@ def main() -> int:
                 path = str(params.get("path", "")).strip()
                 return Path(path).name if path else "limits"
 
+            if kind == "power_profile":
+                return "powerprofilesctl/tuned"
+
             if kind == "qjackctl_server_prefix":
                 return "QjackCtl.conf"
 
@@ -1254,7 +1648,11 @@ def main() -> int:
             return kind
 
         def _visible_knobs(self) -> list:
-            return list(self.registry)
+            if getattr(self, "_view_mode", "all") == "cores":
+                core_ids = self._core_knob_ids()
+                return [k for k in self.registry if k.id in core_ids]
+            core_ids = self._core_knob_ids()
+            return [k for k in self.registry if k.id not in core_ids]
 
         def _refresh_user_groups(self) -> None:
             """Get current user's group memberships."""
@@ -1323,6 +1721,11 @@ def main() -> int:
             if not k.requires_commands:
                 return True  # No commands required
             from audioknob_gui.platform.packages import check_command_available
+            if k.id == "power_profile_performance":
+                return (
+                    check_command_available("powerprofilesctl")
+                    or check_command_available("tuned-adm")
+                )
             return all(check_command_available(cmd) for cmd in k.requires_commands)
 
         def _knob_missing_commands(self, k) -> list[str]:
@@ -1330,6 +1733,13 @@ def main() -> int:
             if not k.requires_commands:
                 return []
             from audioknob_gui.platform.packages import check_command_available
+            if k.id == "power_profile_performance":
+                if (
+                    check_command_available("powerprofilesctl")
+                    or check_command_available("tuned-adm")
+                ):
+                    return []
+                return ["powerprofilesctl", "tuned-adm"]
             return [cmd for cmd in k.requires_commands if not check_command_available(cmd)]
 
         def _collect_log_text(self) -> str:
@@ -1515,6 +1925,16 @@ def main() -> int:
                 return "pipewire_restart"
             if kind == "baloo_disable":
                 return "baloo_disable"
+            if kind == "power_profile":
+                backend = str(effect.get("backend", "")).strip()
+                before = str(effect.get("before", "")).strip()
+                after = str(effect.get("after", "")).strip()
+                detail = " -> ".join([x for x in (before, after) if x])
+                if backend and detail:
+                    return f"power_profile: {backend} ({detail})"
+                if backend:
+                    return f"power_profile: {backend}"
+                return "power_profile"
             return kind or "effect"
 
         def _format_tx_preview(self, item: dict[str, Any], titles: dict[str, str]) -> str:
@@ -2331,6 +2751,7 @@ def main() -> int:
             # Disable sorting during population to avoid issues
             self.table.setSortingEnabled(False)
             self.table.clearSpans()
+            self._refresh_core_plan_summary()
             reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
             advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
             group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
@@ -2559,6 +2980,8 @@ def main() -> int:
                 elif k.id == "disable_baloo" and desktop_kind == "gnome":
                     not_applicable = True
                     not_applicable_reason = "Requires KDE desktop"
+                elif k.id == "power_profile_performance" and not_applicable:
+                    not_applicable_reason = "Requires powerprofilesctl or tuned-adm"
                 locked_bg = QColor("#1f1f1f")
                 locked_fg = QColor("#7a7a7a")
                 locked_style = (
@@ -2664,7 +3087,7 @@ def main() -> int:
                     risk_item.setBackground(locked_bg)
                 self.table.setItem(r, 8, risk_item)
 
-                # Column 9: Sys
+                # Column 9: CLI
                 sys_item = QTableWidgetItem(self._sys_label_for_knob(k))
                 if row_dim:
                     sys_item.setForeground(locked_fg)
@@ -3060,7 +3483,7 @@ def main() -> int:
             risk_texts = [str(k.risk_level) for k in self.registry] + ["Risk"]
             risk_width = max(_w(t) for t in risk_texts)
 
-            sys_texts = [self._sys_label_for_knob(k) for k in self.registry] + ["Sys"]
+            sys_texts = [self._sys_label_for_knob(k) for k in self.registry] + ["CLI"]
             sys_width = max(_w(t[:24] + ("..." if len(t) > 24 else "")) for t in sys_texts)
 
             action_texts = ["Apply", "Reset", "Install", "View", "Test", "Scan", "Join", "Leave", "Action"]
@@ -3150,6 +3573,20 @@ def main() -> int:
                     font-weight: normal;
                     border: none;
                     border-bottom: 1px solid #2a2a2a;
+                }
+                QTabBar::tab {
+                    background-color: #2b2b2b;
+                    color: #cfcfcf;
+                    padding: 6px 10px;
+                    border: 1px solid #1f1f1f;
+                    border-bottom: none;
+                }
+                QTabBar::tab:selected {
+                    background-color: #353535;
+                    color: #e0e0e0;
+                }
+                QTabBar::tab:!selected {
+                    margin-top: 2px;
                 }
                 QPushButton {
                     background-color: #4a4a4a;
@@ -3442,7 +3879,14 @@ def main() -> int:
 
                 cpu_count = get_cpu_count()
                 selected = set(self._qjackctl_cpu_cores_from_state() or [])
-                d = CpuCoreDialog(cpu_count=cpu_count, selected=selected, parent=self)
+                lines = [
+                    "Select CPU cores to pin JACK to (taskset -c).",
+                    "Tip: cores 0-1 are often busiest (IRQs/system tasks).",
+                ]
+                smt_line = self._smt_hint_line()
+                if smt_line:
+                    lines.append(smt_line)
+                d = CpuCoreDialog(cpu_count=cpu_count, selected=selected, lines=lines, parent=self)
                 if d.exec() != QDialog.Accepted:
                     return
 
@@ -3496,6 +3940,7 @@ def main() -> int:
                 self.state["irq_pinning_devices"] = chosen_devices
                 self.state["irq_pinning_cpu_cores"] = chosen_cores
                 save_state(self.state)
+                self._sync_core_plan_controls()
 
                 status = self._knob_statuses.get(knob_id)
                 if status in ("applied", "pending_reboot"):
@@ -3515,9 +3960,9 @@ def main() -> int:
                 from audioknob_gui.platform.detect import get_cpu_count
 
                 cpu_count = get_cpu_count()
-                selected = set(self._kernel_cores_from_state(knob_id) or [])
                 allow_auto = knob_id == "kernel_irqaffinity"
                 auto_enabled = bool(self.state.get("irq_housekeeping_auto", True))
+                selected = set(self._kernel_cores_from_state(knob_id) or [])
                 titles = {
                     "kernel_isolcpus": "Configure isolcpus cores",
                     "kernel_nohz_full": "Configure nohz_full cores",
@@ -3542,6 +3987,10 @@ def main() -> int:
                         "Use non-isolated cores to keep IRQs off audio cores.",
                     ],
                 }
+                dialog_lines = list(lines.get(knob_id) or [])
+                smt_line = self._smt_hint_line()
+                if smt_line:
+                    dialog_lines.append(smt_line)
                 auto_hint = None
                 auto_label = None
                 if allow_auto:
@@ -3555,6 +4004,11 @@ def main() -> int:
                         if housekeeping:
                             hk_list = ",".join(str(c) for c in housekeeping)
                             auto_hint += f" Housekeeping: {hk_list}."
+                    if auto_enabled:
+                        if audio_cores:
+                            selected = set(range(cpu_count)) - audio_cores
+                        else:
+                            selected = set(range(cpu_count))
                 d = CpuCoreDialog(
                     cpu_count=cpu_count,
                     selected=selected,
@@ -3563,7 +4017,7 @@ def main() -> int:
                     auto_label=auto_label,
                     auto_hint=auto_hint,
                     title=titles.get(knob_id, "Configure CPU cores"),
-                    lines=lines.get(knob_id),
+                    lines=dialog_lines,
                     parent=self,
                 )
                 if d.exec() != QDialog.Accepted:
@@ -3576,6 +4030,7 @@ def main() -> int:
                 if key:
                     self.state[key] = chosen
                     save_state(self.state)
+                    self._sync_core_plan_controls()
 
                 status = self._knob_statuses.get(knob_id)
                 if status in ("applied", "pending_reboot"):
@@ -3821,6 +4276,51 @@ def main() -> int:
             if not k:
                 return
 
+            def _kernel_cmdline_tokens() -> list[str]:
+                try:
+                    raw = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
+                except Exception:
+                    return []
+                return [t for t in raw.split() if t]
+
+            def _param_present(tokens: list[str], param: str) -> bool:
+                if "=" in param:
+                    return param in tokens
+                for token in tokens:
+                    if token == param or token.startswith(param + "="):
+                        return True
+                return False
+
+            def _kernel_is_rt() -> bool:
+                try:
+                    rel = os.uname().release.lower()
+                except Exception:
+                    return False
+                return bool(re.search(r"(?:^|[-_])rt\\d|(?:^|[-_])rt$|realtime", rel))
+            
+            def _read_interrupts_map() -> dict[int, str]:
+                try:
+                    raw = Path("/proc/interrupts").read_text(encoding="utf-8")
+                except Exception:
+                    return {}
+                lines: dict[int, str] = {}
+                for line in raw.splitlines():
+                    stripped = line.strip()
+                    if not stripped or not stripped[:1].isdigit():
+                        continue
+                    if ":" not in stripped:
+                        continue
+                    irq_str, rest = stripped.split(":", 1)
+                    irq_str = irq_str.strip()
+                    if not irq_str.isdigit():
+                        continue
+                    try:
+                        irq = int(irq_str)
+                    except Exception:
+                        continue
+                    lines[irq] = rest.strip()
+                return lines
+
             def _shell_single_quote(value: str) -> str:
                 return "'" + value.replace("'", "'\"'\"'") + "'"
             
@@ -3922,6 +4422,182 @@ def main() -> int:
                 extra_html += (
                     "<hr/><p><b>Note:</b> Quit QjackCtl before applying this knob. "
                     "QjackCtl rewrites its config on exit.</p>"
+                )
+            if k.id in (
+                "qjackctl_server_prefix_rt",
+                "irq_pinning",
+                "kernel_isolcpus",
+                "kernel_nohz_full",
+                "kernel_rcu_nocbs",
+                "kernel_irqaffinity",
+                "kernel_threadirqs",
+                "rtirq_enable",
+            ):
+                try:
+                    from audioknob_gui.core.irq import read_cpu_present, read_thread_sibling_groups
+
+                    groups = read_thread_sibling_groups()
+                    logical = len(read_cpu_present() or [])
+                    physical = len(groups)
+                    smt = any(len(g) > 1 for g in groups)
+                    group_chunks: list[str] = []
+                    for group in groups[:8]:
+                        group_chunks.append("(" + ",".join(str(c) for c in group) + ")")
+                    if len(groups) > 8:
+                        group_chunks.append(f"(+{len(groups) - 8} more)")
+                    layout_line = ""
+                    if group_chunks:
+                        layout_line = "Sibling groups: " + " ".join(group_chunks)
+                    extra_html += "<hr/><p><b>CPU core layout:</b></p>"
+                    if smt and logical:
+                        extra_html += (
+                            f"<p>SMT detected: {physical} physical / {logical} logical cores.</p>"
+                            "<p>For best isolation, select both siblings from a physical core.</p>"
+                        )
+                    else:
+                        extra_html += "<p>SMT/Hyper-Threading not detected.</p>"
+                    if layout_line:
+                        extra_html += f"<p>{layout_line}</p>"
+                    if k.id == "kernel_threadirqs":
+                        extra_html += (
+                            "<p>Note: threadirqs makes IRQ handlers schedulable threads "
+                            "but does not change CPU topology.</p>"
+                        )
+                        extra_html += (
+                            "<p>Pairing tip: Enable RTIRQ to raise IRQ thread priorities once IRQs are threaded.</p>"
+                        )
+                    if k.id == "rtirq_enable":
+                        tokens = _kernel_cmdline_tokens()
+                        threaded = _param_present(tokens, "threadirqs")
+                        rt_kernel = _kernel_is_rt()
+                        if threaded or rt_kernel:
+                            extra_html += (
+                                "<p>Threaded IRQs detected; RTIRQ can raise IRQ thread priorities.</p>"
+                            )
+                        else:
+                            extra_html += (
+                                "<p><b>Warning:</b> RTIRQ only affects threaded IRQs. "
+                                "Enable Threaded IRQs or use an RT kernel for RTIRQ to take effect.</p>"
+                            )
+                except Exception:
+                    pass
+            if k.id == "irq_pinning":
+                try:
+                    active = subprocess.run(
+                        ["systemctl", "is-active", "irqbalance.service"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                    ).stdout.strip()
+                    if active == "active":
+                        extra_html += (
+                            "<hr/><p><b>Warning:</b> irqbalance is active and can override IRQ pinning.</p>"
+                        )
+                    device_keys = self._irq_pinning_devices_from_state()
+                    if device_keys:
+                        try:
+                            from audioknob_gui.core.irq import collect_target_irqs, resolve_selected_devices
+
+                            selected, _missing = resolve_selected_devices(device_keys)
+                            target_irqs = collect_target_irqs(selected)
+                        except Exception:
+                            target_irqs = []
+                        if target_irqs:
+                            irq_lines = _read_interrupts_map()
+                            extra_html += "<hr/><p><b>IRQ lines (from /proc/interrupts):</b></p><pre>"
+                            for irq in sorted(set(target_irqs)):
+                                line = irq_lines.get(irq, "")
+                                if line:
+                                    shared = " (shared?)" if "," in line else ""
+                                    extra_html += f"IRQ {irq}: {html_lib.escape(line)}{shared}\n"
+                                else:
+                                    extra_html += f"IRQ {irq}: not found\n"
+                            extra_html += "</pre>"
+                            extra_html += (
+                                "<p>If a line lists multiple devices (comma-separated), the IRQ is shared.</p>"
+                            )
+                except Exception:
+                    pass
+            if k.id == "rt_limits_audio_group":
+                try:
+                    import resource
+
+                    rt_soft, rt_hard = resource.getrlimit(resource.RLIMIT_RTPRIO)
+                    mem_soft, mem_hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+
+                    def _limit_str(value: int) -> str:
+                        if value == resource.RLIM_INFINITY:
+                            return "unlimited"
+                        return str(value)
+
+                    extra_html += "<hr/><p><b>Session limits (ulimit):</b></p>"
+                    extra_html += (
+                        f"<p>rtprio: {_limit_str(rt_soft)} (soft), {_limit_str(rt_hard)} (hard)<br/>"
+                        f"memlock: {_limit_str(mem_soft)} (soft), {_limit_str(mem_hard)} (hard)</p>"
+                    )
+                    extra_html += "<p>Note: limits apply after log out/in or reboot.</p>"
+                except Exception:
+                    pass
+            if k.id == "kernel_rt_throttling_off":
+                try:
+                    value = Path("/proc/sys/kernel/sched_rt_runtime_us").read_text(encoding="utf-8").strip()
+                    extra_html += (
+                        "<hr/><p><b>Current sched_rt_runtime_us:</b> "
+                        f"{html_lib.escape(value)}</p>"
+                    )
+                except Exception:
+                    pass
+            if k.id in ("kernel_cstate_limit", "kernel_intel_idle_cstate_limit"):
+                driver = None
+                try:
+                    driver = Path("/sys/devices/system/cpu/cpu0/cpuidle/current_driver").read_text(encoding="utf-8").strip()
+                except Exception:
+                    driver = None
+                extra_html += "<hr/><p><b>CPU idle driver:</b> "
+                extra_html += html_lib.escape(driver) if driver else "unknown"
+                extra_html += "</p>"
+                if k.id == "kernel_cstate_limit" and driver == "intel_idle":
+                    extra_html += (
+                        "<p><b>Note:</b> intel_idle is active. The Intel C-States knob may be more effective.</p>"
+                    )
+                if k.id == "kernel_intel_idle_cstate_limit" and driver and driver != "intel_idle":
+                    extra_html += (
+                        "<p><b>Note:</b> intel_idle is not active on this system.</p>"
+                    )
+                extra_html += (
+                    "<p>Limiting C-states can increase power draw and heat. Reset if needed.</p>"
+                )
+            if k.id == "power_profile_performance":
+                try:
+                    from audioknob_gui.worker.ops import detect_power_profile_backend, read_power_profile
+
+                    backend = detect_power_profile_backend()
+                    if backend:
+                        current = read_power_profile(backend["backend"], backend["cmd"])
+                        if backend["backend"] == "powerprofilesctl":
+                            expected = "performance"
+                        else:
+                            expected = "latency-performance"
+                        extra_html += "<hr/><p><b>Power profile backend:</b> "
+                        extra_html += html_lib.escape(backend["backend"])
+                        extra_html += "</p>"
+                        if current:
+                            extra_html += (
+                                f"<p>Current: {html_lib.escape(current)}"
+                                f" (target: {html_lib.escape(expected)})</p>"
+                            )
+                    else:
+                        extra_html += (
+                            "<hr/><p><b>Power profile backend:</b> none detected "
+                            "(powerprofilesctl or tuned-adm required).</p>"
+                        )
+                except Exception:
+                    pass
+            if k.id == "qjackctl_server_prefix_rt":
+                extra_html += (
+                    "<hr/><p><b>Buffer math:</b> total buffer = frames/period × periods/buffer. "
+                    "Lower values reduce latency but increase xrun risk. "
+                    "Periods/buffer = 2 is typical; 3 is safer; 1 is often unstable.</p>"
                 )
 
             html = f"""
