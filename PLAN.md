@@ -65,14 +65,6 @@ cd /home/chris/audioknob-gui
 ./packaging/debian/build-deb.sh
 ```
 
-If `python3-pyside6` is missing, enable Universe first:
-
-```bash
-sudo apt-get install -y software-properties-common
-sudo add-apt-repository universe
-sudo apt-get update
-```
-
 Install it:
 
 ```bash

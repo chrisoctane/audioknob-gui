@@ -5,4 +5,8 @@ if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database -q /usr/share/applications || true
 fi
 
+if ! command -v pkexec >/dev/null 2>&1; then
+  echo "WARNING: pkexec not found. Install pkexec (Ubuntu) or policykit-1 (Debian)."
+fi
+
 exit 0

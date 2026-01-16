@@ -6,13 +6,8 @@ Build a local package:
 ./packaging/debian/build-deb.sh
 ```
 
-If `python3-pyside6` is missing on Ubuntu, enable Universe:
-
-```bash
-sudo apt-get install -y software-properties-common
-sudo add-apt-repository universe
-sudo apt-get update
-```
+The build script downloads PySide6 wheels via pip and bundles them into the .deb
+(network required). You do **not** need a system `python3-pyside6` package.
 
 Install:
 

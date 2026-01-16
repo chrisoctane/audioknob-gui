@@ -1267,7 +1267,7 @@ sudo grub2-mkconfig -o /boot/grub2/grub.cfg
 | rtirq config | `/etc/default/rtirq` (if installed) |
 | CPU governor config | `/etc/default/cpufrequtils` (if installed) |
 | Polkit packages | `polkitd` + `pkexec` (Ubuntu) or `policykit-1` (Debian) |
-| PySide6 | `python3-pyside6` (Ubuntu requires Universe) |
+| PySide6 | Bundled into the .deb via pip wheels (build-time download) |
 
 #### Local .deb build (current workflow)
 
