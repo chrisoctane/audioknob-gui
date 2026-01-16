@@ -239,10 +239,11 @@ systemctl is-active rtirq.service
 ```bash
 # Before
 cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
-systemctl is-enabled cpupower.service || true
+systemctl is-enabled cpupower.service || systemctl is-enabled cpufrequtils.service || true
 grep -E '^\s*GOVERNOR\s*=' /etc/sysconfig/cpupower 2>/dev/null || true
+grep -E '^\s*GOVERNOR\s*=' /etc/default/cpufrequtils 2>/dev/null || true
 
-# Apply → expect "performance" + cpupower enabled + GOV set to performance
+# Apply → expect "performance" + service enabled (cpupower/cpufrequtils) + GOV set to performance
 # Reset → expect pre-values restored (sysfs + config + service) via transaction
 ```
 
@@ -623,7 +624,8 @@ else:
     "boot_system": "grub2-bls",
     "paths": {
       "kernel_cmdline_file": "/etc/kernel/cmdline",
-      "cpupower_config": "/etc/sysconfig/cpupower"
+      "cpupower_config": "/etc/sysconfig/cpupower",
+      "cpu_governor_service": "cpupower.service"
     },
     "commands": {
       "package_install": ["zypper", "--non-interactive", "install"],
@@ -1174,14 +1176,16 @@ For production packaging, the desktop entry should use an installed entrypoint (
 #### cpupower Configuration
 
 ```bash
-# Service config
+# openSUSE/Fedora
 /etc/sysconfig/cpupower
+systemctl is-enabled cpupower.service
 
-# Command
-cpupower frequency-set -g performance
+# Debian/Ubuntu
+/etc/default/cpufrequtils
+systemctl is-enabled cpufrequtils.service
 ```
 
-**TODO:** Verify cpupower is installed by default or needs package.
+**TODO:** Verify cpupower/cpufrequtils availability per distro.
 
 ---
 
@@ -1261,7 +1265,14 @@ sudo grub2-mkconfig -o /boot/grub2/grub.cfg
 | Audio stack | PipeWire (Ubuntu 22.04+) or PulseAudio |
 | Audio group | audio |
 | rtirq config | `/etc/default/rtirq` (if installed) |
-| cpupower config | `/etc/default/cpupower` |
+| CPU governor config | `/etc/default/cpufrequtils` (if installed) |
+
+#### Local .deb build (current workflow)
+
+```bash
+./packaging/debian/build-deb.sh
+ls -1 ~/debbuild/audioknob-gui_*_all.deb
+```
 
 #### Package Restore
 
@@ -1349,6 +1360,7 @@ def detect_distro() -> dict:
         "package_manager": None,  # zypper, dnf, apt, pacman
         "rtirq_config": None,
         "cpupower_config": None,
+        "cpu_governor_service": None,
     }
     
     # Detect distro from /etc/os-release
@@ -1361,6 +1373,7 @@ def detect_distro() -> dict:
         info["kernel_cmdline_update_cmd"] = ["sdbootutil", "update-all-entries"]
         info["rtirq_config"] = "/etc/sysconfig/rtirq"
         info["cpupower_config"] = "/etc/sysconfig/cpupower"
+        info["cpu_governor_service"] = "cpupower.service"
     
     elif "opensuse-leap" in os_release.get("ID", ""):
         info["distro"] = "opensuse-leap"

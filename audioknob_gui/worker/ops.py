@@ -78,6 +78,28 @@ def _systemd_is_active(unit: str) -> bool:
     return result.stdout.strip() == "active"
 
 
+def _systemd_unit_exists(unit: str) -> bool:
+    for base in ("/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"):
+        if (Path(base) / unit).exists():
+            return True
+    try:
+        result = run(["systemctl", "list-unit-files", unit])
+    except Exception:
+        return False
+    return result.returncode == 0 and unit in result.stdout
+
+
+def resolve_cpu_governor_service(distro_id: str) -> str | None:
+    deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
+    primary = "cpufrequtils.service" if deb_like else "cpupower.service"
+    secondary = "cpupower.service" if deb_like else "cpufrequtils.service"
+    if _systemd_unit_exists(primary):
+        return primary
+    if _systemd_unit_exists(secondary):
+        return secondary
+    return None
+
+
 def detect_power_profile_backend() -> dict[str, str] | None:
     """Detect available power profile backend.
 
@@ -322,7 +344,9 @@ def build_knob_paths(
             cfg_path = paths.get("cpupower_config", "")
             if cfg_path:
                 targets.append({"type": "path", "value": cfg_path})
-            targets.append({"type": "systemd_unit", "value": "cpupower.service"})
+            svc = paths.get("cpu_governor_service", "")
+            if svc:
+                targets.append({"type": "systemd_unit", "value": svc})
 
         out[knob.id] = {"kind": kind, "targets": targets}
 
@@ -339,6 +363,7 @@ def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
     paths: dict[str, str] = {
         "kernel_cmdline_file": distro.kernel_cmdline_file,
         "cpupower_config": resolve_cpupower_config_path(distro.distro_id),
+        "cpu_governor_service": resolve_cpu_governor_service(distro.distro_id) or "",
         "rtirq_config": resolve_rtirq_config_path(distro.distro_id),
         "pipewire_user_conf_dir": str(Path("~/.config/pipewire/pipewire.conf.d").expanduser()),
         "pipewire_system_conf_dir": "/etc/pipewire/pipewire.conf.d",
@@ -375,6 +400,7 @@ def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
     checks: dict[str, bool] = {
         "kernel_cmdline_file": _check_path(paths["kernel_cmdline_file"], expect_dir=False),
         "cpupower_config": _check_path(paths["cpupower_config"], expect_dir=False),
+        "cpu_governor_service": bool(paths["cpu_governor_service"]),
         "rtirq_config": _check_path(paths["rtirq_config"], expect_dir=False),
         "pipewire_user_conf_dir": _check_path(paths["pipewire_user_conf_dir"], expect_dir=True),
         "pipewire_system_conf_dir": _check_path(paths["pipewire_system_conf_dir"], expect_dir=True),
@@ -1710,11 +1736,13 @@ def check_knob_status(knob: Any) -> str:
                 cfg_ok = False
 
             svc_ok = False
-            try:
-                r = run(["systemctl", "is-enabled", "cpupower.service"])
-                svc_ok = r.stdout.strip() in ("enabled", "static", "indirect")
-            except Exception:
-                svc_ok = False
+            service = resolve_cpu_governor_service(distro_id)
+            if service:
+                try:
+                    r = run(["systemctl", "is-enabled", service])
+                    svc_ok = r.stdout.strip() in ("enabled", "static", "indirect")
+                except Exception:
+                    svc_ok = False
 
             if cfg_ok and svc_ok:
                 return "applied"

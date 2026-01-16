@@ -176,6 +176,16 @@ def check_cpu_governor() -> CheckResult:
         )
     
     gov_summary = ", ".join(f"{g}: {n}" for g, n in governors.items())
+    fix_cmd = None
+    try:
+        from audioknob_gui.platform.packages import which_command
+
+        if which_command("cpupower"):
+            fix_cmd = "cpupower frequency-set -g performance"
+        elif which_command("cpufreq-set"):
+            fix_cmd = "cpufreq-set -g performance"
+    except Exception:
+        fix_cmd = None
     return CheckResult(
         id="cpu_governor",
         name="CPU governor",
@@ -183,7 +193,7 @@ def check_cpu_governor() -> CheckResult:
         message=f"Not all CPUs on 'performance'",
         detail=gov_summary,
         fix_knob="cpu_governor_performance_persistent",
-        fix_command="cpupower frequency-set -g performance"
+        fix_command=fix_cmd
     )
 
 
@@ -771,13 +781,25 @@ def check_cyclictest_available() -> CheckResult:
             status=CheckStatus.PASS,
             message="cyclictest is installed"
         )
+    fix_command = None
+    detail = "Needed for latency testing (rt-tests package)"
+    try:
+        from audioknob_gui.platform.packages import get_package_name, resolve_package_commands
+
+        pkg = get_package_name("cyclictest")
+        install_cmd = resolve_package_commands().get("install") or []
+        if pkg and install_cmd:
+            fix_command = "sudo " + " ".join([*install_cmd, pkg])
+            detail = f"Needed for latency testing ({pkg} package)"
+    except Exception:
+        pass
     return CheckResult(
         id="cyclictest",
         name="cyclictest available",
         status=CheckStatus.WARN,
         message="cyclictest not installed",
-        detail="Needed for latency testing (rt-tests package)",
-        fix_command="sudo zypper install rt-tests"
+        detail=detail,
+        fix_command=fix_command
     )
 
 

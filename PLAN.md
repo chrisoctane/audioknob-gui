@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.4.1)
+### Install on openSUSE Tumbleweed (RPM, v0.4.2)
 
-For v0.4.1 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.4.2 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -55,6 +55,27 @@ sudo zypper remove -y audioknob-gui
 Notes:
 - This installs the GUI launcher `audioknob-gui` and the worker `audioknob-worker`.
 - Root operations use polkit + a fixed-path worker wrapper at `/usr/libexec/audioknob-gui-worker`.
+
+### Install on Debian/Ubuntu (DEB, v0.4.2)
+
+Build a local DEB from this repo:
+
+```bash
+cd /home/chris/audioknob-gui
+./packaging/debian/build-deb.sh
+```
+
+Install it:
+
+```bash
+sudo apt-get install -y ~/debbuild/audioknob-gui_*_all.deb
+```
+
+Uninstall it:
+
+```bash
+sudo apt-get remove -y audioknob-gui
+```
 
 ### Set up pre-commit hooks (recommended for contributors)
 
@@ -344,7 +365,7 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 ### CPU
 | Knob | Kind | Status |
 |------|------|--------|
-| CPU Performance (persistent) | sysfs_glob_kv (+ cpupower config + service) | ✓ |
+| CPU Performance (persistent) | sysfs_glob_kv (+ cpupower/cpufrequtils config + service) | ✓ |
 | CPU DMA latency udev rule | udev_rule | ✓ |
 
 ### VM

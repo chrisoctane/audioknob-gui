@@ -1019,6 +1019,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 from audioknob_gui.worker.ops import (
                     read_os_release,
                     resolve_cpupower_config_path,
+                    resolve_cpu_governor_service,
                     systemd_enable_now,
                 )
 
@@ -1053,8 +1054,15 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 Path(cfg_path).parent.mkdir(parents=True, exist_ok=True)
                 Path(cfg_path).write_text(after, encoding="utf-8")
 
-                # Best-effort: ensure cpupower.service is enabled so setting persists.
-                effects.append(systemd_enable_now("cpupower.service"))
+                service = resolve_cpu_governor_service(distro_id)
+                if service:
+                    # Best-effort: enable service so the setting persists.
+                    effects.append(systemd_enable_now(service))
+                else:
+                    warnings.append(
+                        "No cpupower/cpufrequtils systemd service found; "
+                        "governor persistence may not survive reboot."
+                    )
 
         elif kind == "power_profile":
             from audioknob_gui.worker.ops import detect_power_profile_backend, read_power_profile, systemd_enable_now

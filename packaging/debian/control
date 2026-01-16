@@ -1,0 +1,11 @@
+Package: audioknob-gui
+Version: @VERSION@
+Section: sound
+Priority: optional
+Architecture: all
+Maintainer: audioknob-gui contributors <noreply@github.com>
+Homepage: https://github.com/chrisoctane/audioknob-gui
+Depends: python3 (>= 3.10), python3-pyside6, policykit-1, desktop-file-utils
+Description: GUI-first realtime audio tuning app (transactions + preview/apply/undo)
+ audioknob-gui applies system tuning knobs with transaction-based apply/undo/reset.
+ Privileged changes run through pkexec/polkit using a fixed-path root worker.

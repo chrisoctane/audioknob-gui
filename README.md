@@ -6,7 +6,10 @@ GUI-first realtime audio tuning tool for Linux.
 
 ## Install
 
-The **v0.4.1** RPM install path is validated on openSUSE Tumbleweed.
+The **v0.4.2** local package paths cover:
+
+- openSUSE Tumbleweed (RPM)
+- Debian/Ubuntu (DEB)
 
 ### openSUSE Tumbleweed (local RPM)
 
@@ -39,7 +42,7 @@ cd audioknob-gui
 Expected output includes:
 
 - `Built RPM(s):`
-- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.4.1-0.noarch.rpm`
+- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.4.2-0.noarch.rpm`
 
 ### 4) Install the RPM (unsigned local build)
 
@@ -120,6 +123,77 @@ rm -rf ~/rpmbuild/BUILD ~/rpmbuild/BUILDROOT ~/rpmbuild/SOURCES ~/rpmbuild/OTHER
 
 - Root operations are performed via polkit using a fixed-path worker at:
   - `/usr/libexec/audioknob-gui-worker`
+
+### Debian/Ubuntu (local .deb)
+
+### 1) Install prerequisites (including git)
+
+```bash
+sudo apt-get install -y \
+  git \
+  dpkg-dev \
+  python3 python3-pip python3-setuptools python3-wheel \
+  python3-pyside6 \
+  desktop-file-utils \
+  policykit-1
+```
+
+### 2) Clone the repo
+
+```bash
+git clone https://github.com/chrisoctane/audioknob-gui.git
+cd audioknob-gui
+```
+
+### 3) Build the DEB (local)
+
+```bash
+./packaging/debian/build-deb.sh
+```
+
+Expected output includes:
+
+- `Built DEB:`
+- `~/debbuild/audioknob-gui_0.4.2_all.deb`
+
+### 4) Install the DEB
+
+```bash
+sudo apt-get install -y ~/debbuild/audioknob-gui_*_all.deb
+```
+
+### 5) Verify install
+
+```bash
+dpkg -l audioknob-gui
+command -v audioknob-gui
+ls -l /usr/libexec/audioknob-gui-worker /usr/share/polkit-1/actions/org.audioknob-gui.policy
+```
+
+Launch:
+
+```bash
+audioknob-gui
+```
+
+### 6) Optional: Refresh & rebuild (pull latest)
+
+```bash
+cd ~/audioknob-gui
+git pull
+./packaging/debian/build-deb.sh
+sudo apt-get install -y ~/debbuild/audioknob-gui_*_all.deb
+```
+
+### 7) Uninstall
+
+```bash
+sudo apt-get remove -y audioknob-gui
+```
+
+### Notes
+
+- PySide6 >= 6.9.0 is required. If your distro ships an older version, use a venv and `pip install PySide6` for dev runs.
 
 ## Signed RPM via OBS (future)
 

@@ -152,7 +152,7 @@
         "restore": true
       },
       "category": "cpu",
-      "description": "Sets CPU governor to 'performance' now AND configures it to persist across reboots (best-effort). On openSUSE/Fedora this writes /etc/sysconfig/cpupower and enables cpupower.service. Reset restores original config via transaction backups.",
+      "description": "Sets CPU governor to 'performance' now AND configures it to persist across reboots (best-effort). On openSUSE/Fedora this writes /etc/sysconfig/cpupower and enables cpupower.service. On Debian/Ubuntu this writes /etc/default/cpufrequtils and enables cpufrequtils.service when available. Reset restores original config via transaction backups.",
       "id": "cpu_governor_performance_persistent",
       "impl": {
         "kind": "sysfs_glob_kv",
@@ -161,9 +161,7 @@
           "value": "performance"
         }
       },
-      "requires_commands": [
-        "cpupower"
-      ],
+      "requires_commands": [],
       "requires_groups": [],
       "requires_reboot": false,
       "requires_root": true,
