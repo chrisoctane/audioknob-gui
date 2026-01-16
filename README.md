@@ -145,11 +145,19 @@ git clone https://github.com/chrisoctane/audioknob-gui.git
 cd audioknob-gui
 ```
 
+If you already cloned the repo earlier, make sure you pull the latest first:
+
+```bash
+git pull
+```
+
 ### 3) Build the DEB (local)
 
 ```bash
 ./packaging/debian/build-deb.sh
 ```
+
+If that script is missing, you're on an older checkout — run `git pull` first.
 
 Expected output includes:
 
