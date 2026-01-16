@@ -6,7 +6,7 @@ GUI-first realtime audio tuning tool for Linux.
 
 ## Install
 
-The **v0.4.2** local package paths cover:
+The **v0.4.3** local package paths cover:
 
 - openSUSE Tumbleweed (RPM)
 - Debian/Ubuntu (DEB)
@@ -42,7 +42,7 @@ cd audioknob-gui
 Expected output includes:
 
 - `Built RPM(s):`
-- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.4.2-0.noarch.rpm`
+- `~/rpmbuild/RPMS/noarch/audioknob-gui-0.4.3-0.noarch.rpm`
 
 ### 4) Install the RPM (unsigned local build)
 
@@ -162,7 +162,7 @@ If that script is missing, you're on an older checkout — run `git pull` first.
 Expected output includes:
 
 - `Built DEB:`
-- `~/debbuild/audioknob-gui_0.4.2_all.deb`
+- `~/debbuild/audioknob-gui_0.4.3_all.deb`
 
 ### 4) Install the DEB
 
