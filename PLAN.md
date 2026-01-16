@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.4.3)
+### Install on openSUSE Tumbleweed (RPM)
 
-For v0.4.3 we support **RPM packaging on openSUSE Tumbleweed**.
+We support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -56,7 +56,7 @@ Notes:
 - This installs the GUI launcher `audioknob-gui` and the worker `audioknob-worker`.
 - Root operations use polkit + a fixed-path worker wrapper at `/usr/libexec/audioknob-gui-worker`.
 
-### Install on Debian/Ubuntu (DEB, v0.4.3)
+### Install on Debian/Ubuntu (DEB)
 
 Build a local DEB from this repo:
 
