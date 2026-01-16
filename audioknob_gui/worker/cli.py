@@ -1085,7 +1085,33 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 raise SystemExit("Failed to read current power profile")
 
             if backend["backend"] == "powerprofilesctl":
+                def _list_powerprofilesctl_profiles(cmd: str) -> list[str]:
+                    try:
+                        res = subprocess.run([cmd, "list"], capture_output=True, text=True)
+                    except Exception:
+                        return []
+                    if res.returncode != 0:
+                        return []
+                    profiles: list[str] = []
+                    for line in res.stdout.splitlines():
+                        line = line.strip()
+                        if not line or ":" not in line:
+                            continue
+                        if line.startswith("*"):
+                            line = line[1:].strip()
+                        name = line.split(":", 1)[0].strip()
+                        if name:
+                            profiles.append(name)
+                    return profiles
+
                 target = str(params.get("ppd_profile", "performance")).strip() or "performance"
+                available = _list_powerprofilesctl_profiles(backend["cmd"])
+                if available and target not in available:
+                    warnings.append(
+                        "Power profile 'performance' is not supported on this system. "
+                        f"Available profiles: {', '.join(available)}."
+                    )
+                    continue
                 cmd = [backend["cmd"], "set", target]
             else:
                 target = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"

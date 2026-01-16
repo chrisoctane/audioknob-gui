@@ -33,7 +33,7 @@
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle), an IRQ Overview popup, plus RT throttling and C-state limiters
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
-- **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile
+- **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 

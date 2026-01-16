@@ -322,7 +322,7 @@
         "restore": true
       },
       "category": "power",
-      "description": "Sets the system power profile to performance using power-profiles-daemon (performance) or tuned (latency-performance). Uses the active/available backend and restores the previous profile on reset.",
+      "description": "Sets the system power profile to performance using power-profiles-daemon (performance) or tuned (latency-performance). Uses the active/available backend and restores the previous profile on reset. If power-profiles-daemon does not expose a performance profile, the knob warns and makes no change.",
       "id": "power_profile_performance",
       "impl": {
         "kind": "power_profile",

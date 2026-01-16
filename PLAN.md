@@ -132,6 +132,7 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - **Power Profile** sets the system power profile to performance via power-profiles-daemon or tuned (latency-performance).
 - Reset restores the previous profile.
+  - If power-profiles-daemon does not expose a performance profile, the knob warns and makes no change.
 
 ### Main + Advanced views
 

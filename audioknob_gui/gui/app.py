@@ -6189,6 +6189,7 @@ def main() -> int:
                 missing_root, other_root = self._collect_no_transaction_knobs(reset_root)
                 missing_ids = list(dict.fromkeys(missing_user + missing_root))
                 other_errors = other_user + other_root
+                unsupported: list[str] = []
 
                 if missing_ids:
                     _get_gui_logger().warning(
