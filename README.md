@@ -129,13 +129,17 @@ rm -rf ~/rpmbuild/BUILD ~/rpmbuild/BUILDROOT ~/rpmbuild/SOURCES ~/rpmbuild/OTHER
 ### 1) Install prerequisites (including git)
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository universe
+sudo apt-get update
 sudo apt-get install -y \
   git \
   dpkg-dev \
   python3 python3-pip python3-setuptools python3-wheel \
   python3-pyside6 \
   desktop-file-utils \
-  policykit-1
+  polkitd pkexec
 ```
 
 ### 2) Clone the repo
@@ -194,6 +198,8 @@ sudo apt-get remove -y audioknob-gui
 ### Notes
 
 - PySide6 >= 6.9.0 is required. If your distro ships an older version, use a venv and `pip install PySide6` for dev runs.
+- If `python3-pyside6` is unavailable, keep using the repo/venv run; the .deb requires a system PySide6 package.
+- On Debian, the polkit package name may be `policykit-1` instead of `polkitd`/`pkexec`.
 
 ## Signed RPM via OBS (future)
 

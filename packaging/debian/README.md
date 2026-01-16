@@ -6,6 +6,14 @@ Build a local package:
 ./packaging/debian/build-deb.sh
 ```
 
+If `python3-pyside6` is missing on Ubuntu, enable Universe:
+
+```bash
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository universe
+sudo apt-get update
+```
+
 Install:
 
 ```bash
