@@ -133,6 +133,8 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 - **Power Profile** sets the system power profile to performance via power-profiles-daemon or tuned (latency-performance).
 - Reset restores the previous profile.
   - If power-profiles-daemon does not expose a performance profile, the knob warns and makes no change.
+- The backend is configurable (Auto / powerprofilesctl / tuned). Auto uses the active backend.
+- tuned can override CPU governor and C-state knobs; the app warns and offers to queue resets for conflicts.
 
 ### Main + Advanced views
 
@@ -181,6 +183,12 @@ In the **Advanced** tab, you can manage baselines manually:
 - **Info** uses a simple tag format: `[i]` summary, `[r]` requirements, `[+]` benefits, `[-]` tradeoffs.
 - **Status/Check** shows live technical details; when status is **partial**, it includes a short reason line and raw checks below.
 - Status column states include short tooltips (baseline, deviated, applied, partial, reboot required, etc.).
+
+### Conflicts and blockers
+
+- The app warns on known conflicts and offers an optional **Queue resets** action.
+- The app never auto-disables knobs without explicit confirmation.
+- Known conflicts, dependencies, and blockers are documented in `docs/KNOB_INTERACTIONS.md`.
 
 ---
 

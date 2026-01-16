@@ -322,11 +322,12 @@
         "restore": true
       },
       "category": "power",
-      "description": "[i] sets the system power profile to performance (powerprofilesctl) or latency-performance (tuned) and restores the previous profile on reset.\n[+] ensures a known low-latency profile even if desktop UI toggles are unavailable.\n[-] higher power use/heat and may duplicate desktop power toggles (e.g., KDE taskbar).",
+      "description": "[i] sets the system power profile to performance (powerprofilesctl) or latency-performance (tuned) and restores the previous profile on reset.\n[+] ensures a known low-latency profile even if desktop UI toggles are unavailable.\n[-] higher power use/heat; tuned can override CPU governor and C-state knobs.",
       "id": "power_profile_performance",
       "impl": {
         "kind": "power_profile",
         "params": {
+          "backend": "auto",
           "ppd_profile": "performance",
           "tuned_profile": "latency-performance"
         }

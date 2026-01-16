@@ -448,6 +448,7 @@ def load_state() -> dict:
         "advanced_mode_enabled": False,  # bool
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
+        "power_profile_backend": "auto",  # auto | powerprofilesctl | tuned
         "jitter_test_last": None,  # dict payload from last run or None
         "system_profile": None,  # dict from startup scan or None
         "baseline_statuses": {},  # knob_id -> status string (first-run baseline)
@@ -497,6 +498,8 @@ def load_state() -> dict:
             data["pipewire_quantum"] = None
         if "pipewire_sample_rate" not in data:
             data["pipewire_sample_rate"] = None
+        if "power_profile_backend" not in data:
+            data["power_profile_backend"] = "auto"
         if "jitter_test_last" not in data:
             data["jitter_test_last"] = None
         if "system_profile" not in data:
@@ -603,6 +606,9 @@ def load_state() -> dict:
                 data["pipewire_sample_rate"] = None
         except Exception:
             data["pipewire_sample_rate"] = None
+        backend = str(data.get("power_profile_backend") or "").strip().lower()
+        if backend not in ("auto", "powerprofilesctl", "tuned"):
+            data["power_profile_backend"] = "auto"
         return data
     except Exception:
         return default
@@ -1647,6 +1653,11 @@ def main() -> int:
                 return Path(path).name if path else "limits"
 
             if kind == "power_profile":
+                backend = self._power_profile_backend_from_state()
+                if backend == "powerprofilesctl":
+                    return "powerprofilesctl"
+                if backend == "tuned":
+                    return "tuned-adm"
                 return "powerprofilesctl/tuned"
 
             if kind == "qjackctl_server_prefix":
@@ -1768,6 +1779,11 @@ def main() -> int:
                 return True  # No commands required
             from audioknob_gui.platform.packages import check_command_available
             if k.id == "power_profile_performance":
+                backend = self._power_profile_backend_from_state()
+                if backend == "powerprofilesctl":
+                    return check_command_available("powerprofilesctl")
+                if backend == "tuned":
+                    return check_command_available("tuned-adm")
                 return (
                     check_command_available("powerprofilesctl")
                     or check_command_available("tuned-adm")
@@ -1780,6 +1796,11 @@ def main() -> int:
                 return []
             from audioknob_gui.platform.packages import check_command_available
             if k.id == "power_profile_performance":
+                backend = self._power_profile_backend_from_state()
+                if backend == "powerprofilesctl":
+                    return [] if check_command_available("powerprofilesctl") else ["powerprofilesctl"]
+                if backend == "tuned":
+                    return [] if check_command_available("tuned-adm") else ["tuned-adm"]
                 if (
                     check_command_available("powerprofilesctl")
                     or check_command_available("tuned-adm")
@@ -3263,7 +3284,13 @@ def main() -> int:
                     not_applicable = True
                     not_applicable_reason = "Requires KDE desktop"
                 elif k.id == "power_profile_performance" and not_applicable:
-                    not_applicable_reason = "Requires powerprofilesctl or tuned-adm"
+                    backend = self._power_profile_backend_from_state()
+                    if backend == "powerprofilesctl":
+                        not_applicable_reason = "Requires powerprofilesctl"
+                    elif backend == "tuned":
+                        not_applicable_reason = "Requires tuned-adm"
+                    else:
+                        not_applicable_reason = "Requires powerprofilesctl or tuned-adm"
                 locked_bg = QColor("#1f1f1f")
                 locked_fg = QColor("#7a7a7a")
                 locked_style = (
@@ -3585,6 +3612,58 @@ def main() -> int:
                         cfg_btn.setEnabled(False)
                         cfg_btn.setStyleSheet(locked_style)
                     self.table.setCellWidget(r, 3, cfg_btn)
+                elif k.id == "power_profile_performance":
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status in ("applied", "pending_reboot"):
+                        btn = self._make_reset_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset")
+                    else:
+                        btn = self._make_apply_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply")
+                    self._apply_busy_state(btn, busy=busy)
+                    if locked:
+                        btn.setStyleSheet(locked_style)
+                    self._set_action_cell(r, btn)
+
+                    backend_combo = QComboBox()
+                    backend_combo.setMinimumWidth(130)
+                    backend_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+                    backend_combo.addItem("Auto", "auto")
+                    backend_combo.addItem("powerprofilesctl", "powerprofilesctl")
+                    backend_combo.addItem("tuned", "tuned")
+                    backend_combo.setToolTip(
+                        "Power profile backend: auto uses the active backend; tuned uses latency-performance."
+                    )
+                    current_backend = self._power_profile_backend_from_state()
+                    if current_backend not in ("auto", "powerprofilesctl", "tuned"):
+                        current_backend = "auto"
+                    backend_combo.blockSignals(True)
+                    for idx in range(backend_combo.count()):
+                        if backend_combo.itemData(idx) == current_backend:
+                            backend_combo.setCurrentIndex(idx)
+                            break
+                    backend_combo.blockSignals(False)
+
+                    def _on_backend_change(_: int, *, _combo: QComboBox = backend_combo) -> None:
+                        self.state["power_profile_backend"] = str(_combo.currentData())
+                        save_state(self.state)
+                        # Config changed; force re-evaluation until apply succeeds.
+                        self._knob_statuses["power_profile_performance"] = "not_applied"
+                        self._refresh_statuses()
+                        self._populate()
+
+                    backend_combo.currentIndexChanged.connect(_on_backend_change)
+                    self._install_hover_tracking(backend_combo, r)
+
+                    config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
+                    if config_locked:
+                        backend_combo.setEnabled(False)
+                        backend_combo.setStyleSheet(
+                            "QComboBox { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                        )
+                    self.table.setCellWidget(r, 3, backend_combo)
                 elif k.id == "irq_pinning":
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
@@ -3658,6 +3737,7 @@ def main() -> int:
                 if k.id not in (
                     "pipewire_quantum",
                     "pipewire_sample_rate",
+                    "power_profile_performance",
                     "qjackctl_server_prefix_rt",
                     "irq_pinning",
                     "kernel_isolcpus",
@@ -3690,9 +3770,17 @@ def main() -> int:
                 self._install_hover_tracking(check_btn, r)
                 self.table.setCellWidget(r, 6, check_btn)
                 if row_dim:
+                    config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
                     for col in range(self.table.columnCount()):
                         widget = self.table.cellWidget(r, col)
                         if widget is None:
+                            continue
+                        if (
+                            k.id == "power_profile_performance"
+                            and col == 3
+                            and isinstance(widget, QComboBox)
+                            and not config_locked
+                        ):
                             continue
                         if isinstance(widget, QPushButton):
                             widget.setStyleSheet(locked_style)
@@ -4103,6 +4191,19 @@ def main() -> int:
             if v in (44100, 48000, 88200, 96000, 192000):
                 return v
             return None
+
+        def _power_profile_backend_from_state(self) -> str:
+            raw = str(self.state.get("power_profile_backend") or "").strip().lower()
+            if raw in ("powerprofilesctl", "tuned"):
+                return raw
+            return "auto"
+
+        def _tuned_conflict_ids(self) -> list[str]:
+            return [
+                "cpu_governor_performance_persistent",
+                "kernel_cstate_limit",
+                "kernel_intel_idle_cstate_limit",
+            ]
 
         def _irq_pinning_devices_from_state(self) -> list[str]:
             raw = self.state.get("irq_pinning_devices")
@@ -4657,6 +4758,8 @@ def main() -> int:
                         params["device_keys"] = devices
                     if cores is not None:
                         params["cpu_cores"] = ",".join(str(c) for c in cores)
+                if k.id == "power_profile_performance":
+                    params["backend"] = self._power_profile_backend_from_state()
                 if k.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
                     override = self._kernel_cmdline_param_for_state(k.id)
                     if override:
@@ -4908,16 +5011,23 @@ def main() -> int:
                 )
             if k.id == "power_profile_performance":
                 try:
-                    from audioknob_gui.worker.ops import detect_power_profile_backend, read_power_profile
+                    from audioknob_gui.worker.ops import read_power_profile, select_power_profile_backend
 
-                    backend = detect_power_profile_backend()
+                    pref = self._power_profile_backend_from_state()
+                    params = dict(k.impl.params) if k.impl else {}
+                    params["backend"] = pref
+                    backend = select_power_profile_backend(params)
+                    pref_label = pref if pref != "auto" else "auto (active backend)"
+                    extra_html += "<hr/><p><b>Backend preference:</b> "
+                    extra_html += html_lib.escape(pref_label)
+                    extra_html += "</p>"
                     if backend:
                         current = read_power_profile(backend["backend"], backend["cmd"])
                         if backend["backend"] == "powerprofilesctl":
-                            expected = "performance"
+                            expected = str(params.get("ppd_profile", "performance")).strip() or "performance"
                         else:
-                            expected = "latency-performance"
-                        extra_html += "<hr/><p><b>Power profile backend:</b> "
+                            expected = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
+                        extra_html += "<p><b>Resolved backend:</b> "
                         extra_html += html_lib.escape(backend["backend"])
                         extra_html += "</p>"
                         if current:
@@ -4925,9 +5035,30 @@ def main() -> int:
                                 f"<p>Current: {html_lib.escape(current)}"
                                 f" (target: {html_lib.escape(expected)})</p>"
                             )
+                        if backend["backend"] == "tuned":
+                            conflict_ids = self._tuned_conflict_ids()
+                            by_id = {kn.id: kn for kn in self.registry}
+                            conflict_titles = []
+                            for cid in conflict_ids:
+                                title = by_id.get(cid).title if cid in by_id else cid
+                                state = self._knob_statuses.get(cid)
+                                if state in ("applied", "pending_reboot"):
+                                    conflict_titles.append(f"{title} ({state})")
+                                else:
+                                    conflict_titles.append(title)
+                            if conflict_titles:
+                                extra_html += (
+                                    "<p><b>Potential conflicts:</b> "
+                                    + html_lib.escape(", ".join(conflict_titles))
+                                    + "</p>"
+                                )
+                            extra_html += (
+                                "<p><b>Note:</b> tuned manages system power/governor settings. "
+                                "Avoid stacking overlapping knobs unless you know their combined effect.</p>"
+                            )
                     else:
                         extra_html += (
-                            "<hr/><p><b>Power profile backend:</b> none detected "
+                            "<p><b>Resolved backend:</b> none detected "
                             "(powerprofilesctl or tuned-adm required).</p>"
                         )
                 except Exception:
@@ -5173,6 +5304,8 @@ def main() -> int:
             kind = knob.impl.kind if knob.impl else ""
             params = dict(knob.impl.params) if knob.impl else {}
             lines.append(f"kind: {kind}")
+            if knob.id == "power_profile_performance":
+                params["backend"] = self._power_profile_backend_from_state()
 
             if kind == "qjackctl_server_prefix":
                 path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
@@ -6431,6 +6564,44 @@ def main() -> int:
                 except Exception:
                     pass
 
+        def _power_profile_backend_is_tuned(self) -> bool:
+            pref = self._power_profile_backend_from_state()
+            if pref == "tuned":
+                return True
+            if pref == "powerprofilesctl":
+                return False
+            try:
+                from audioknob_gui.worker.ops import select_power_profile_backend
+
+                params = {"backend": "auto"}
+                backend = select_power_profile_backend(params)
+                return bool(backend) and backend.get("backend") == "tuned"
+            except Exception:
+                return False
+
+        def _prompt_tuned_conflicts(self, conflict_ids: list[str]) -> str:
+            by_id = {k.id: k for k in self.registry}
+            titles = [by_id.get(cid).title if cid in by_id else cid for cid in conflict_ids]
+            msg = (
+                "tuned can override settings from these knobs:\n\n"
+                + ", ".join(titles)
+                + "\n\nQueue resets for the conflicting knobs?"
+            )
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("tuned conflicts")
+            box.setText(msg)
+            reset_btn = box.addButton("Queue resets", QMessageBox.AcceptRole)
+            box.addButton("Continue", QMessageBox.DestructiveRole)
+            cancel_btn = box.addButton(QMessageBox.Cancel)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked == reset_btn:
+                return "reset"
+            if clicked == cancel_btn:
+                return "cancel"
+            return "continue"
+
         def _on_apply_queue(self, reboot_after: bool) -> bool:
             if not self._queued_actions or self._queue_busy:
                 return False
@@ -6445,6 +6616,27 @@ def main() -> int:
             queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
             if not queued:
                 return False
+            if any(kid == "power_profile_performance" and action == "apply" for kid, action in queued):
+                if self._power_profile_backend_is_tuned():
+                    conflict_ids = [
+                        cid
+                        for cid in self._tuned_conflict_ids()
+                        if self._queued_actions.get(cid) == "apply"
+                        or self._knob_statuses.get(cid) in ("applied", "pending_reboot")
+                    ]
+                    if conflict_ids:
+                        choice = self._prompt_tuned_conflicts(conflict_ids)
+                        if choice == "cancel":
+                            return False
+                        if choice == "reset":
+                            for cid in conflict_ids:
+                                self._queued_actions[cid] = "reset"
+                            self._save_queue()
+                            self._update_queue_ui()
+                            self._populate()
+                            queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
+                            if not queued:
+                                return False
             if any(kid == "qjackctl_server_prefix_rt" for kid, _ in queued) and self._is_process_running(
                 ["qjackctl", "qjackctl6"]
             ):

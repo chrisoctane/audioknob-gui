@@ -37,8 +37,9 @@
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
 - **Baseline management** - Audio Core Plan includes Capture Baseline/Import Baseline buttons for baseline snapshots
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
+- **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
-- **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
+- **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 

@@ -183,6 +183,13 @@ def _pipewire_sample_rate_override(state: dict) -> int | None:
     return None
 
 
+def _power_profile_backend_override(state: dict) -> str | None:
+    raw = str(state.get("power_profile_backend") or "").strip().lower()
+    if raw in ("auto", "powerprofilesctl", "tuned"):
+        return raw
+    return None
+
+
 def _irq_pinning_override(state: dict) -> tuple[list[str] | None, str | None]:
     devices_raw = state.get("irq_pinning_devices")
     devices: list[str] | None = None
@@ -354,6 +361,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
     qjackctl_override = _qjackctl_cpu_cores_override(state)
     pipewire_quantum = _pipewire_quantum_override(state)
     pipewire_sample_rate = _pipewire_sample_rate_override(state)
+    power_profile_backend = _power_profile_backend_override(state)
     irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
 
     items = []
@@ -390,6 +398,15 @@ def cmd_preview(args: argparse.Namespace) -> int:
         ):
             new_params = dict(k.impl.params)
             new_params["rate"] = pipewire_sample_rate
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if (
+            power_profile_backend is not None
+            and k.id == "power_profile_performance"
+            and k.impl is not None
+            and k.impl.kind == "power_profile"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["backend"] = power_profile_backend
             k = replace(k, impl=replace(k.impl, params=new_params))
         kernel_override = _kernel_cmdline_override(state, k.id)
         if kernel_override and k.impl is not None and k.impl.kind == "kernel_cmdline":
@@ -712,6 +729,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
     state = _load_gui_state()
     irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
+    power_profile_backend = _power_profile_backend_override(state)
 
     effects: list[dict] = []
     backups: list[dict] = []
@@ -755,6 +773,15 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 new_params["device_keys"] = irq_devices_override
             if irq_cpu_override is not None:
                 new_params["cpu_cores"] = irq_cpu_override
+            params = new_params
+        if (
+            power_profile_backend is not None
+            and k.id == "power_profile_performance"
+            and k.impl is not None
+            and k.impl.kind == "power_profile"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["backend"] = power_profile_backend
             params = new_params
 
         if kind == "pam_limits_audio_group":
@@ -1065,9 +1092,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     )
 
         elif kind == "power_profile":
-            from audioknob_gui.worker.ops import detect_power_profile_backend, read_power_profile, systemd_enable_now
+            from audioknob_gui.worker.ops import select_power_profile_backend, read_power_profile, systemd_enable_now
 
-            backend = detect_power_profile_backend()
+            backend = select_power_profile_backend(params)
             if not backend:
                 raise SystemExit("No power profile backend found (powerprofilesctl or tuned-adm).")
 
@@ -1927,6 +1954,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     qjackctl_override = _qjackctl_cpu_cores_override(state)
     pipewire_quantum = _pipewire_quantum_override(state)
     pipewire_sample_rate = _pipewire_sample_rate_override(state)
+    power_profile_backend = _power_profile_backend_override(state)
     irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
     
     statuses = []
@@ -1956,6 +1984,15 @@ def cmd_status(args: argparse.Namespace) -> int:
         ):
             new_params = dict(k.impl.params)
             new_params["rate"] = pipewire_sample_rate
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if (
+            power_profile_backend is not None
+            and k.id == "power_profile_performance"
+            and k.impl is not None
+            and k.impl.kind == "power_profile"
+        ):
+            new_params = dict(k.impl.params)
+            new_params["backend"] = power_profile_backend
             k = replace(k, impl=replace(k.impl, params=new_params))
         kernel_override = _kernel_cmdline_override(state, k.id)
         if kernel_override and k.impl is not None and k.impl.kind == "kernel_cmdline":

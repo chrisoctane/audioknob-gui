@@ -137,6 +137,37 @@ def detect_power_profile_backend() -> dict[str, str] | None:
     return None
 
 
+def select_power_profile_backend(params: dict[str, Any]) -> dict[str, str] | None:
+    """Select power profile backend based on params.
+
+    backend: auto | powerprofilesctl | tuned
+    """
+    from audioknob_gui.platform.packages import which_command
+
+    pref = str(params.get("backend") or "").strip().lower()
+    if pref in ("", "auto"):
+        return detect_power_profile_backend()
+    if pref in ("powerprofilesctl", "power-profiles-daemon", "ppd"):
+        cmd = which_command("powerprofilesctl")
+        if not cmd:
+            return None
+        return {
+            "backend": "powerprofilesctl",
+            "cmd": cmd,
+            "service": "power-profiles-daemon.service",
+        }
+    if pref in ("tuned", "tuned-adm"):
+        cmd = which_command("tuned-adm")
+        if not cmd:
+            return None
+        return {
+            "backend": "tuned",
+            "cmd": cmd,
+            "service": "tuned.service",
+        }
+    return detect_power_profile_backend()
+
+
 def read_power_profile(backend: str, cmd: str) -> str | None:
     """Read the current power profile name for the selected backend."""
     if backend == "powerprofilesctl":
@@ -678,8 +709,11 @@ def _power_profile_preview(params: dict[str, Any]) -> tuple[list[list[str]], lis
     notes: list[str] = []
     cmds: list[list[str]] = []
 
-    backend = detect_power_profile_backend()
+    backend = select_power_profile_backend(params)
     if not backend:
+        pref = str(params.get("backend") or "").strip().lower()
+        if pref and pref != "auto":
+            notes.append(f"Requested backend '{pref}' is not available.")
         notes.append("No power profile backend found (powerprofilesctl or tuned-adm).")
         return cmds, notes
 
@@ -1496,7 +1530,7 @@ def check_knob_status(knob: Any) -> str:
         return "not_applied"
 
     if kind == "power_profile":
-        backend = detect_power_profile_backend()
+        backend = select_power_profile_backend(params)
         if not backend:
             return "not_applicable"
         current = read_power_profile(backend["backend"], backend["cmd"])

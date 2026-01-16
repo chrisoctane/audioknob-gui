@@ -36,6 +36,8 @@ It is for agent control only and does not change public docs.
 - Any registry/schema edit MUST sync:
   - `config/registry.json` → `audioknob_gui/data/registry.json`
   - `config/registry.schema.json` → `audioknob_gui/data/registry.schema.json`
+- Any new knob or behavior change MUST update `docs/KNOB_INTERACTIONS.md` with
+  conflicts, dependencies, or blockers.
 - New knob kinds require preview/apply/status support in worker.
 - Every knob must have a system_profile location entry (per-knob path/target map).
 - For knobs that share a file (GRUB cmdline, sysctl.d, limits.d, pipewire.conf.d, udev rules, etc.):
@@ -48,6 +50,14 @@ It is for agent control only and does not change public docs.
 - Match existing style and structure; do not introduce new patterns unless they
   simplify the codebase and reduce future drift.
 - If you spot safe optimization or deduplication, implement it in the same change.
+
+## Research gate (complex changes)
+Before making changes that affect IRQs, kernel cmdline, RT scheduling, power
+management, or CPU isolation:
+- Read `docs/KNOB_INTERACTIONS.md` first and align changes with the conflict map.
+- Add short research notes with sources to `docs/KNOB_INTERACTIONS.md`
+  (or a linked doc) if behavior is non-obvious or distro-specific.
+- If sources conflict or behavior is unclear, STOP and ask the user.
 
 ## Definition of done (minimum)
 - Consistency gate passes:
