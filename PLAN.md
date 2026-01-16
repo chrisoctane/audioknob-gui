@@ -28,9 +28,9 @@ The script auto-detects:
 
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
-### Install on openSUSE Tumbleweed (RPM, v0.4.0.0)
+### Install on openSUSE Tumbleweed (RPM, v0.4.1)
 
-For v0.4.0.0 we support **RPM packaging on openSUSE Tumbleweed**.
+For v0.4.1 we support **RPM packaging on openSUSE Tumbleweed**.
 Current support is **Tumbleweed only**.
 
 Build a local RPM from this repo:
@@ -100,22 +100,22 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 ### RT throttling
 
 - **RT Throttling** disables `kernel.sched_rt_runtime_us` (sets to `-1`), which prevents periodic throttling of RT threads.
-- This can reduce xruns but risks a runaway RT thread starving the system; use with care and reset if needed.
+- This can reduce xruns but risks a runaway RT thread starving the system or blocking suspend; reset before sleep if needed.
 
 ### CPU C-States
 
-- **CPU C-States** adds `processor.max_cstate=1` to the kernel cmdline to limit idle states (higher power/heat, lower latency jitter).
-- **Intel C-States** adds `intel_idle.max_cstate=1` for systems using the Intel `intel_idle` driver.
+- **CPU C-States** adds `processor.max_cstate=1` to the kernel cmdline to limit idle states (higher power/heat, lower latency jitter; may affect suspend).
+- **Intel C-States** adds `intel_idle.max_cstate=1` for systems using the Intel `intel_idle` driver (same tradeoffs).
 
 ### Power profile
 
 - **Power Profile** sets the system power profile to performance via power-profiles-daemon or tuned (latency-performance).
 - Reset restores the previous profile.
 
-### Main + Cores/IRQ views
+### Main + Advanced views
 
-- The **Main** tab shows all knobs except the core/IRQ set (to avoid duplicates).
-- Use the **Cores/IRQ** tab to focus on core/IRQ knobs only.
+- The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
+- Use the **Advanced** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.
 - **Auto housekeeping** inverts the selected audio cores to derive IRQ housekeeping cores; manual mode uses the IRQ housekeeping core selection.
@@ -302,7 +302,7 @@ btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
 self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 ```
 
-The jitter test also stores the most recent per-thread results in the knob info dialog.
+The jitter test stores the most recent per-thread summary (min/median/avg/p95/max) in the knob info dialog, with a "Show Sample List" button for raw values.
 The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
 Use the "Status" button in the Check column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. It also shows the initial baseline snapshot for that knob. Read-only test rows show N/A in this column.
 The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) to make mixed logs easy to read.

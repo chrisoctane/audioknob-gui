@@ -350,7 +350,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds processor.max_cstate=1 to kernel cmdline. Limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat. Requires reboot.",
+      "description": "Adds processor.max_cstate=1 to kernel cmdline. Advanced: limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat; can keep fans running and may affect suspend. Requires reboot.",
       "id": "kernel_cstate_limit",
       "impl": {
         "kind": "kernel_cmdline",
@@ -372,7 +372,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds intel_idle.max_cstate=1 to kernel cmdline. Intel-only (intel_idle driver). Limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat. Requires reboot.",
+      "description": "Adds intel_idle.max_cstate=1 to kernel cmdline. Advanced: Intel-only (intel_idle driver). Limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat; can keep fans running and may affect suspend. Requires reboot.",
       "id": "kernel_intel_idle_cstate_limit",
       "impl": {
         "kind": "kernel_cmdline",
@@ -416,7 +416,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Disables RT throttling (kernel.sched_rt_runtime_us=-1). Prevents periodic throttling of RT threads but can allow runaway RT tasks to starve the system. Apply requires reboot or sysctl reload.",
+      "description": "Disables RT throttling (kernel.sched_rt_runtime_us=-1). Advanced: prevents periodic throttling of RT threads but can allow runaway RT tasks to starve the system or block suspend. Reset before sleep. Apply requires reboot or sysctl reload.",
       "id": "kernel_rt_throttling_off",
       "impl": {
         "kind": "sysctl_conf",

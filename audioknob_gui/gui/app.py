@@ -1055,7 +1055,7 @@ def main() -> int:
             self._view_mode = str(self.state.get("view_tab", "all"))
             self.view_tabs = QTabBar()
             self.view_tabs.addTab("Main")
-            self.view_tabs.addTab("Cores/IRQ")
+            self.view_tabs.addTab("Advanced")
             if self._view_mode == "cores":
                 self.view_tabs.setCurrentIndex(1)
             else:
@@ -1149,6 +1149,9 @@ def main() -> int:
             return {
                 "qjackctl_server_prefix_rt",
                 "irq_pinning",
+                "kernel_rt_throttling_off",
+                "kernel_cstate_limit",
+                "kernel_intel_idle_cstate_limit",
                 "kernel_isolcpus",
                 "kernel_nohz_full",
                 "kernel_rcu_nocbs",
@@ -4323,6 +4326,13 @@ def main() -> int:
 
             def _shell_single_quote(value: str) -> str:
                 return "'" + value.replace("'", "'\"'\"'") + "'"
+
+            def _fmt_jitter_value(value: object) -> str:
+                if isinstance(value, float):
+                    return f"{value:.1f}"
+                if isinstance(value, int):
+                    return str(value)
+                return "—"
             
             # Build detailed info
             status = self._knob_statuses.get(k.id, "unknown")
@@ -4396,6 +4406,7 @@ def main() -> int:
                     returncode = last.get("returncode")
                     note = last.get("note")
                     threads = last.get("threads")
+                    thread_samples = last.get("thread_samples")
                     extra_html += "<hr/><p><b>Last jitter test:</b></p>"
                     if isinstance(max_us, int):
                         extra_html += f"<p>Max: {max_us} µs</p>"
@@ -4403,13 +4414,35 @@ def main() -> int:
                         extra_html += "<p>Result: unavailable</p>"
                     if isinstance(threads, list) and threads:
                         extra_html += "<table>"
-                        extra_html += "<tr><td><b>Thread</b></td><td><b>Max (µs)</b></td></tr>"
+                        extra_html += (
+                            "<tr>"
+                            "<td><b>Thread</b></td>"
+                            "<td><b>Samples</b></td>"
+                            "<td><b>Min</b></td>"
+                            "<td><b>Median</b></td>"
+                            "<td><b>Avg</b></td>"
+                            "<td><b>P95</b></td>"
+                            "<td><b>Max</b></td>"
+                            "</tr>"
+                        )
                         for item in sorted(threads, key=lambda t: t.get("thread", 0)):
                             t = item.get("thread")
-                            v = item.get("max_us")
-                            if isinstance(t, int) and isinstance(v, int):
-                                extra_html += f"<tr><td>{t}</td><td>{v}</td></tr>"
+                            if not isinstance(t, int):
+                                continue
+                            extra_html += (
+                                "<tr>"
+                                f"<td>{t}</td>"
+                                f"<td>{_fmt_jitter_value(item.get('samples'))}</td>"
+                                f"<td>{_fmt_jitter_value(item.get('min_us'))}</td>"
+                                f"<td>{_fmt_jitter_value(item.get('median_us'))}</td>"
+                                f"<td>{_fmt_jitter_value(item.get('avg_us'))}</td>"
+                                f"<td>{_fmt_jitter_value(item.get('p95_us'))}</td>"
+                                f"<td>{_fmt_jitter_value(item.get('max_us'))}</td>"
+                                "</tr>"
+                            )
                         extra_html += "</table>"
+                        if isinstance(thread_samples, list) and thread_samples:
+                            extra_html += "<p>Tip: use \"Show Sample List\" to view raw values.</p>"
                     else:
                         extra_html += "<p>No per-thread results captured yet.</p>"
                     if note:
@@ -4545,6 +4578,10 @@ def main() -> int:
                         "<hr/><p><b>Current sched_rt_runtime_us:</b> "
                         f"{html_lib.escape(value)}</p>"
                     )
+                    extra_html += (
+                        "<p><b>Warning:</b> disabling RT throttling can let runaway RT tasks "
+                        "starve the system and may block suspend. Reset before sleep if needed.</p>"
+                    )
                 except Exception:
                     pass
             if k.id in ("kernel_cstate_limit", "kernel_intel_idle_cstate_limit"):
@@ -4566,6 +4603,9 @@ def main() -> int:
                     )
                 extra_html += (
                     "<p>Limiting C-states can increase power draw and heat. Reset if needed.</p>"
+                )
+                extra_html += (
+                    "<p><b>Warning:</b> limiting C-states can keep fans running and may affect suspend behavior.</p>"
                 )
             if k.id == "power_profile_performance":
                 try:
@@ -4650,6 +4690,41 @@ def main() -> int:
                 config_btn = QPushButton("Configure CPU Cores...")
                 config_btn.clicked.connect(lambda: (dialog.accept(), self.on_configure_knob(k.id)))
                 layout.addWidget(config_btn)
+            if k.id == "scheduler_jitter_test":
+                last = self.state.get("jitter_test_last")
+                samples = last.get("thread_samples") if isinstance(last, dict) else None
+                if isinstance(samples, list) and samples:
+                    samples_btn = QPushButton("Show Sample List...")
+                    samples_btn.clicked.connect(lambda: self._show_jitter_samples(samples))
+                    layout.addWidget(samples_btn)
+
+            btns = QDialogButtonBox(QDialogButtonBox.Close)
+            btns.rejected.connect(dialog.reject)
+            layout.addWidget(btns)
+
+            dialog.exec()
+
+        def _show_jitter_samples(self, samples: list[dict]) -> None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Jitter Test Samples")
+            dialog.resize(640, 420)
+            layout = QVBoxLayout(dialog)
+
+            text = QTextEdit()
+            text.setReadOnly(True)
+            lines: list[str] = []
+            for item in sorted(samples, key=lambda t: t.get("thread", 0)):
+                thread_id = item.get("thread")
+                values = item.get("samples")
+                if not isinstance(thread_id, int) or not isinstance(values, list):
+                    continue
+                lines.append(f"Thread {thread_id} ({len(values)} samples):")
+                lines.append("  " + ", ".join(str(v) for v in values))
+                lines.append("")
+            if not lines:
+                lines.append("No samples captured.")
+            text.setPlainText("\n".join(lines))
+            layout.addWidget(text)
 
             btns = QDialogButtonBox(QDialogButtonBox.Close)
             btns.rejected.connect(dialog.reject)

@@ -30,11 +30,12 @@
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
-- **Cores/IRQ view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle) and an IRQ Overview popup
+- **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle), an IRQ Overview popup, plus RT throttling and C-state limiters
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
+- **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 
 ### GUI Layout
 ```
@@ -43,7 +44,7 @@ Columns: Info | Knob | Action | Config | Requirements | Status | Check | Categor
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
-- Header tabs switch between **Main** and **Cores/IRQ**; Main hides core/IRQ knobs to avoid duplicates, and the Cores/IRQ view filters to core-related knobs and shows the Audio Core Plan panel.
+- Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Requirements" shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
@@ -103,6 +104,7 @@ Notes:
 - Category headers and separators clear all cell widgets so no stray info buttons appear.
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
+- Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
