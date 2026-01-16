@@ -52,7 +52,7 @@ sed -e "s/@VERSION@/${version}/g" -e "s/@ARCH@/${arch}/g" packaging/debian/contr
 install -m 0755 packaging/debian/postinst "${pkg_root}/DEBIAN/postinst"
 install -m 0755 packaging/debian/postrm "${pkg_root}/DEBIAN/postrm"
 
-dpkg-deb --build "${pkg_root}" "${out_dir}/${name}_${version}_all.deb"
+dpkg-deb --root-owner-group --build "${pkg_root}" "${out_dir}/${name}_${version}_all.deb"
 
 echo ""
 echo "Built DEB:"
