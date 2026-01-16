@@ -7,7 +7,7 @@
         "restore": true
       },
       "category": "permissions",
-      "description": "Adds current user to audio-related groups (audio, realtime, pipewire). Required for RT limits and low-latency audio. Reboot required to take effect.",
+      "description": "[i] adds the current user to audio-related groups (audio, realtime, pipewire).\n[+] required for RT limits and low-latency device access.\n[-] grants extra device permissions and needs a reboot or log out/in.",
       "id": "audio_group_membership",
       "impl": {
         "kind": "group_membership",
@@ -36,7 +36,7 @@
       "depends_on": [
         "audio_group_membership"
       ],
-      "description": "Allows audio apps in the 'audio' group to request realtime priority (rtprio 95), lock memory (memlock unlimited), and use nice -10. Essential for low-latency audio. Log out/in or reboot required to take effect.",
+      "description": "[i] sets PAM limits for the audio group (rtprio 95, memlock unlimited, nice -10).\n[+] lets audio apps use realtime priority and lock memory to avoid xruns.\n[-] requires log out/in or reboot; runaway RT apps can affect system responsiveness.",
       "id": "rt_limits_audio_group",
       "impl": {
         "kind": "pam_limits_audio_group",
@@ -66,7 +66,7 @@
         "restore": true
       },
       "category": "irq",
-      "description": "Stops irqbalance service so audio IRQs don't get moved between CPUs unexpectedly. Reduces latency jitter.",
+      "description": "[i] disables irqbalance.\n[+] prevents IRQs moving between CPUs, which stabilizes audio latency and pinning.\n[-] IRQ distribution becomes static and can reduce throughput for some workloads.",
       "id": "irqbalance_disable",
       "impl": {
         "kind": "systemd_unit_toggle",
@@ -89,7 +89,7 @@
         "restore": true
       },
       "category": "irq",
-      "description": "Configures rtirq priorities for audio IRQ threads and enables the rtirq service. Writes an audioknob block to /etc/sysconfig/rtirq (or /etc/default/rtirq on Debian/Ubuntu) with RTIRQ_NAME_LIST/HIGH_LIST and priority settings.",
+      "description": "[i] configures rtirq priorities and enables the rtirq service.\n[+] with threaded IRQs, higher IRQ thread priority reduces audio interrupt latency.\n[-] requires threaded IRQs (threadirqs or RT kernel) to have effect and can deprioritize other IRQs.",
       "id": "rtirq_enable",
       "impl": {
         "kind": "rtirq_config",
@@ -126,7 +126,7 @@
       "depends_on": [
         "irqbalance_disable"
       ],
-      "description": "Pins IRQs for selected audio devices to specific CPU cores. PCI audio devices pin their own IRQs; USB audio devices pin the USB host controller IRQs (shared). Also moves non-audio IRQs off the selected audio cores (housekeeping sweep). Housekeeping cores come from IRQ Housekeeping (irqaffinity) if set; otherwise, all cores minus the selected audio cores. Configure devices + cores in the UI. Requires irqbalance disabled for stable pinning. Persists via /var/lib/audioknob-gui/state.json + audioknob-irq-pinning.service.",
+      "description": "[i] pins IRQs for selected audio devices to chosen cores and sweeps other IRQs off audio cores.\n[+] isolates audio interrupts to reduce jitter.\n[-] USB devices share controller IRQs; requires irqbalance off; poor choices can shift IRQ load.",
       "id": "irq_pinning",
       "impl": {
         "kind": "irq_affinity",
@@ -152,7 +152,7 @@
         "restore": true
       },
       "category": "cpu",
-      "description": "Sets CPU governor to 'performance' now AND configures it to persist across reboots (best-effort). On openSUSE/Fedora this writes /etc/sysconfig/cpupower and enables cpupower.service. On Debian/Ubuntu this writes /etc/default/cpufrequtils and enables cpufrequtils.service when available. Reset restores original config via transaction backups.",
+      "description": "[i] sets CPU governor to performance now and configures it to persist across reboots.\n[+] avoids frequency scaling latency spikes under realtime load.\n[-] higher power use and heat.",
       "id": "cpu_governor_performance_persistent",
       "impl": {
         "kind": "sysfs_glob_kv",
@@ -175,7 +175,7 @@
         "restore": true
       },
       "category": "cpu",
-      "description": "Creates udev rule to allow audio group write access to /dev/cpu_dma_latency. Enables apps to request low C-state latency. File: /etc/udev/rules.d/99-cpu-dma-latency.rules",
+      "description": "[i] grants the audio group access to /dev/cpu_dma_latency.\n[+] allows audio apps to request low-latency C-state behavior.\n[-] apps can keep CPUs in higher power states.",
       "id": "cpu_dma_latency_udev",
       "impl": {
         "kind": "udev_rule",
@@ -201,7 +201,7 @@
         "restore": true
       },
       "category": "vm",
-      "description": "Sets vm.swappiness=10 to reduce swapping, avoiding latency spikes under memory pressure. File: /etc/sysctl.d/99-audioknob-gui.conf",
+      "description": "[i] sets vm.swappiness=10.\n[+] reduces swapping that can cause dropouts under memory pressure.\n[-] uses more RAM and less swap.",
       "id": "swappiness",
       "impl": {
         "kind": "sysctl_conf",
@@ -226,7 +226,7 @@
         "restore": true
       },
       "category": "vm",
-      "description": "Sets Transparent Huge Pages to 'madvise' mode via kernel cmdline. Requires reboot to take effect. Param: transparent_hugepage=madvise",
+      "description": "[i] sets transparent huge pages to madvise.\n[+] avoids unexpected THP latency while keeping opt-in behavior.\n[-] requires reboot; may reduce THP benefits for some workloads.",
       "id": "thp_mode_madvise",
       "impl": {
         "kind": "kernel_cmdline",
@@ -248,7 +248,7 @@
         "restore": true
       },
       "category": "vm",
-      "description": "Sets fs.inotify.max_user_watches=600000 for DAWs that watch many files. Prevents 'too many open files' errors. File: /etc/sysctl.d/99-audioknob-inotify.conf",
+      "description": "[i] sets fs.inotify.max_user_watches=600000.\n[+] prevents DAWs from hitting file watch limits.\n[-] uses more kernel memory for watchers.",
       "id": "inotify_max_watches",
       "impl": {
         "kind": "sysctl_conf",
@@ -273,7 +273,7 @@
         "restore": true
       },
       "category": "vm",
-      "description": "Lowers vm.dirty_bytes to 50MB and vm.dirty_background_bytes to 16MB to reduce I/O latency from writeback. File: /etc/sysctl.d/99-audioknob-dirty.conf",
+      "description": "[i] lowers vm.dirty_bytes and vm.dirty_background_bytes.\n[+] reduces long writeback stalls that cause audio glitches.\n[-] increases writeback frequency.",
       "id": "dirty_bytes",
       "impl": {
         "kind": "sysctl_conf",
@@ -299,7 +299,7 @@
         "restore": true
       },
       "category": "power",
-      "description": "Disables USB autosuspend to prevent USB audio device dropouts. Creates udev rule. File: /etc/udev/rules.d/99-usb-no-autosuspend.rules",
+      "description": "[i] disables USB autosuspend via udev.\n[+] prevents USB audio device dropouts.\n[-] higher USB power draw and reduced battery life.",
       "id": "usb_autosuspend_disable",
       "impl": {
         "kind": "udev_rule",
@@ -322,7 +322,7 @@
         "restore": true
       },
       "category": "power",
-      "description": "Sets the system power profile to performance using power-profiles-daemon (performance) or tuned (latency-performance). Uses the active/available backend and restores the previous profile on reset. If power-profiles-daemon does not expose a performance profile, the knob warns and makes no change.",
+      "description": "[i] sets the system power profile to performance (powerprofilesctl) or latency-performance (tuned) and restores the previous profile on reset.\n[+] ensures a known low-latency profile even if desktop UI toggles are unavailable.\n[-] higher power use/heat and may duplicate desktop power toggles (e.g., KDE taskbar).",
       "id": "power_profile_performance",
       "impl": {
         "kind": "power_profile",
@@ -348,7 +348,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds processor.max_cstate=1 to kernel cmdline. Advanced: limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat; can keep fans running and may affect suspend. Requires reboot.",
+      "description": "[i] adds processor.max_cstate=1 to kernel cmdline.\n[+] limits deep idle states to reduce latency jitter.\n[-] higher power/heat, fans, and possible suspend issues.",
       "id": "kernel_cstate_limit",
       "impl": {
         "kind": "kernel_cmdline",
@@ -370,7 +370,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds intel_idle.max_cstate=1 to kernel cmdline. Advanced: Intel-only (intel_idle driver). Limits CPU idle C-states to reduce latency jitter at the cost of higher power/heat; can keep fans running and may affect suspend. Requires reboot.",
+      "description": "[i] adds intel_idle.max_cstate=1 to kernel cmdline.\n[+] limits deep idle states on systems using intel_idle for lower jitter.\n[-] Intel-only, higher power/heat, possible suspend issues.",
       "id": "kernel_intel_idle_cstate_limit",
       "impl": {
         "kind": "kernel_cmdline",
@@ -392,7 +392,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds 'threadirqs' to kernel cmdline. Makes IRQ handlers schedulable for better RT performance. Requires reboot. File: /etc/kernel/cmdline (openSUSE TW) or /etc/default/grub",
+      "description": "[i] adds threadirqs to kernel cmdline.\n[+] makes IRQ handlers schedulable threads so RTIRQ can prioritize them.\n[-] requires reboot and can add overhead.",
       "id": "kernel_threadirqs",
       "impl": {
         "kind": "kernel_cmdline",
@@ -414,7 +414,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Disables RT throttling (kernel.sched_rt_runtime_us=-1). Advanced: prevents periodic throttling of RT threads but can allow runaway RT tasks to starve the system or block suspend. Reset before sleep. Apply requires reboot or sysctl reload.",
+      "description": "[i] sets kernel.sched_rt_runtime_us=-1.\n[+] avoids periodic RT throttling that can cause xruns.\n[-] runaway RT tasks can starve the system or block suspend.",
       "id": "kernel_rt_throttling_off",
       "impl": {
         "kind": "sysctl_conf",
@@ -439,7 +439,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds isolcpus=<cores> to the kernel cmdline. Isolates selected cores from the scheduler (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "description": "[i] adds isolcpus=<cores> to kernel cmdline.\n[+] isolates selected cores for dedicated audio work.\n[-] reduces CPU capacity for general workloads; requires reboot.",
       "id": "kernel_isolcpus",
       "impl": {
         "kind": "kernel_cmdline",
@@ -461,7 +461,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds nohz_full=<cores> to the kernel cmdline. Enables full tickless mode on selected cores (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "description": "[i] adds nohz_full=<cores> to kernel cmdline.\n[+] reduces timer ticks on audio cores for lower jitter.\n[-] requires reboot and works best with isolcpus/rcu_nocbs.",
       "id": "kernel_nohz_full",
       "impl": {
         "kind": "kernel_cmdline",
@@ -483,7 +483,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds rcu_nocbs=<cores> to the kernel cmdline. Offloads RCU callbacks from selected cores (advanced). Configure cores in the UI. Requires reboot. Can reduce performance for general workloads.",
+      "description": "[i] adds rcu_nocbs=<cores> to kernel cmdline.\n[+] offloads RCU callbacks from audio cores to reduce jitter.\n[-] requires reboot and shifts work to housekeeping cores.",
       "id": "kernel_rcu_nocbs",
       "impl": {
         "kind": "kernel_cmdline",
@@ -505,7 +505,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds irqaffinity=<cores> to the kernel cmdline. Pins default IRQ handling to the selected housekeeping cores (advanced). Configure cores in the UI or enable Auto to invert selected audio cores. Requires reboot. Can reduce performance for general workloads.",
+      "description": "[i] adds irqaffinity=<cores> to kernel cmdline for default IRQ handling.\n[+] keeps interrupts off audio cores.\n[-] requires reboot; bad choices can concentrate IRQ load.",
       "id": "kernel_irqaffinity",
       "impl": {
         "kind": "kernel_cmdline",
@@ -527,7 +527,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds 'audit=0' to kernel cmdline. Reduces overhead from audit subsystem. Requires reboot. File: /etc/kernel/cmdline or /etc/default/grub",
+      "description": "[i] adds audit=0 to kernel cmdline.\n[+] reduces audit overhead on realtime workloads.\n[-] disables kernel audit logging (security tradeoff).",
       "id": "kernel_audit_off",
       "impl": {
         "kind": "kernel_cmdline",
@@ -549,7 +549,7 @@
         "restore": true
       },
       "category": "kernel",
-      "description": "Adds 'mitigations=off' to kernel cmdline. SECURITY TRADEOFF: Improves performance but disables Spectre/Meltdown protections. Requires reboot.",
+      "description": "[i] adds mitigations=off to kernel cmdline.\n[+] reduces CPU mitigation overhead.\n[-] disables Spectre/Meltdown protections (security risk).",
       "id": "kernel_mitigations_off",
       "impl": {
         "kind": "kernel_cmdline",
@@ -571,7 +571,7 @@
         "restore": true
       },
       "category": "stack",
-      "description": "Ensures QjackCtl RT (Realtime=true, Priority=90) and CPU pinning (default cores 0,1). Updates the active preset (if any) and mirrors unscoped settings while preserving user presets, disables ServerConfig so GUI settings are used, and configures a QjackCtl PostStartupScript to re-pin JACK on start. Optional: change cores via Config. If JACK is running, CPU affinity is updated immediately; status checks also use live JACK RT threads when available.",
+      "description": "[i] configures QjackCtl realtime/priority and a post-start script to re-pin JACK, updating active presets without removing user presets.\n[+] keeps JACK RT settings and core pinning consistent across starts.\n[-] apply while QjackCtl is closed; updates QjackCtl config.",
       "id": "qjackctl_server_prefix_rt",
       "impl": {
         "kind": "qjackctl_server_prefix",
@@ -601,7 +601,7 @@
         "restore": true
       },
       "category": "stack",
-      "description": "Configures PipeWire buffer size (quantum). Lower = less latency, more CPU. System default is 1024; we recommend 128-256 for pro audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-quantum.conf",
+      "description": "[i] sets PipeWire buffer size (quantum).\n[+] lower buffers reduce latency for realtime audio.\n[-] higher CPU usage and xrun risk; PipeWire restarts.",
       "id": "pipewire_quantum",
       "impl": {
         "kind": "pipewire_conf",
@@ -624,7 +624,7 @@
         "restore": true
       },
       "category": "stack",
-      "description": "Configures PipeWire default sample rate. System default is 48000 Hz. Higher rates (96k/192k) for hi-res audio. PipeWire will be restarted automatically after applying. File: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rate.conf",
+      "description": "[i] sets PipeWire default sample rate.\n[+] matches project/interface rate for consistent audio.\n[-] higher rates increase CPU use; PipeWire restarts.",
       "id": "pipewire_sample_rate",
       "impl": {
         "kind": "pipewire_conf",
@@ -647,7 +647,7 @@
         "restore": true
       },
       "category": "services",
-      "description": "Masks tracker-miner-fs and tracker-extract services (file indexer) which cause latency spikes during indexing. GNOME desktops only.",
+      "description": "[i] disables GNOME Tracker indexer services.\n[+] avoids background IO/CPU spikes during audio work.\n[-] GNOME file indexing/search is reduced.",
       "id": "disable_tracker",
       "impl": {
         "kind": "user_service_mask",
@@ -687,7 +687,7 @@
         "restore": true
       },
       "category": "services",
-      "description": "Disables Baloo file indexer (KDE) which causes latency spikes during indexing. Uses balooctl to disable. KDE desktops only.",
+      "description": "[i] disables KDE Baloo indexer.\n[+] avoids background IO/CPU spikes during audio work.\n[-] KDE file indexing/search is reduced.",
       "id": "disable_baloo",
       "impl": {
         "kind": "baloo_disable",
@@ -709,7 +709,7 @@
         "restore": false
       },
       "category": "testing",
-      "description": "Shows what audio server is active: PipeWire, JACK, or ALSA only. Also lists ALSA playback devices.",
+      "description": "[i] reports the active audio stack (PipeWire/JACK/ALSA) and lists ALSA devices.\n[+] quick visibility for troubleshooting.\n[-] read-only; no changes.",
       "id": "stack_detect",
       "impl": {
         "kind": "read_only",
@@ -731,7 +731,7 @@
         "restore": false
       },
       "category": "testing",
-      "description": "Runs cyclictest to measure scheduler latency jitter. Shows max latency in microseconds. Lower is better. Requires cyclictest (rt-tests package).",
+      "description": "[i] runs cyclictest to measure scheduler latency jitter.\n[+] quantifies realtime latency before/after tuning.\n[-] uses CPU while running; requires cyclictest.",
       "id": "scheduler_jitter_test",
       "impl": {
         "kind": "read_only",
@@ -755,7 +755,7 @@
         "restore": false
       },
       "category": "testing",
-      "description": "Comprehensive realtime readiness scan. Checks: audio group, CPU governor, swappiness, inotify, kernel RT/threadirqs, high-res timers, irqbalance, THP, USB autosuspend, HPET/RTC access, filesystems, and more. Based on realtimeconfigquickscan but improved.",
+      "description": "[i] runs a realtime readiness scan.\n[+] highlights missing prerequisites and common blockers.\n[-] read-only; may need extra packages for some checks.",
       "id": "blocker_check",
       "impl": {
         "kind": "read_only",

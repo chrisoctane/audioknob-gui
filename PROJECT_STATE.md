@@ -17,20 +17,25 @@
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
 - **Info popup** - Info column with "i" button shows details + config options
+- **Info formatting** - uses tagged lines: [i] summary, [r] requirements, [+] benefits, [-] tradeoffs; requirements are auto-generated
 - **Advanced mode toggle** - gates performance-impacting knobs on the main table
 - **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
 - **Info popup status check** - Run a live per-knob diagnostic snapshot
+- **Partial status notes** - Status/Check view includes a brief reason line when partial
+- **Status tooltips** - Status column includes brief tooltips for each state (baseline/applied/deviated/etc.).
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Reset All** - reverts all changes to system defaults
 - **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
+- **Baseline capture/import** - Advanced tab buttons to snapshot baseline to JSON or import a baseline file (no system changes)
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum and sample rate knobs
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
-- **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle), an IRQ Overview popup, plus RT throttling and C-state limiters
+- **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
+- **Baseline management** - Audio Core Plan includes Capture Baseline/Import Baseline buttons for baseline snapshots
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
@@ -44,7 +49,7 @@ Columns: Info | Knob | Action | Config | Requirements | Status | Check | Categor
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
-- Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel.
+- Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview and baseline capture/import.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Requirements" shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).

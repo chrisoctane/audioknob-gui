@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 def _registry_path() -> str:
@@ -455,6 +455,7 @@ def load_state() -> dict:
         "baseline_captured_at": None,  # ISO timestamp
         "baseline_txid_user": None,  # last_user_txid at capture time
         "baseline_txid_root": None,  # last_root_txid at capture time
+        "baseline_source": "initial",  # initial | capture | import
     }
     if not p.exists():
         return default
@@ -510,6 +511,8 @@ def load_state() -> dict:
             data["baseline_txid_user"] = None
         if "baseline_txid_root" not in data:
             data["baseline_txid_root"] = None
+        if "baseline_source" not in data:
+            data["baseline_source"] = "initial"
         if "enable_reboot_knobs" not in data:
             data["enable_reboot_knobs"] = False
         if "queued_knobs" not in data:
@@ -581,6 +584,10 @@ def load_state() -> dict:
             data["baseline_txid_user"] = None
         if data.get("baseline_txid_root") is not None and not isinstance(data.get("baseline_txid_root"), str):
             data["baseline_txid_root"] = None
+        if data.get("baseline_source") is not None and not isinstance(data.get("baseline_source"), str):
+            data["baseline_source"] = "initial"
+        if data.get("baseline_source") not in ("initial", "capture", "import"):
+            data["baseline_source"] = "initial"
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
         try:
             q = data.get("pipewire_quantum")
@@ -615,6 +622,7 @@ def main() -> int:
             QComboBox,
             QDialog,
             QDialogButtonBox,
+            QFileDialog,
             QGridLayout,
             QGroupBox,
             QHBoxLayout,
@@ -1216,6 +1224,18 @@ def main() -> int:
             btn_row.addStretch(1)
             root.addLayout(btn_row)
 
+            baseline_row = QHBoxLayout()
+            self.btn_baseline_capture = QPushButton("Capture Baseline...")
+            self.btn_baseline_capture.setToolTip("Capture current system as baseline and save to a file")
+            self.btn_baseline_capture.clicked.connect(self._on_capture_baseline)
+            baseline_row.addWidget(self.btn_baseline_capture)
+            self.btn_baseline_import = QPushButton("Import Baseline...")
+            self.btn_baseline_import.setToolTip("Import a baseline snapshot file (no system changes)")
+            self.btn_baseline_import.clicked.connect(self._on_import_baseline)
+            baseline_row.addWidget(self.btn_baseline_import)
+            baseline_row.addStretch(1)
+            root.addLayout(baseline_row)
+
             return panel
 
         def _on_core_plan_count_changed(self, value: int) -> None:
@@ -1313,15 +1333,34 @@ def main() -> int:
             self.state["irq_housekeeping_auto"] = True
             save_state(self.state)
 
-            for kid in (
+            affected = [
                 "irq_pinning",
                 "qjackctl_server_prefix_rt",
                 "kernel_isolcpus",
                 "kernel_nohz_full",
                 "kernel_rcu_nocbs",
                 "kernel_irqaffinity",
-            ):
+            ]
+            by_id = {k.id: k for k in self.registry}
+            queued: list[str] = []
+            skipped: list[str] = []
+            for kid in affected:
                 self._knob_statuses[kid] = "not_applied"
+                knob = by_id.get(kid)
+                if knob is None:
+                    continue
+                allowed, reason = self._queue_apply_allowed(knob)
+                if not allowed:
+                    if reason:
+                        skipped.append(f"{knob.title} ({reason})")
+                    else:
+                        skipped.append(knob.title)
+                    continue
+                if self._queued_actions.get(kid) != "apply":
+                    self._queued_actions[kid] = "apply"
+                    queued.append(knob.title)
+            self._save_queue()
+            self._update_queue_ui()
             self._refresh_statuses()
             self._populate()
             extra = ""
@@ -1329,10 +1368,14 @@ def main() -> int:
                 extra = (
                     f"\n\nRequested {count} cores; selected {selected_count} to keep SMT siblings together."
                 )
+            if queued:
+                extra += "\n\nQueued apply for:\n" + "\n".join(f"- {name}" for name in queued)
+            if skipped:
+                extra += "\n\nSkipped (locked/unavailable):\n" + "\n".join(f"- {name}" for name in skipped)
             QMessageBox.information(
                 self,
                 "Auto-set complete",
-                "Core selections updated. Apply the relevant knobs to take effect." + extra,
+                "Core selections updated. Apply the queued changes to take effect." + extra,
             )
 
         def _sync_core_plan_controls(self) -> None:
@@ -1744,6 +1787,45 @@ def main() -> int:
                     return []
                 return ["powerprofilesctl", "tuned-adm"]
             return [cmd for cmd in k.requires_commands if not check_command_available(cmd)]
+
+        def _queue_apply_allowed(self, k) -> tuple[bool, str]:
+            if not self._baseline_ready:
+                return False, "Baseline scan pending"
+            status = self._knob_statuses.get(k.id, "unknown")
+            if status == "not_applicable":
+                return False, "Not available on this system"
+            reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
+            advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
+            group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
+            group_ok = self._knob_group_ok(k)
+            if group_pending and k.requires_groups:
+                group_ok = False
+            commands_ok = self._knob_commands_ok(k)
+            reboot_gate_lock = (
+                bool(k.requires_reboot)
+                and not reboot_gate_enabled
+                and status not in ("applied", "pending_reboot")
+            )
+            advanced_gate_lock = (
+                k.id in self._advanced_knob_ids()
+                and not advanced_enabled
+                and status not in ("applied", "pending_reboot")
+            )
+            reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
+            if group_pending:
+                return False, f"Groups pending reboot: {', '.join(k.requires_groups)}"
+            if reboot_dep_lock:
+                return False, f"Requires groups: {', '.join(k.requires_groups)} (enable reboot-required changes)"
+            if not group_ok:
+                return False, f"Join groups: {', '.join(k.requires_groups)}"
+            if reboot_gate_lock:
+                return False, f"Reboot required: {k.title}"
+            if advanced_gate_lock:
+                return False, "Enable advanced knobs"
+            if not commands_ok:
+                missing = self._knob_missing_commands(k)
+                return False, f"Install: {', '.join(missing)}" if missing else "Missing commands"
+            return True, ""
 
         def _collect_log_text(self) -> str:
             gui_log = _state_path().parent / "logs" / "gui.log"
@@ -2266,10 +2348,136 @@ def main() -> int:
             baseline = self.state.get("baseline_statuses")
             return isinstance(baseline, dict) and bool(baseline)
 
-        def _ensure_baseline_state(self) -> None:
-            if self._baseline_ready or self._baseline_busy:
+        def _baseline_is_manual(self) -> bool:
+            return self.state.get("baseline_source") in ("capture", "import")
+
+        def _set_baseline_buttons_enabled(self, enabled: bool) -> None:
+            for name in ("btn_baseline_capture", "btn_baseline_import"):
+                btn = getattr(self, name, None)
+                if isinstance(btn, QPushButton):
+                    btn.setEnabled(enabled)
+
+        def _set_baseline_state(
+            self,
+            statuses: dict[str, str],
+            *,
+            checks: dict[str, list[str]] | None = None,
+            captured_at: str | None = None,
+            source: str = "initial",
+        ) -> None:
+            if not isinstance(statuses, dict) or not statuses:
+                return
+            valid_ids = {k.id for k in self.registry}
+            cleaned = {k: str(v) for k, v in statuses.items() if k in valid_ids}
+            if not cleaned:
+                return
+            if not isinstance(captured_at, str) or not captured_at:
+                captured_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            self.state["baseline_statuses"] = cleaned
+            self.state["baseline_captured_at"] = captured_at
+            self.state["baseline_txid_user"] = self.state.get("last_user_txid")
+            self.state["baseline_txid_root"] = self.state.get("last_root_txid")
+            self.state["baseline_source"] = source if source in ("initial", "capture", "import") else "initial"
+            if checks is None:
+                self.state["baseline_checks"] = self._build_baseline_checks(cleaned)
+            elif isinstance(checks, dict):
+                clean_checks: dict[str, list[str]] = {}
+                for knob_id, lines in checks.items():
+                    if knob_id not in valid_ids:
+                        continue
+                    if not isinstance(lines, list):
+                        continue
+                    clean_checks[knob_id] = [str(x) for x in lines]
+                self.state["baseline_checks"] = clean_checks
+            else:
+                self.state["baseline_checks"] = {}
+            save_state(self.state)
+            self._baseline_ready = True
+            self._refresh_statuses()
+            self._populate()
+
+        def _baseline_snapshot(self) -> dict[str, object]:
+            from audioknob_gui import __version__
+
+            return {
+                "schema": 1,
+                "baseline_statuses": dict(self.state.get("baseline_statuses") or {}),
+                "baseline_checks": dict(self.state.get("baseline_checks") or {}),
+                "baseline_captured_at": self.state.get("baseline_captured_at"),
+                "baseline_source": self.state.get("baseline_source", "initial"),
+                "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                "app_version": __version__,
+            }
+
+        def _write_baseline_snapshot(self, path: str, snapshot: dict[str, object]) -> bool:
+            try:
+                payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+                Path(path).write_text(payload, encoding="utf-8")
+            except Exception as exc:
+                QMessageBox.warning(self, "Baseline", f"Failed to save baseline:\n{exc}")
+                return False
+            return True
+
+        def _load_baseline_snapshot(self, path: str) -> dict[str, object] | None:
+            try:
+                raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            except Exception as exc:
+                QMessageBox.warning(self, "Baseline", f"Failed to load baseline:\n{exc}")
+                return None
+            if not isinstance(raw, dict):
+                QMessageBox.warning(self, "Baseline", "Baseline file is not a JSON object.")
+                return None
+            statuses = raw.get("baseline_statuses")
+            if not isinstance(statuses, dict) or not statuses:
+                QMessageBox.warning(self, "Baseline", "Baseline file is missing status data.")
+                return None
+            valid_ids = {k.id for k in self.registry}
+            cleaned = {k: str(v) for k, v in statuses.items() if k in valid_ids}
+            if not cleaned:
+                QMessageBox.warning(self, "Baseline", "Baseline file has no known knob ids.")
+                return None
+            checks = raw.get("baseline_checks")
+            clean_checks: dict[str, list[str]] | None = None
+            if isinstance(checks, dict):
+                clean_checks = {}
+                for knob_id, lines in checks.items():
+                    if knob_id not in valid_ids:
+                        continue
+                    if not isinstance(lines, list):
+                        continue
+                    clean_checks[knob_id] = [str(x) for x in lines]
+            captured_at = raw.get("baseline_captured_at")
+            if not isinstance(captured_at, str) or not captured_at:
+                captured_at = None
+            return {
+                "statuses": cleaned,
+                "checks": clean_checks,
+                "captured_at": captured_at,
+            }
+
+        def _confirm_baseline_overwrite(self, summary: str) -> bool:
+            if not self._baseline_ready:
+                return True
+            msg = (
+                f"{summary}\n\n"
+                "This will overwrite the current baseline snapshot.\n\n"
+                "This does not change system settings.\n\nContinue?"
+            )
+            return QMessageBox.question(self, "Baseline", msg) == QMessageBox.Yes
+
+        def _start_baseline_scan(
+            self,
+            *,
+            on_success: Callable[[dict[str, str]], None],
+            on_cancel_title: str = "Baseline Required",
+            on_cancel_message: str | None = None,
+            on_error_title: str = "Baseline",
+            on_error_message: str | None = None,
+        ) -> None:
+            if self._baseline_busy:
                 return
             self._baseline_busy = True
+            self._set_baseline_buttons_enabled(False)
 
             def _task() -> tuple[bool, object, str]:
                 argv = [
@@ -2309,37 +2517,44 @@ def main() -> int:
 
             def _on_done(success: bool, payload: object, message: str) -> None:
                 self._baseline_busy = False
+                self._set_baseline_buttons_enabled(True)
                 if not success:
                     if message == _PKEXEC_CANCELLED:
-                        QMessageBox.information(
-                            self,
-                            "Baseline Required",
-                            "Initial state capture was cancelled.\n\n"
-                            "Run 'Re-check State' to capture baseline before making changes.",
-                        )
-                    else:
-                        _get_gui_logger().warning("baseline scan failed error=%s", message)
+                        if on_cancel_message:
+                            QMessageBox.information(self, on_cancel_title, on_cancel_message)
+                        return
+                    if on_error_message:
+                        QMessageBox.warning(self, on_error_title, on_error_message + f"\n\n{message}")
+                        return
+                    _get_gui_logger().warning("baseline scan failed error=%s", message)
                     return
                 if not isinstance(payload, dict):
                     return
                 statuses = payload.get("statuses") or {}
                 if not isinstance(statuses, dict) or not statuses:
                     return
-                self.state["baseline_statuses"] = statuses
-                self.state["baseline_captured_at"] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-                self.state["baseline_txid_user"] = self.state.get("last_user_txid")
-                self.state["baseline_txid_root"] = self.state.get("last_root_txid")
-                self.state["baseline_checks"] = self._build_baseline_checks(statuses)
-                save_state(self.state)
-                self._baseline_ready = True
-                self._refresh_statuses()
-                self._populate()
-                _get_gui_logger().info("baseline scan complete")
+                on_success(statuses)
 
             worker.finished.connect(_on_done)
             worker.finished.connect(worker.deleteLater)
             self._task_threads.append(worker)
             worker.start()
+
+        def _ensure_baseline_state(self) -> None:
+            if self._baseline_ready or self._baseline_busy:
+                return
+            def _on_success(statuses: dict[str, str]) -> None:
+                self._set_baseline_state(statuses, source="initial")
+                _get_gui_logger().info("baseline scan complete")
+
+            self._start_baseline_scan(
+                on_success=_on_success,
+                on_cancel_title="Baseline Required",
+                on_cancel_message=(
+                    "Initial state capture was cancelled.\n\n"
+                    "Run 'Re-check State' to capture baseline before making changes."
+                ),
+            )
 
         def _build_baseline_checks(self, statuses: dict[str, str]) -> dict[str, list[str]]:
             baseline_checks: dict[str, list[str]] = {}
@@ -2349,6 +2564,68 @@ def main() -> int:
                     continue
                 baseline_checks[knob.id] = self._collect_live_checks(knob, status_override=status)
             return baseline_checks
+
+        def _on_capture_baseline(self) -> None:
+            if self._baseline_busy:
+                return
+            default_name = str(Path.home() / "audioknob-baseline.json")
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Baseline Snapshot",
+                default_name,
+                "JSON Files (*.json)",
+            )
+            if not path:
+                return
+            if not path.lower().endswith(".json"):
+                path = path + ".json"
+            if not self._confirm_baseline_overwrite("Capture baseline"):
+                return
+
+            def _on_success(statuses: dict[str, str]) -> None:
+                self._set_baseline_state(statuses, source="capture")
+                snapshot = self._baseline_snapshot()
+                if self._write_baseline_snapshot(path, snapshot):
+                    QMessageBox.information(self, "Baseline", f"Baseline saved to:\n{path}")
+
+            self._start_baseline_scan(
+                on_success=_on_success,
+                on_cancel_title="Baseline",
+                on_cancel_message="Baseline capture was cancelled.",
+                on_error_title="Baseline",
+                on_error_message="Failed to capture baseline.",
+            )
+
+        def _on_import_baseline(self) -> None:
+            if self._baseline_busy:
+                return
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Import Baseline Snapshot",
+                str(Path.home()),
+                "JSON Files (*.json)",
+            )
+            if not path:
+                return
+            payload = self._load_baseline_snapshot(path)
+            if not payload:
+                return
+            captured_at = payload.get("captured_at") or "unknown"
+            if not self._confirm_baseline_overwrite(
+                f"Import baseline from:\n{path}\nCaptured: {captured_at}"
+            ):
+                return
+            statuses = payload.get("statuses")
+            checks = payload.get("checks")
+            if not isinstance(statuses, dict):
+                return
+            self._set_baseline_state(
+                statuses,
+                checks=checks if isinstance(checks, dict) else None,
+                captured_at=payload.get("captured_at"),
+                source="import",
+            )
+            QMessageBox.information(self, "Baseline", "Baseline imported.")
 
         def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
             if not isinstance(raw, dict):
@@ -2510,6 +2787,7 @@ def main() -> int:
             baseline_root_txid = self.state.get("baseline_txid_root")
             last_user_txid = self.state.get("last_user_txid")
             last_root_txid = self.state.get("last_root_txid")
+            manual_baseline = self._baseline_is_manual()
             user_diverged = (
                 isinstance(baseline_user_txid, str)
                 and isinstance(last_user_txid, str)
@@ -2524,7 +2802,7 @@ def main() -> int:
                 current = self._knob_statuses.get(knob.id)
                 if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable"):
                     continue
-                if root_tx_unknown and knob.requires_root:
+                if not manual_baseline and root_tx_unknown and knob.requires_root:
                     continue
                 base = baseline.get(knob.id)
                 if base is None:
@@ -2532,15 +2810,16 @@ def main() -> int:
                 if base in ("unknown", "not_applicable"):
                     continue
                 tx_time = tx_times.get(knob.id)
-                if tx_time is not None and baseline_ts is not None and baseline_ts >= tx_time:
-                    continue
-                if tx_time is not None and baseline_ts is None:
-                    continue
-                if tx_time is None:
-                    if knob.requires_root and root_diverged:
+                if not manual_baseline:
+                    if tx_time is not None and baseline_ts is not None and baseline_ts >= tx_time:
                         continue
-                    if not knob.requires_root and user_diverged:
+                    if tx_time is not None and baseline_ts is None:
                         continue
+                    if tx_time is None:
+                        if knob.requires_root and root_diverged:
+                            continue
+                        if not knob.requires_root and user_diverged:
+                            continue
                 if current == base:
                     self._knob_statuses[knob.id] = "sys_default"
                     continue
@@ -2737,7 +3016,7 @@ def main() -> int:
             mapping = {
                 "applied": ("✓ Applied", "#2e7d32"),      # Green
                 "sys_default": ("Sys Default", "#1976d2"), # Blue
-                "deviated": ("⚠ Deviated", "#f57c00"),   # Orange warning
+                "deviated": ("Deviated", "#607d8b"),      # Blue-gray
                 "not_applied": ("—", "#757575"),          # Gray dash
                 "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
                 "partial": ("◐ Partial", "#f57c00"),      # Orange
@@ -3072,6 +3351,26 @@ def main() -> int:
                     status_text, status_color = self._status_display(display_status)
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
+                    tooltip_map = {
+                        "applied": "Baseline captured; optimization applied successfully.",
+                        "sys_default": "Baseline captured before optimization.",
+                        "deviated": "Differs from both baseline and expected optimization.",
+                        "partial": "Partially applied; see Status details.",
+                        "pending_reboot": "Applied in boot config; reboot required.",
+                        "not_applied": "Not applied.",
+                        "not_applicable": "Not available on this system.",
+                        "read_only": "Read-only check.",
+                        "unknown": "Status unknown.",
+                        "running": "Updating...",
+                        "done": "Completed.",
+                        "error": "Error during operation.",
+                    }
+                    if display_status.startswith("result:"):
+                        status_item.setToolTip("Test result.")
+                    else:
+                        tip = tooltip_map.get(display_status)
+                        if tip:
+                            status_item.setToolTip(tip)
                 if row_dim:
                     status_item.setBackground(locked_bg)
                 self.table.setItem(r, 5, status_item)
@@ -4640,9 +4939,59 @@ def main() -> int:
                     "Periods/buffer = 2 is typical; 3 is safer; 1 is often unstable.</p>"
                 )
 
+            def _requirements_info_line() -> str | None:
+                parts: list[str] = []
+                if k.requires_root:
+                    parts.append("root access")
+                if k.requires_reboot:
+                    parts.append("reboot")
+                if k.requires_groups:
+                    parts.append(f"group membership: {', '.join(k.requires_groups)}")
+                if k.requires_commands:
+                    parts.append(f"commands: {', '.join(k.requires_commands)}")
+                if k.id in self._advanced_knob_ids():
+                    parts.append("advanced mode")
+                if not parts:
+                    return None
+                return "requires " + "; ".join(parts)
+
+            def _format_description(desc: str) -> str:
+                lines = [ln.strip() for ln in desc.splitlines() if ln.strip()]
+                tagged = any(ln.startswith("[") and len(ln) > 2 and ln[2] == "]" for ln in lines)
+                if not tagged:
+                    return f"<p>{html_lib.escape(desc)}</p>"
+                groups: dict[str, list[str]] = {"i": [], "r": [], "+": [], "-": [], "?": []}
+                for line in lines:
+                    tag = None
+                    text = line
+                    if line.startswith("[") and len(line) > 2 and line[2] == "]":
+                        tag = line[1].lower()
+                        text = line[3:].strip()
+                    if tag in ("i", "r", "+", "-"):
+                        groups[tag].append(text)
+                    else:
+                        groups["?"].append(text)
+                req_line = _requirements_info_line()
+                if req_line:
+                    groups["r"].insert(0, req_line)
+                parts_html: list[str] = []
+                for line in groups["i"]:
+                    parts_html.append(f"<p><b>[i]</b> {html_lib.escape(line)}</p>")
+                for line in groups["r"]:
+                    parts_html.append(f"<p><b>[r]</b> {html_lib.escape(line)}</p>")
+                for line in groups["+"]:
+                    parts_html.append(f"<p><b>[+]</b> {html_lib.escape(line)}</p>")
+                for line in groups["-"]:
+                    parts_html.append(f"<p><b>[-]</b> {html_lib.escape(line)}</p>")
+                for line in groups["?"]:
+                    parts_html.append(f"<p>{html_lib.escape(line)}</p>")
+                return "\n".join(parts_html)
+
+            description_html = _format_description(k.description)
+
             html = f"""
             <h3>{k.title}</h3>
-            <p>{k.description}</p>
+            {description_html}
             <hr/>
             <table>
             <tr><td><b>ID:</b></td><td>{k.id}</td></tr>
@@ -4839,6 +5188,84 @@ def main() -> int:
                 if cfg is not None:
                     active_preset = cfg.def_preset if cfg.def_preset else "(default)"
                     lines.append(f"active_preset: {active_preset}")
+                    cmd = cfg.server_cmd or ""
+                    tokens = cmd.split()
+                    ensure_rt = bool(params.get("ensure_rt", True))
+                    ensure_prio = bool(params.get("ensure_priority", False))
+                    expected_prio = 90 if ensure_prio else None
+                    rt_cfg_ok = True
+                    prio_cfg_ok = True
+                    if ensure_rt:
+                        rt_cfg_ok = cfg.realtime is True or any(
+                            t in ("-R", "--realtime") or t.startswith("--realtime") for t in tokens
+                        )
+                    if ensure_prio:
+                        prio_cfg_ok = (cfg.priority == expected_prio) or any(
+                            t.startswith("-P") for t in tokens
+                        )
+                    expected_cores = self._qjackctl_cpu_cores_from_state()
+                    if expected_cores is None:
+                        cpu_cores = params.get("cpu_cores")
+                        if cpu_cores is not None:
+                            try:
+                                from audioknob_gui.core.irq import parse_cpu_list
+
+                                expected_cores = sorted(parse_cpu_list(str(cpu_cores)))
+                            except Exception:
+                                expected_cores = None
+                    config_pin_ok = True
+                    runtime_pin_ok = None
+                    if expected_cores is not None:
+                        expected_list = ",".join(str(c) for c in expected_cores)
+                        if expected_list:
+                            try:
+                                from audioknob_gui.core.qjackctl import (
+                                    build_post_start_script,
+                                    default_post_start_script_path,
+                                )
+
+                                expected_script = build_post_start_script(expected_list)
+                                expected_path = str(default_post_start_script_path())
+                                config_pin_ok = (
+                                    cfg.post_startup_enabled
+                                    and cfg.post_startup_shell == expected_path
+                                )
+                                if config_pin_ok:
+                                    try:
+                                        script_text = Path(expected_path).read_text(encoding="utf-8")
+                                        config_pin_ok = script_text == expected_script
+                                    except Exception:
+                                        config_pin_ok = False
+                            except Exception:
+                                config_pin_ok = False
+                            try:
+                                from audioknob_gui.core.irq import parse_cpu_list
+
+                                expected_set = set(expected_cores)
+                                runtime_pin_ok = True
+                                for pid in _find_pids_by_comm("jackd"):
+                                    allowed = _read_proc_cpu_allowed_list(pid)
+                                    if not allowed:
+                                        continue
+                                    if parse_cpu_list(allowed) != expected_set:
+                                        runtime_pin_ok = False
+                                        break
+                            except Exception:
+                                runtime_pin_ok = None
+                        else:
+                            config_pin_ok = not cfg.post_startup_enabled and not cfg.post_startup_shell
+
+                    if status == "partial":
+                        if cfg.server_config_enabled:
+                            lines.append("partial_reason: ServerConfig enabled; QjackCtl may override GUI settings.")
+                        if ensure_rt and not rt_cfg_ok:
+                            lines.append("partial_reason: Realtime not enabled in QjackCtl config.")
+                        if ensure_prio and not prio_cfg_ok:
+                            lines.append("partial_reason: Priority not set to expected value in QjackCtl config.")
+                        if expected_cores is not None and not config_pin_ok:
+                            lines.append("partial_reason: Post-start script missing or mismatched for CPU pinning.")
+                        if runtime_pin_ok is False:
+                            lines.append("partial_reason: running jackd not pinned to selected cores.")
                 include_preset_lines = cfg is not None and bool(cfg.def_preset)
                 base_keys = (
                     "ServerConfig",
@@ -4940,6 +5367,7 @@ def main() -> int:
                     lines.append("device: none")
 
                 target_irqs = collect_target_irqs(selected)
+                mismatched: list[int] = []
                 if target_irqs:
                     for irq in target_irqs:
                         current = _read_irq_affinity(irq)
@@ -4947,6 +5375,92 @@ def main() -> int:
                             lines.append(f"irq[{irq}]: missing")
                         else:
                             lines.append(f"irq[{irq}] affinity: {current}")
+                            try:
+                                from audioknob_gui.core.irq import parse_cpu_list
+
+                                if cores and parse_cpu_list(current) != set(cores):
+                                    mismatched.append(irq)
+                            except Exception:
+                                pass
+                if status == "partial" and mismatched:
+                    lines.append(
+                        f"partial_reason: IRQs not on selected cores: {', '.join(str(i) for i in mismatched)}"
+                    )
+                if status == "partial" and missing:
+                    lines.append("partial_reason: missing devices (selection not found); check device list.")
+                if status == "partial" and cores:
+                    try:
+                        from audioknob_gui.core.irq import list_irqs, parse_cpu_list, read_irq_affinity_list
+
+                        audio_set = set(cores)
+                        sweep_ok = True
+                        for irq in list_irqs():
+                            if irq in target_irqs:
+                                continue
+                            current = read_irq_affinity_list(irq)
+                            if current is None:
+                                continue
+                            if parse_cpu_list(current) & audio_set:
+                                sweep_ok = False
+                                break
+                        if not sweep_ok:
+                            lines.append(
+                                "partial_reason: some non-audio IRQs still target audio cores (housekeeping sweep)."
+                            )
+                    except Exception:
+                        pass
+            elif kind == "rtirq_config":
+                from audioknob_gui.core.rtirq import normalize_rtirq_list, rtirq_block_present
+                from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path
+
+                distro_id = read_os_release().get("ID", "")
+                cfg_path = resolve_rtirq_config_path(distro_id)
+                lines.append(f"rtirq_config: {cfg_path}")
+                name_list = normalize_rtirq_list(params.get("name_list", ["snd", "usb"]))
+                high_list = normalize_rtirq_list(params.get("high_list", name_list))
+                prio_high = int(params.get("prio_high", 90))
+                prio_decr = int(params.get("prio_decr", 5))
+                cfg_ok = False
+                try:
+                    content = Path(cfg_path).read_text(encoding="utf-8")
+                    cfg_ok = rtirq_block_present(
+                        content,
+                        name_list=name_list,
+                        high_list=high_list,
+                        prio_high=prio_high,
+                        prio_decr=prio_decr,
+                    )
+                except Exception:
+                    cfg_ok = False
+                lines.append(f"rtirq_block: {cfg_ok}")
+                unit = str(params.get("unit", "rtirq.service"))
+                enabled = None
+                active = None
+                try:
+                    enabled = subprocess.run(
+                        ["systemctl", "is-enabled", unit],
+                        capture_output=True,
+                        text=True,
+                    ).stdout.strip() or None
+                except Exception:
+                    enabled = None
+                try:
+                    active = subprocess.run(
+                        ["systemctl", "is-active", unit],
+                        capture_output=True,
+                        text=True,
+                    ).stdout.strip() or None
+                except Exception:
+                    active = None
+                if enabled is not None:
+                    lines.append(f"service_enabled: {enabled}")
+                if active is not None:
+                    lines.append(f"service_active: {active}")
+                if status == "partial":
+                    if cfg_ok and active != "active":
+                        lines.append("partial_reason: config present but rtirq service not active.")
+                    elif not cfg_ok and active == "active":
+                        lines.append("partial_reason: rtirq service active but config block missing.")
             elif kind == "systemd_unit_toggle":
                 unit = str(params.get("unit", ""))
                 if unit:
@@ -4985,6 +5499,15 @@ def main() -> int:
                 path = str(params.get("path", ""))
                 if path:
                     lines.extend(_read_file(path))
+                    if status == "partial":
+                        wanted_lines = [str(x) for x in params.get("lines", [])]
+                        try:
+                            content = Path(path).read_text(encoding="utf-8")
+                            missing = [line for line in wanted_lines if line not in content]
+                        except Exception:
+                            missing = []
+                        if missing:
+                            lines.append(f"partial_reason: missing lines: {', '.join(missing)}")
             elif kind == "sysfs_glob_kv":
                 pattern = str(params.get("glob", ""))
                 if pattern:
@@ -4999,12 +5522,15 @@ def main() -> int:
                 override = self._kernel_cmdline_param_for_state(knob.id)
                 if override:
                     param = override
+                running_has = None
+                boot_has = None
                 if param:
                     try:
                         running = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
                         lines.append(f"/proc/cmdline: {running}")
                         tokens = running.split()
-                        lines.append(f"/proc/cmdline has {param}: {_param_present(tokens, param)}")
+                        running_has = _param_present(tokens, param)
+                        lines.append(f"/proc/cmdline has {param}: {running_has}")
                     except Exception as e:
                         lines.append(f"/proc/cmdline read error: {e}")
                     try:
@@ -5028,9 +5554,17 @@ def main() -> int:
                                             tokens = rhs.split()
                                         in_boot = _param_present(tokens, param)
                                         break
+                            boot_has = in_boot
                             lines.append(f"{boot_path} has {param}: {in_boot}")
                     except Exception as e:
                         lines.append(f"boot config read error: {e}")
+                if status == "partial" and param and running_has is not None and boot_has is not None:
+                    if boot_has and not running_has:
+                        lines.append("partial_reason: boot config set but reboot not applied yet.")
+                    elif running_has and not boot_has:
+                        lines.append("partial_reason: running kernel has param but boot config missing.")
+                    else:
+                        lines.append("partial_reason: running/boot config mismatch; verify bootloader updates.")
             elif kind == "udev_rule":
                 path = str(params.get("path", ""))
                 if path:
@@ -5045,6 +5579,15 @@ def main() -> int:
                 path = str(params.get("path", ""))
                 if path:
                     lines.extend(_read_file(path))
+                    if status == "partial":
+                        wanted_lines = [str(x) for x in params.get("lines", [])]
+                        try:
+                            content = Path(path).read_text(encoding="utf-8")
+                            missing = [line for line in wanted_lines if line not in content]
+                        except Exception:
+                            missing = []
+                        if missing:
+                            lines.append(f"partial_reason: missing lines: {', '.join(missing)}")
                 try:
                     import resource
                     rt_soft, rt_hard = resource.getrlimit(resource.RLIMIT_RTPRIO)

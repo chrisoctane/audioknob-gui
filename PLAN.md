@@ -141,8 +141,9 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.
 - **Auto housekeeping** inverts the selected audio cores to derive IRQ housekeeping cores; manual mode uses the IRQ housekeeping core selection.
-- Auto-set updates knob configuration only; apply the relevant knobs to make changes.
+- Auto-set updates core selections and queues Apply for affected knobs, so the global Apply button can be used.
 - **IRQ Overview** shows a core map (housekeeping vs audio cores) and a live list of IRQ affinity assignments.
+- **Capture Baseline...** and **Import Baseline...** allow saving/loading baseline snapshots for Sys Default/Deviated labeling.
 
 ### Logs (what the app did and where it failed)
 
@@ -170,6 +171,16 @@ pkexec so root-only knobs are included. This baseline is used to label knobs as
 **Sys Default** when the current state matches the initial state. A **Re-check State**
 button in the header re-runs current status checks for development/testing. Apply/reset
 actions are disabled until baseline capture completes.
+
+In the **Advanced** tab, you can manage baselines manually:
+- **Capture Baseline...** snapshots the current system and saves a JSON file.
+- **Import Baseline...** loads a baseline JSON and overwrites the current baseline (no system changes).
+
+### Info vs Status panels
+
+- **Info** uses a simple tag format: `[i]` summary, `[r]` requirements, `[+]` benefits, `[-]` tradeoffs.
+- **Status/Check** shows live technical details; when status is **partial**, it includes a short reason line and raw checks below.
+- Status column states include short tooltips (baseline, deviated, applied, partial, reboot required, etc.).
 
 ---
 
