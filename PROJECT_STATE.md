@@ -118,6 +118,7 @@ Notes:
 - Baseline labeling no longer overrides `partial` statuses.
 - CPU governor status includes cpupower config/service details for persistence checks.
 - Status/Check now includes unit names, group gaps, udev rule matches, PipeWire runtime state, and last jitter test summary.
+- Restoring CPU governor effects now resolves systemd restores via the worker ops module to avoid UnboundLocalError.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

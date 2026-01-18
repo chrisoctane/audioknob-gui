@@ -34,9 +34,9 @@ from audioknob_gui.worker.ops import (
     preview,
     restore_irq_affinity,
     restore_sysfs,
-    systemd_restore,
     resolve_user_services,
 )
+import audioknob_gui.worker.ops as worker_ops
 
 
 def _setup_worker_logging() -> logging.Logger:
@@ -1357,7 +1357,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
 
         restore_sysfs(sysfs)
         for e in systemd:
-            systemd_restore(e)
+            worker_ops.systemd_restore(e)
         restore_irq_affinity(irq_affinity)
         power_errors: list[str] = []
         _restore_power_profile_effects(effects, power_errors)
@@ -1562,7 +1562,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             try:
                 restore_sysfs(sysfs)
                 for e in systemd:
-                    systemd_restore(e)
+                    worker_ops.systemd_restore(e)
                 restore_irq_affinity(irq_affinity)
                 power_errors: list[str] = []
                 power_restored = _restore_power_profile_effects(effects, power_errors)
@@ -2314,7 +2314,7 @@ def _restore_knob_once(knob_id: str) -> dict:
         try:
             for e in effects:
                 if e.get("kind") == "systemd_unit_toggle":
-                    systemd_restore(e)
+                    worker_ops.systemd_restore(e)
             if any(e.get("kind") == "systemd_unit_toggle" for e in effects):
                 restored.append("(systemd effects)")
         except Exception as exc:
@@ -2363,7 +2363,7 @@ def _restore_knob_once(knob_id: str) -> dict:
         try:
             restore_sysfs(sysfs)
             for e in systemd:
-                systemd_restore(e)
+                worker_ops.systemd_restore(e)
             restore_irq_affinity(irq_affinity)
             power_errors: list[str] = []
             power_restored = _restore_power_profile_effects(effects, power_errors)
