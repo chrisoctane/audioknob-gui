@@ -40,6 +40,8 @@
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
+- **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
+- **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 
@@ -51,6 +53,7 @@ Columns: Info | Knob | Action | Config | Requirements | Status | Check | Categor
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
 - Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview and baseline capture/import.
+- The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Requirements" shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
@@ -111,6 +114,9 @@ Notes:
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
+- Sysctl status checks now resolve the `sysctl` command path even when GUI PATH omits sbin.
+- Baseline labeling no longer overrides `partial` statuses.
+- CPU governor status includes cpupower config/service details for persistence checks.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

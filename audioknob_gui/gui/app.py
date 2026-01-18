@@ -444,6 +444,7 @@ def load_state() -> dict:
         "irq_pinning_devices": [],  # list[str]
         "irq_pinning_cpu_cores": None,  # list[int] or None
         "audio_core_plan_count": 4,  # int
+        "audio_core_plan_expanded": True,  # bool
         "view_tab": "all",  # str
         "advanced_mode_enabled": False,  # bool
         "pipewire_quantum": None,  # int (32..1024) or None
@@ -488,6 +489,8 @@ def load_state() -> dict:
             data["irq_pinning_cpu_cores"] = None
         if "audio_core_plan_count" not in data:
             data["audio_core_plan_count"] = 4
+        if "audio_core_plan_expanded" not in data:
+            data["audio_core_plan_expanded"] = True
         if "view_tab" not in data:
             data["view_tab"] = "all"
         if "advanced_mode_enabled" not in data:
@@ -645,6 +648,7 @@ def main() -> int:
             QTableWidgetItem,
             QTabBar,
             QTextEdit,
+            QToolButton,
             QVBoxLayout,
             QWidget,
         )
@@ -1191,12 +1195,30 @@ def main() -> int:
             from audioknob_gui.platform.detect import get_cpu_count
 
             cpu_count = get_cpu_count()
-            panel = QGroupBox("Audio Core Plan")
+            panel = QWidget()
             root = QVBoxLayout(panel)
+            root.setContentsMargins(0, 0, 0, 0)
+
+            expanded = bool(self.state.get("audio_core_plan_expanded", True))
+            header_row = QHBoxLayout()
+            self.core_plan_toggle = QToolButton()
+            self.core_plan_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.core_plan_toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+            self.core_plan_toggle.setText("Audio Core Plan")
+            self.core_plan_toggle.setCheckable(True)
+            self.core_plan_toggle.setChecked(expanded)
+            self.core_plan_toggle.setAutoRaise(True)
+            self.core_plan_toggle.toggled.connect(self._on_core_plan_toggle)
+            header_row.addWidget(self.core_plan_toggle)
+            header_row.addStretch(1)
+            root.addLayout(header_row)
+
+            self.core_plan_body = QWidget()
+            body = QVBoxLayout(self.core_plan_body)
 
             hint = QLabel("Auto-set chooses audio cores and updates per-knob core selections. Apply knobs to take effect.")
             hint.setWordWrap(True)
-            root.addWidget(hint)
+            body.addWidget(hint)
 
             row = QHBoxLayout()
             row.addWidget(QLabel("Audio cores"))
@@ -1209,7 +1231,7 @@ def main() -> int:
             self.btn_core_plan_auto.clicked.connect(self._on_core_plan_auto)
             row.addWidget(self.btn_core_plan_auto)
             row.addStretch(1)
-            root.addLayout(row)
+            body.addLayout(row)
 
             self.core_plan_auto_housekeeping = QCheckBox("Auto housekeeping (invert audio cores)")
             self.core_plan_auto_housekeeping.setChecked(bool(self.state.get("irq_housekeeping_auto", True)))
@@ -1217,18 +1239,18 @@ def main() -> int:
                 "Use IRQ Pinning audio cores to invert the housekeeping set for irqaffinity."
             )
             self.core_plan_auto_housekeeping.toggled.connect(self._on_housekeeping_auto_toggled)
-            root.addWidget(self.core_plan_auto_housekeeping)
+            body.addWidget(self.core_plan_auto_housekeeping)
 
             self.core_plan_summary = QLabel("")
             self.core_plan_summary.setWordWrap(True)
-            root.addWidget(self.core_plan_summary)
+            body.addWidget(self.core_plan_summary)
 
             btn_row = QHBoxLayout()
             self.btn_irq_overview = QPushButton("IRQ Overview")
             self.btn_irq_overview.clicked.connect(self._show_irq_overview)
             btn_row.addWidget(self.btn_irq_overview)
             btn_row.addStretch(1)
-            root.addLayout(btn_row)
+            body.addLayout(btn_row)
 
             baseline_row = QHBoxLayout()
             self.btn_baseline_capture = QPushButton("Capture Baseline...")
@@ -1240,9 +1262,20 @@ def main() -> int:
             self.btn_baseline_import.clicked.connect(self._on_import_baseline)
             baseline_row.addWidget(self.btn_baseline_import)
             baseline_row.addStretch(1)
-            root.addLayout(baseline_row)
+            body.addLayout(baseline_row)
+
+            self.core_plan_body.setVisible(expanded)
+            root.addWidget(self.core_plan_body)
 
             return panel
+
+        def _on_core_plan_toggle(self, expanded: bool) -> None:
+            self.state["audio_core_plan_expanded"] = bool(expanded)
+            save_state(self.state)
+            if hasattr(self, "core_plan_body"):
+                self.core_plan_body.setVisible(expanded)
+            if hasattr(self, "core_plan_toggle"):
+                self.core_plan_toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
 
         def _on_core_plan_count_changed(self, value: int) -> None:
             self.state["audio_core_plan_count"] = int(value)
@@ -2821,7 +2854,7 @@ def main() -> int:
             )
             for knob in self.registry:
                 current = self._knob_statuses.get(knob.id)
-                if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable"):
+                if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable", "partial"):
                     continue
                 if not manual_baseline and root_tx_unknown and knob.requires_root:
                     continue
@@ -5594,6 +5627,56 @@ def main() -> int:
                         lines.append("partial_reason: config present but rtirq service not active.")
                     elif not cfg_ok and active == "active":
                         lines.append("partial_reason: rtirq service active but config block missing.")
+            elif kind == "power_profile":
+                try:
+                    from audioknob_gui.worker.ops import read_power_profile, select_power_profile_backend
+                except Exception:
+                    read_power_profile = None
+                    select_power_profile_backend = None
+                pref = self._power_profile_backend_from_state()
+                params_local = dict(params)
+                params_local["backend"] = pref
+                lines.append("")
+                lines.append(f"backend_preference: {pref}")
+                backend = select_power_profile_backend(params_local) if select_power_profile_backend else None
+                if not backend:
+                    lines.append("resolved_backend: none")
+                    lines.append("note: powerprofilesctl or tuned-adm required")
+                else:
+                    lines.append(f"resolved_backend: {backend.get('backend')}")
+                    cmd = backend.get("cmd") or ""
+                    if cmd:
+                        lines.append(f"cmd: {cmd}")
+                    unit = backend.get("service")
+                    if unit:
+                        try:
+                            r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
+                            lines.append(f"service_active: {r.stdout.strip() or r.stderr.strip()}")
+                        except Exception:
+                            pass
+                    if read_power_profile:
+                        current = read_power_profile(backend["backend"], backend["cmd"])
+                        if backend["backend"] == "powerprofilesctl":
+                            target = str(params.get("ppd_profile", "performance")).strip() or "performance"
+                        else:
+                            target = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
+                        lines.append(f"current: {current or 'unknown'}")
+                        lines.append(f"target: {target}")
+                    try:
+                        if backend["backend"] == "powerprofilesctl":
+                            r = subprocess.run([backend["cmd"], "list"], capture_output=True, text=True)
+                            output = (r.stdout or r.stderr or "").strip()
+                            if output:
+                                lines.append("available_profiles:")
+                                lines.extend(output.splitlines()[:20])
+                        elif backend["backend"] == "tuned":
+                            r = subprocess.run([backend["cmd"], "list"], capture_output=True, text=True)
+                            output = (r.stdout or r.stderr or "").strip()
+                            if output:
+                                lines.append("available_profiles:")
+                                lines.extend(output.splitlines()[:20])
+                    except Exception:
+                        pass
             elif kind == "systemd_unit_toggle":
                 unit = str(params.get("unit", ""))
                 if unit:
@@ -5641,15 +5724,101 @@ def main() -> int:
                             missing = []
                         if missing:
                             lines.append(f"partial_reason: missing lines: {', '.join(missing)}")
+                keys: list[str] = []
+                expected: dict[str, str] = {}
+                for line in params.get("lines", []) or []:
+                    raw = str(line).strip()
+                    if not raw or raw.startswith("#") or "=" not in raw:
+                        continue
+                    key, _, value = raw.partition("=")
+                    key = key.strip()
+                    value = value.strip()
+                    if key and key not in keys:
+                        keys.append(key)
+                        expected[key] = value
+                if keys:
+                    try:
+                        from audioknob_gui.platform.packages import which_command
+                    except Exception:
+                        which_command = None
+                    sysctl_cmd = None
+                    if which_command:
+                        sysctl_cmd = which_command("sysctl")
+                    if not sysctl_cmd:
+                        sysctl_cmd = shutil.which("sysctl") or "sysctl"
+                    for key in keys:
+                        try:
+                            r = subprocess.run([sysctl_cmd, "-n", key], capture_output=True, text=True)
+                            current = r.stdout.strip() or r.stderr.strip() or "unknown"
+                        except Exception as e:
+                            current = f"error: {e}"
+                        exp = expected.get(key)
+                        if exp is not None:
+                            lines.append(f"sysctl {key}: {current} (expected: {exp})")
+                        else:
+                            lines.append(f"sysctl {key}: {current}")
             elif kind == "sysfs_glob_kv":
                 pattern = str(params.get("glob", ""))
                 if pattern:
-                    for p in sorted(glob.glob(pattern))[:8]:
+                    paths = sorted(glob.glob(pattern))
+                    expected_val = str(params.get("value", "")).strip()
+                    total = len(paths)
+                    match = 0
+                    unreadable = 0
+                    for p in paths:
+                        try:
+                            val = Path(p).read_text(encoding="utf-8").strip()
+                            if expected_val and val == expected_val:
+                                match += 1
+                        except Exception:
+                            unreadable += 1
+                    mismatch = max(0, total - match - unreadable)
+                    if expected_val:
+                        lines.append(
+                            f"sysfs_summary: total={total} match={match} mismatch={mismatch} unreadable={unreadable} "
+                            f"(expected: {expected_val})"
+                        )
+                    else:
+                        lines.append(
+                            f"sysfs_summary: total={total} unreadable={unreadable}"
+                        )
+                    for p in paths[:8]:
                         try:
                             val = Path(p).read_text(encoding="utf-8").strip()
                             lines.append(f"{p}: {val}")
                         except Exception as e:
                             lines.append(f"{p}: unreadable: {e}")
+                    if knob.id == "cpu_governor_performance_persistent":
+                        try:
+                            from audioknob_gui.worker.ops import (
+                                read_os_release,
+                                resolve_cpupower_config_path,
+                                resolve_cpu_governor_service,
+                            )
+                            os_release = read_os_release()
+                            distro_id = os_release.get("ID", "")
+                            cfg_path = resolve_cpupower_config_path(distro_id)
+                            lines.append(f"cpupower_config: {cfg_path}")
+                            try:
+                                cfg_text = Path(cfg_path).read_text(encoding="utf-8")
+                            except Exception as e:
+                                cfg_text = None
+                                lines.append(f"cpupower_config_read_error: {e}")
+                            if cfg_text:
+                                for line in cfg_text.splitlines():
+                                    if "GOVERNOR" in line:
+                                        lines.append(f"cpupower_config_governor: {line.strip()}")
+                                        break
+                            service = resolve_cpu_governor_service(distro_id)
+                            if service:
+                                for label, cmd in (
+                                    ("service_enabled", ["systemctl", "is-enabled", service]),
+                                    ("service_active", ["systemctl", "is-active", service]),
+                                ):
+                                    r = subprocess.run(cmd, capture_output=True, text=True)
+                                    lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                        except Exception:
+                            pass
             elif kind == "kernel_cmdline":
                 param = str(params.get("param", ""))
                 override = self._kernel_cmdline_param_for_state(knob.id)
