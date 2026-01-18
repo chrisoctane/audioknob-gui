@@ -146,7 +146,7 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 - **Auto housekeeping** inverts the selected audio cores to derive IRQ housekeeping cores; manual mode uses the IRQ housekeeping core selection.
 - Auto-set updates core selections and queues Apply for affected knobs, so the global Apply button can be used.
 - **IRQ Overview** shows a core map (housekeeping vs audio cores) and a live list of IRQ affinity assignments.
-- **Capture Baseline...** and **Import Baseline...** allow saving/loading baseline snapshots for Sys Default/Deviated labeling.
+- Use the **Baseline** menu in the header to **Capture**, **Import**, or **Export** baseline snapshots for Sys Default/Deviated labeling.
 
 ### Logs (what the app did and where it failed)
 
@@ -175,9 +175,10 @@ pkexec so root-only knobs are included. This baseline is used to label knobs as
 button in the header re-runs current status checks for development/testing. Apply/reset
 actions are disabled until baseline capture completes.
 
-In the **Advanced** tab, you can manage baselines manually:
+Use the **Baseline** menu in the header to manage baselines:
 - **Capture Baseline...** snapshots the current system and saves a JSON file.
 - **Import Baseline...** loads a baseline JSON and overwrites the current baseline (no system changes).
+- **Export Baseline...** saves the currently stored baseline snapshot to a JSON file.
 
 ### Info vs Status panels
 

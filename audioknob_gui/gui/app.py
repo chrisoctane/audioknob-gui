@@ -638,6 +638,7 @@ def main() -> int:
             QHeaderView,
             QLabel,
             QMainWindow,
+            QMenu,
             QMessageBox,
             QPushButton,
             QScrollArea,
@@ -1051,6 +1052,19 @@ def main() -> int:
             self.btn_logs.clicked.connect(self._on_show_logs)
             top.addWidget(self.btn_logs)
 
+            self.btn_baseline_menu = QToolButton()
+            self.btn_baseline_menu.setText("Baseline")
+            self.btn_baseline_menu.setPopupMode(QToolButton.InstantPopup)
+            baseline_menu = QMenu(self.btn_baseline_menu)
+            self.act_baseline_capture = baseline_menu.addAction("Capture Baseline...")
+            self.act_baseline_import = baseline_menu.addAction("Import Baseline...")
+            self.act_baseline_export = baseline_menu.addAction("Export Baseline...")
+            self.act_baseline_capture.triggered.connect(self._on_capture_baseline)
+            self.act_baseline_import.triggered.connect(self._on_import_baseline)
+            self.act_baseline_export.triggered.connect(self._on_export_baseline)
+            self.btn_baseline_menu.setMenu(baseline_menu)
+            top.addWidget(self.btn_baseline_menu)
+
             self.btn_tx_history = QPushButton("Tx History")
             self.btn_tx_history.setToolTip("View transactions (txid) and restore")
             self.btn_tx_history.clicked.connect(self._on_show_tx_history)
@@ -1251,18 +1265,6 @@ def main() -> int:
             btn_row.addWidget(self.btn_irq_overview)
             btn_row.addStretch(1)
             body.addLayout(btn_row)
-
-            baseline_row = QHBoxLayout()
-            self.btn_baseline_capture = QPushButton("Capture Baseline...")
-            self.btn_baseline_capture.setToolTip("Capture current system as baseline and save to a file")
-            self.btn_baseline_capture.clicked.connect(self._on_capture_baseline)
-            baseline_row.addWidget(self.btn_baseline_capture)
-            self.btn_baseline_import = QPushButton("Import Baseline...")
-            self.btn_baseline_import.setToolTip("Import a baseline snapshot file (no system changes)")
-            self.btn_baseline_import.clicked.connect(self._on_import_baseline)
-            baseline_row.addWidget(self.btn_baseline_import)
-            baseline_row.addStretch(1)
-            body.addLayout(baseline_row)
 
             self.core_plan_body.setVisible(expanded)
             root.addWidget(self.core_plan_body)
@@ -1720,6 +1722,8 @@ def main() -> int:
                 return "groups"
 
             if kind == "user_service_mask":
+                if k.id == "disable_tracker":
+                    return "tracker"
                 services = params.get("services")
                 if isinstance(services, list):
                     items = [str(s) for s in services if s]
@@ -2406,10 +2410,13 @@ def main() -> int:
             return self.state.get("baseline_source") in ("capture", "import")
 
         def _set_baseline_buttons_enabled(self, enabled: bool) -> None:
-            for name in ("btn_baseline_capture", "btn_baseline_import"):
-                btn = getattr(self, name, None)
-                if isinstance(btn, QPushButton):
-                    btn.setEnabled(enabled)
+            btn = getattr(self, "btn_baseline_menu", None)
+            if isinstance(btn, QToolButton):
+                btn.setEnabled(enabled)
+            for name in ("act_baseline_capture", "act_baseline_import", "act_baseline_export"):
+                action = getattr(self, name, None)
+                if action is not None:
+                    action.setEnabled(enabled)
 
         def _set_baseline_state(
             self,
@@ -2680,6 +2687,27 @@ def main() -> int:
                 source="import",
             )
             QMessageBox.information(self, "Baseline", "Baseline imported.")
+
+        def _on_export_baseline(self) -> None:
+            if self._baseline_busy:
+                return
+            if not self._baseline_available():
+                QMessageBox.information(self, "Baseline", "No baseline captured yet.")
+                return
+            default_name = str(Path.home() / "audioknob-baseline.json")
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Baseline Snapshot",
+                default_name,
+                "JSON Files (*.json)",
+            )
+            if not path:
+                return
+            if not path.lower().endswith(".json"):
+                path = path + ".json"
+            snapshot = self._baseline_snapshot()
+            if self._write_baseline_snapshot(path, snapshot):
+                QMessageBox.information(self, "Baseline", f"Baseline exported to:\n{path}")
 
         def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
             if not isinstance(raw, dict):

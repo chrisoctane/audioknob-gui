@@ -27,7 +27,7 @@
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Reset All** - reverts all changes to system defaults
 - **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
-- **Baseline capture/import** - Advanced tab buttons to snapshot baseline to JSON or import a baseline file (no system changes)
+- **Baseline capture/import/export** - Header Baseline menu to snapshot baseline to JSON, import a baseline file, or export the current baseline (no system changes)
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
@@ -52,7 +52,7 @@ Columns: Info | Knob | Action | Config | Requirements | Status | Check | Categor
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
-- Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview and baseline capture/import.
+- Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview. Baseline capture/import/export live in the header Baseline menu.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
