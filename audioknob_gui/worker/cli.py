@@ -2283,7 +2283,7 @@ def _restore_knob_once(knob_id: str) -> dict:
 
     if knob and knob.impl and knob.impl.kind == "rtirq_config":
         from audioknob_gui.core.rtirq import strip_rtirq_block
-        from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path, systemd_restore
+        from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path
 
         distro_id = read_os_release().get("ID", "")
         cfg_path = resolve_rtirq_config_path(distro_id)
