@@ -298,7 +298,7 @@ In `gui/app.py` → `_populate()`:
 
 **Columns**: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | CLI
 
-**Advanced mode**: Single table; advanced knobs are gated by the "Enable advanced knobs" checkbox.
+**Advanced mode**: Single table; advanced knobs are gated by the "Advanced knobs" checkbox.
 
 **Sorting**: Click any column header to sort. Category/Requirements/Status/Risk sorts show grouped headers; other columns sort as a flat list.
 
@@ -328,7 +328,7 @@ Apply/Reset runs in the background; the status column shows “⏳ Updating” a
 Apply and Reset now queue the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot. "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 Group join/leave actions remain immediate because they require explicit confirmation.
 If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (for both single and queued resets). Force reset is supported where defaults can be inferred or safely removed: `systemd_unit_toggle`, `kernel_cmdline`, `sysfs_glob_kv` (only when sysfs exposes a bracketed default), `pam_limits_audio_group`, `sysctl_conf`, `udev_rule` (only if file matches audioknob content), `pipewire_conf` (only if file has audioknob header), `user_service_mask`, and `baloo_disable`.
-Reboot-required knobs are disabled until the user enables the "Enable reboot-required changes" toggle.
+Reboot-required knobs are disabled until the user enables the "Reboot-required changes" toggle.
 Knobs requiring audio groups stay locked while group membership is pending reboot.
 
 ### Read-only info

@@ -35,7 +35,7 @@
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
-- **Baseline management** - Audio Core Plan includes Capture Baseline/Import Baseline buttons for baseline snapshots
+- **Baseline management** - header Baseline menu supports capture/import/export of baseline snapshots (no system changes on import/export)
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
@@ -51,7 +51,7 @@ Columns: Info | Knob | Action | Config | Requirements | Status | Check | Categor
          (0)  (1)    (2)      (3)      (4)           (5)     (6)    (7)       (8)    (9)
 
 Notes:
-- Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Enable advanced knobs" toggle in the header.
+- Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
 - Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview. Baseline capture/import/export live in the header Baseline menu.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.

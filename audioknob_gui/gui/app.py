@@ -987,6 +987,7 @@ def main() -> int:
             # Header
             top = QHBoxLayout()
             self.header_layout = top
+            top.setSpacing(6)
             self.font_label = QLabel("Font:")
             top.addWidget(self.font_label)
             self.font_spinner = QSpinBox()
@@ -995,7 +996,7 @@ def main() -> int:
             self.font_spinner.setToolTip("Adjust font size")
             self.font_spinner.valueChanged.connect(self._on_font_change)
             top.addWidget(self.font_spinner)
-            top.addStretch(1)
+            top.addSpacing(12)
 
             # Global reboot-required banner (shown when any knob is pending reboot).
             self.reboot_banner = QLabel("")
@@ -1003,17 +1004,19 @@ def main() -> int:
             self.reboot_banner.setWordWrap(True)
             self.reboot_banner.setVisible(False)
 
-            self.reboot_toggle = QCheckBox("Enable reboot-required changes")
+            self.reboot_toggle = QCheckBox("Reboot-required changes")
             self.reboot_toggle.setChecked(bool(self.state.get("enable_reboot_knobs", False)))
             self.reboot_toggle.setToolTip("Unlock knobs that require a reboot/log-out to take effect")
             self.reboot_toggle.toggled.connect(self._on_reboot_toggle)
             top.addWidget(self.reboot_toggle)
 
-            self.advanced_toggle = QCheckBox("Enable advanced knobs")
+            self.advanced_toggle = QCheckBox("Advanced knobs")
             self.advanced_toggle.setChecked(bool(self.state.get("advanced_mode_enabled", False)))
             self.advanced_toggle.setToolTip("Unlock advanced knobs that can impact system performance")
             self.advanced_toggle.toggled.connect(self._on_advanced_mode_toggle)
             top.addWidget(self.advanced_toggle)
+
+            top.addStretch(1)
 
             self.queue_label = QLabel("")
             self.queue_label.setToolTip("Queued changes waiting to apply")
@@ -1041,6 +1044,7 @@ def main() -> int:
             self.reboot_button.clicked.connect(self._on_reboot_now)
             self.reboot_button.setVisible(False)
             top.addWidget(self.reboot_button)
+            top.addSpacing(8)
 
             self.btn_recheck = QPushButton("Re-check State")
             self.btn_recheck.setToolTip("Re-scan current system state")
@@ -1052,9 +1056,9 @@ def main() -> int:
             self.btn_logs.clicked.connect(self._on_show_logs)
             top.addWidget(self.btn_logs)
 
-            self.btn_baseline_menu = QToolButton()
+            self.btn_baseline_menu = QPushButton("Baseline")
             self.btn_baseline_menu.setText("Baseline")
-            self.btn_baseline_menu.setPopupMode(QToolButton.InstantPopup)
+            self.btn_baseline_menu.setToolTip("Capture, import, or export baseline snapshots")
             baseline_menu = QMenu(self.btn_baseline_menu)
             self.act_baseline_capture = baseline_menu.addAction("Capture Baseline...")
             self.act_baseline_import = baseline_menu.addAction("Import Baseline...")
@@ -1079,7 +1083,7 @@ def main() -> int:
 
             advanced_note = QLabel(
                 "Advanced settings can reduce performance in intensive workloads. "
-                "Enable advanced knobs to make changes; reboot may be required."
+                "Use the Advanced knobs toggle to make changes; reboot may be required."
             )
             advanced_note.setWordWrap(True)
             root.addWidget(advanced_note)
@@ -1873,13 +1877,13 @@ def main() -> int:
             if group_pending:
                 return False, f"Groups pending reboot: {', '.join(k.requires_groups)}"
             if reboot_dep_lock:
-                return False, f"Requires groups: {', '.join(k.requires_groups)} (enable reboot-required changes)"
+                return False, f"Requires groups: {', '.join(k.requires_groups)} (Turn on Reboot-required changes)"
             if not group_ok:
                 return False, f"Join groups: {', '.join(k.requires_groups)}"
             if reboot_gate_lock:
                 return False, f"Reboot required: {k.title}"
             if advanced_gate_lock:
-                return False, "Enable advanced knobs"
+                return False, "Turn on Advanced knobs"
             if not commands_ok:
                 missing = self._knob_missing_commands(k)
                 return False, f"Install: {', '.join(missing)}" if missing else "Missing commands"
@@ -3380,13 +3384,13 @@ def main() -> int:
                 if group_pending_lock:
                     lock_reason = f"Groups pending reboot: {', '.join(k.requires_groups)}"
                 elif reboot_dep_lock:
-                    lock_reason = f"Requires groups: {', '.join(k.requires_groups)} (enable reboot-required changes)"
+                    lock_reason = f"Requires groups: {', '.join(k.requires_groups)} (Turn on Reboot-required changes)"
                 elif not group_ok:
                     lock_reason = f"Join groups: {', '.join(k.requires_groups)}"
                 elif reboot_gate_lock:
                     lock_reason = f"Reboot required: {k.title}"
                 elif advanced_gate_lock:
-                    lock_reason = "Enable advanced knobs"
+                    lock_reason = "Turn on Advanced knobs"
                 elif not commands_ok:
                     lock_reason = f"Install: {', '.join(missing_cmds)}"
                 
@@ -3440,10 +3444,10 @@ def main() -> int:
                     status_item = QTableWidgetItem(status_text)
                     status_item.setForeground(QColor(status_color))
                     tooltip_map = {
-                        "applied": "Baseline captured; optimization applied successfully.",
-                        "sys_default": "Baseline captured before optimization.",
-                        "deviated": "Differs from both baseline and expected optimization.",
-                        "partial": "Partially applied; see Status details.",
+                        "applied": "Baseline captured; patch applied successfully.",
+                        "sys_default": "Baseline; captured before optimisation.",
+                        "deviated": "Differs from both baseline and optimisation.",
+                        "partial": "See Status details.",
                         "pending_reboot": "Applied in boot config; reboot required.",
                         "not_applied": "Not applied.",
                         "not_applicable": "Not available on this system.",
