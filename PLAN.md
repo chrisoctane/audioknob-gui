@@ -182,7 +182,7 @@ In the **Advanced** tab, you can manage baselines manually:
 ### Info vs Status panels
 
 - **Info** uses a simple tag format: `[i]` summary, `[r]` requirements, `[+]` benefits, `[-]` tradeoffs.
-- **Status/Check** shows live technical details; when status is **partial**, it includes a short reason line and raw checks below.
+- **Status/Check** shows live technical details (service states, group gaps, sysctl/sysfs values, PipeWire runtime settings, etc.); when status is **partial**, it includes a short reason line and raw checks below.
 - Status column states include short tooltips (baseline, deviated, applied, partial, reboot required, etc.).
 
 ### Conflicts and blockers

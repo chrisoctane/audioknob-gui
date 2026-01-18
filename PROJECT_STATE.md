@@ -117,6 +117,7 @@ Notes:
 - Sysctl status checks now resolve the `sysctl` command path even when GUI PATH omits sbin.
 - Baseline labeling no longer overrides `partial` statuses.
 - CPU governor status includes cpupower config/service details for persistence checks.
+- Status/Check now includes unit names, group gaps, udev rule matches, PipeWire runtime state, and last jitter test summary.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

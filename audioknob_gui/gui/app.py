@@ -5680,6 +5680,7 @@ def main() -> int:
             elif kind == "systemd_unit_toggle":
                 unit = str(params.get("unit", ""))
                 if unit:
+                    lines.append(f"unit: {unit}")
                     for label, cmd in (
                         ("is-enabled", ["systemctl", "is-enabled", unit]),
                         ("is-active", ["systemctl", "is-active", unit]),
@@ -5692,6 +5693,8 @@ def main() -> int:
                     from audioknob_gui.worker.ops import resolve_user_services
 
                     resolved = resolve_user_services([str(s) for s in services if s])
+                    if resolved:
+                        lines.append(f"user_services: {', '.join(resolved)}")
                     if not resolved:
                         lines.append("user units: [no matches]")
                     for svc in resolved:
@@ -5705,6 +5708,7 @@ def main() -> int:
                 else:
                     unit = str(params.get("unit", ""))
                     if unit:
+                        lines.append(f"user_services: {unit}")
                         for label, cmd in (
                             ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
                             ("user is-active", ["systemctl", "--user", "is-active", unit]),
@@ -5871,12 +5875,68 @@ def main() -> int:
                 path = str(params.get("path", ""))
                 if path:
                     lines.extend(_read_file(path))
+                    expected = str(params.get("content", "")).strip()
+                    if expected:
+                        try:
+                            current = Path(path).read_text(encoding="utf-8")
+                            present = expected in current
+                        except Exception:
+                            present = False
+                        lines.append(f"expected_rule_present: {present}")
             elif kind == "pipewire_conf":
                 path = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
                 lines.extend(_read_file(path))
+                try:
+                    for label, cmd in (
+                        ("pipewire_active", ["systemctl", "--user", "is-active", "pipewire"]),
+                        ("wireplumber_active", ["systemctl", "--user", "is-active", "wireplumber"]),
+                        ("pipewire_pulse_active", ["systemctl", "--user", "is-active", "pipewire-pulse"]),
+                    ):
+                        r = subprocess.run(cmd, capture_output=True, text=True)
+                        lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                except Exception:
+                    pass
+                try:
+                    if shutil.which("pw-metadata"):
+                        r = subprocess.run(
+                            ["pw-metadata", "-n", "settings", "0"],
+                            capture_output=True,
+                            text=True,
+                            timeout=2,
+                        )
+                        output = (r.stdout or r.stderr or "").strip()
+                        if output:
+                            clock_rate = None
+                            clock_quantum = None
+                            for line in output.splitlines():
+                                if "clock.rate" in line:
+                                    match = re.search(r"clock\\.rate\\s*=\\s*(\\d+)", line)
+                                    if match:
+                                        clock_rate = match.group(1)
+                                if "clock.quantum" in line:
+                                    match = re.search(r"clock\\.quantum\\s*=\\s*(\\d+)", line)
+                                    if match:
+                                        clock_quantum = match.group(1)
+                            if clock_rate or clock_quantum:
+                                lines.append(
+                                    f"pipewire_runtime: rate={clock_rate or 'unknown'} "
+                                    f"quantum={clock_quantum or 'unknown'}"
+                                )
+                except Exception:
+                    pass
             elif kind == "group_membership":
                 r = subprocess.run(["id"], capture_output=True, text=True)
                 lines.append(f"id: {r.stdout.strip()}")
+                try:
+                    from audioknob_gui.platform.detect import get_missing_groups
+
+                    missing = get_missing_groups()
+                    if missing:
+                        lines.append(f"missing_groups: {', '.join(missing)}")
+                    else:
+                        lines.append("missing_groups: none")
+                except Exception:
+                    pass
             elif kind == "pam_limits_audio_group":
                 path = str(params.get("path", ""))
                 if path:
@@ -5900,11 +5960,26 @@ def main() -> int:
                     lines.append(f"limits read error: {e}")
             elif kind == "baloo_disable":
                 cmd = "balooctl6" if shutil.which("balooctl6") else "balooctl"
+                lines.append(f"command: {cmd}")
                 if shutil.which(cmd):
                     r = subprocess.run([cmd, "status"], capture_output=True, text=True)
                     lines.append(r.stdout.strip() or r.stderr.strip())
                 else:
                     lines.append("balooctl not found")
+            elif kind == "read_only":
+                what = str(params.get("what", "")).strip()
+                if what:
+                    lines.append(f"read_only: {what}")
+                if knob.id == "scheduler_jitter_test":
+                    last = self.state.get("jitter_test_last")
+                    if isinstance(last, dict):
+                        max_us = last.get("max_us")
+                        threads = last.get("threads")
+                        lines.append("last_jitter_test:")
+                        if isinstance(max_us, int):
+                            lines.append(f"  max_us: {max_us}")
+                        if isinstance(threads, list):
+                            lines.append(f"  threads: {len(threads)}")
 
             return lines
 
