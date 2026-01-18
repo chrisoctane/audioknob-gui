@@ -3359,9 +3359,9 @@ def main() -> int:
                 locked_bg = QColor("#1f1f1f")
                 locked_fg = QColor("#7a7a7a")
                 locked_style = (
-                    "QPushButton { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
-                    "QPushButton:hover { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
-                    "QPushButton:pressed { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                    "QPushButton { background-color: transparent; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                    "QPushButton:hover { background-color: transparent; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                    "QPushButton:pressed { background-color: transparent; color: #7a7a7a; border: 1px solid #2a2a2a; }"
                 )
 
                 # Check requirements
@@ -3471,7 +3471,9 @@ def main() -> int:
                 status_btn.setProperty("status_button", True)
                 status_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 status_btn.setCursor(Qt.PointingHandCursor)
-                status_btn.setStyleSheet(f"text-align: left; color: {status_color};")
+                status_btn.setStyleSheet(
+                    f"text-align: left; color: {status_color}; background: transparent; border: none;"
+                )
                 if status_tip:
                     status_btn.setToolTip(status_tip)
                 if k.impl and k.impl.kind == "read_only":
@@ -4027,6 +4029,23 @@ def main() -> int:
                 QTableWidget::item:selected {
                     background-color: #46525d;
                     color: #e0e0e0;
+                }
+                QPushButton {
+                    background-color: transparent;
+                    color: #e0e0e0;
+                    border: 1px solid #2a2a2a;
+                    padding: 4px 8px;
+                }
+                QPushButton:hover {
+                    background-color: transparent;
+                }
+                QPushButton:pressed {
+                    background-color: transparent;
+                }
+                QPushButton:disabled {
+                    color: #7a7a7a;
+                    background-color: transparent;
+                    border: 1px solid #2a2a2a;
                 }
                 QHeaderView::section {
                     background-color: #1f1f1f;
