@@ -48,8 +48,8 @@
 
 ### GUI Layout
 ```
-Columns: Info | Knob | Action | Config | Requirements | Status | Check | Category | Risk | CLI
-         (0)  (1)    (2)      (3)      (4)           (5)     (6)    (7)       (8)    (9)
+Columns: Info | Knob | Action | Config | Requirements | Status | Category | Risk | CLI
+         (0)  (1)    (2)      (3)      (4)           (5)     (6)       (7)    (8)
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
@@ -58,7 +58,7 @@ Notes:
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Requirements" shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
-- "Check" column shows a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
+- Status column includes a "Status" button that opens the CLI status/preview dialog; read-only tests show N/A.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Requirements/Status/Risk keeps grouped headers; other columns sort flat.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
@@ -946,7 +946,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 10 columns (Info, Knob, Action, Config, Requirements, Status, Check, Category, Risk, CLI). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
+**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Requirements, Status, Category, Risk, CLI). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
 
 **Detection needed:**
 ```python

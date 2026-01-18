@@ -1103,9 +1103,9 @@ def main() -> int:
             root.addWidget(self.cores_panel)
             self._update_cores_panel_visibility()
 
-            self.table = QTableWidget(0, 10)
+            self.table = QTableWidget(0, 9)
             self.table.setHorizontalHeaderLabels(
-                ["Info", "Knob", "Action", "Config", "Requirements", "Status", "Check", "Category", "Risk", "CLI"]
+                ["Info", "Knob", "Action", "Config", "Requirements", "Status", "Category", "Risk", "CLI"]
             )
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(False)
@@ -3148,14 +3148,14 @@ def main() -> int:
                     return (req, k.title.lower())
                 if col == 5:
                     return (status_order.get(status, 99), k.title.lower())
-                if col == 7:
+                if col == 6:
                     return (str(k.category).lower(), k.title.lower())
-                if col == 8:
+                if col == 7:
                     return (risk_order.get(str(k.risk_level), 99), k.title.lower())
-                if col == 9:
+                if col == 8:
                     sys_label = self._sys_label_for_knob(k).lower()
                     return (sys_label, k.title.lower())
-                if col in (0, 1, 2, 3, 6):
+                if col in (0, 1, 2, 3):
                     return (k.title.lower(),)
                 return (status_order.get(status, 99), k.title.lower())
 
@@ -3194,7 +3194,7 @@ def main() -> int:
                     [(c, self._category_label(c)) for c in category_order]
                     + [(c, self._category_label(c)) for c in extra_categories]
                 )
-                if self._sort_column == 7 and self._sort_descending:
+                if self._sort_column == 6 and self._sort_descending:
                     ordered_categories = list(reversed(ordered_categories))
                 for cat_key, cat_label in ordered_categories:
                     items = by_category.get(cat_key, [])
@@ -3431,18 +3431,17 @@ def main() -> int:
                 self.table.setItem(r, 4, req_item)
 
                 # Column 5: Status (with color)
+                status_tip = ""
                 if locked:
-                    status_item = QTableWidgetItem("Locked")
-                    status_item.setForeground(locked_fg)
-                    status_item.setToolTip(lock_reason)
+                    status_text = "Locked"
+                    status_color = locked_fg.name()
+                    status_tip = lock_reason
                 elif not_applicable:
-                    status_item = QTableWidgetItem("N/A")
-                    status_item.setForeground(locked_fg)
-                    status_item.setToolTip(not_applicable_reason)
+                    status_text = "N/A"
+                    status_color = locked_fg.name()
+                    status_tip = not_applicable_reason
                 else:
                     status_text, status_color = self._status_display(display_status)
-                    status_item = QTableWidgetItem(status_text)
-                    status_item.setForeground(QColor(status_color))
                     tooltip_map = {
                         "applied": "Baseline captured; patch applied successfully.",
                         "sys_default": "Baseline; captured before optimisation.",
@@ -3458,35 +3457,61 @@ def main() -> int:
                         "error": "Error during operation.",
                     }
                     if display_status.startswith("result:"):
-                        status_item.setToolTip("Test result.")
+                        status_tip = "Test result."
                     else:
-                        tip = tooltip_map.get(display_status)
-                        if tip:
-                            status_item.setToolTip(tip)
+                        status_tip = tooltip_map.get(display_status, "")
+                status_item = QTableWidgetItem("")
+                status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 if row_dim:
                     status_item.setBackground(locked_bg)
                 self.table.setItem(r, 5, status_item)
 
-                # Column 7: Category
+                status_widget = QWidget()
+                status_widget.setProperty("status_widget", True)
+                status_layout = QHBoxLayout(status_widget)
+                status_layout.setContentsMargins(6, 0, 6, 0)
+                status_layout.setSpacing(6)
+                status_label = QLabel(status_text)
+                status_label.setStyleSheet(f"color: {status_color};")
+                if status_tip:
+                    status_label.setToolTip(status_tip)
+                status_layout.addWidget(status_label)
+                status_layout.addStretch(1)
+                if k.impl and k.impl.kind == "read_only":
+                    status_btn = self._make_action_button("N/A")
+                    status_btn.setEnabled(False)
+                    status_btn.setToolTip("Not applicable for read-only tests")
+                    status_btn.setFocusPolicy(Qt.NoFocus)
+                    status_btn.setStyleSheet(locked_style)
+                else:
+                    status_btn = self._make_action_button("Status")
+                    status_btn.setToolTip("Show live CLI status details")
+                    status_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
+                self._install_hover_tracking(status_btn, r)
+                status_layout.addWidget(status_btn)
+                self._install_hover_tracking(status_widget, r)
+                self.table.setCellWidget(r, 5, status_widget)
+
+                # Column 6: Category
                 cat_item = QTableWidgetItem(self._category_label(str(k.category)))
                 if row_dim:
                     cat_item.setForeground(locked_fg)
                     cat_item.setBackground(locked_bg)
-                self.table.setItem(r, 7, cat_item)
+                self.table.setItem(r, 6, cat_item)
 
-                # Column 8: Risk
+                # Column 7: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
                 if row_dim:
                     risk_item.setForeground(locked_fg)
                     risk_item.setBackground(locked_bg)
-                self.table.setItem(r, 8, risk_item)
+                self.table.setItem(r, 7, risk_item)
 
-                # Column 9: CLI
+                # Column 8: CLI
                 sys_item = QTableWidgetItem(self._sys_label_for_knob(k))
                 if row_dim:
                     sys_item.setForeground(locked_fg)
                     sys_item.setBackground(locked_bg)
-                self.table.setItem(r, 9, sys_item)
+                self.table.setItem(r, 8, sys_item)
 
                 # Column 2: Action button (context-sensitive)
                 if k.id == "audio_group_membership":
@@ -3821,24 +3846,15 @@ def main() -> int:
                     if item is not None and item.text() == "":
                         self.table.takeItem(r, 3)
 
-                # Column 6: Status check
-                if k.impl and k.impl.kind == "read_only":
-                    check_btn = self._make_action_button("N/A")
-                    check_btn.setEnabled(False)
-                    check_btn.setToolTip("Not applicable for read-only tests")
-                    check_btn.setFocusPolicy(Qt.NoFocus)
-                    check_btn.setStyleSheet(locked_style)
-                else:
-                    check_btn = self._make_action_button("Status")
-                    check_btn.setToolTip("Show live CLI status details")
-                    check_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
-                self._install_hover_tracking(check_btn, r)
-                self.table.setCellWidget(r, 6, check_btn)
                 if row_dim:
                     config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
                     for col in range(self.table.columnCount()):
                         widget = self.table.cellWidget(r, col)
                         if widget is None:
+                            continue
+                        if widget.property("status_widget"):
+                            for btn in widget.findChildren(QPushButton):
+                                btn.setStyleSheet(locked_style)
                             continue
                         if (
                             k.id == "power_profile_performance"
@@ -3949,15 +3965,12 @@ def main() -> int:
             config_width = max(_w(t, pad=44) for t in config_texts)
             config_width = max(config_width, 128)
 
-            check_texts = ["Check", "Status"]
-            check_width = max(_w(t, pad=40) for t in check_texts)
-            check_width = max(check_width, 96)
+            status_width = max(status_width, _w("Status", pad=60))
 
             self._min_column_widths = {
                 0: 32,
                 2: action_width,
                 3: config_width,
-                6: check_width,
             }
 
             self.table.setColumnWidth(0, 32)  # Info button
@@ -3966,10 +3979,9 @@ def main() -> int:
             self.table.setColumnWidth(3, config_width)
             self.table.setColumnWidth(4, requirements_width)
             self.table.setColumnWidth(5, status_width)
-            self.table.setColumnWidth(6, check_width)
-            self.table.setColumnWidth(7, category_width)
-            self.table.setColumnWidth(8, risk_width)
-            self.table.setColumnWidth(9, sys_width)
+            self.table.setColumnWidth(6, category_width)
+            self.table.setColumnWidth(7, risk_width)
+            self.table.setColumnWidth(8, sys_width)
             self._enforce_min_column_widths()
 
         def _apply_window_constraints(self) -> None:
