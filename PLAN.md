@@ -347,7 +347,7 @@ self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 
 The jitter test stores the most recent per-thread summary (min/median/avg/p95/max) in the knob info dialog, with a "Show Sample List" button for raw values.
 The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
-Use the "Status" button in the Status column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. It also shows the initial baseline snapshot for that knob. Read-only test rows show N/A in this column.
+Click the Status value in the Status column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. It also shows the initial baseline snapshot for that knob. Read-only test rows show N/A in this column.
 The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) to make mixed logs easy to read.
 The GUI log also records high-level action start/finish entries (apply queue, reset all) so successes are visible in-app.
 Force-reset prompts and outcomes are also logged in the GUI log.

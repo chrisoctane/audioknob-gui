@@ -3460,37 +3460,27 @@ def main() -> int:
                         status_tip = "Test result."
                     else:
                         status_tip = tooltip_map.get(display_status, "")
-                status_item = QTableWidgetItem("")
+                status_item = QTableWidgetItem(status_text)
                 status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 if row_dim:
                     status_item.setBackground(locked_bg)
                 self.table.setItem(r, 5, status_item)
-
-                status_widget = QWidget()
-                status_widget.setProperty("status_widget", True)
-                status_layout = QHBoxLayout(status_widget)
-                status_layout.setContentsMargins(6, 0, 6, 0)
-                status_layout.setSpacing(6)
-                status_label = QLabel(status_text)
-                status_label.setStyleSheet(f"color: {status_color};")
+                status_btn = QPushButton(status_text)
+                status_btn.setFocusPolicy(Qt.NoFocus)
+                status_btn.setFlat(True)
+                status_btn.setProperty("status_button", True)
+                status_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                status_btn.setCursor(Qt.PointingHandCursor)
+                status_btn.setStyleSheet(f"text-align: left; color: {status_color};")
                 if status_tip:
-                    status_label.setToolTip(status_tip)
-                status_layout.addWidget(status_label)
-                status_layout.addStretch(1)
+                    status_btn.setToolTip(status_tip)
                 if k.impl and k.impl.kind == "read_only":
-                    status_btn = self._make_action_button("N/A")
                     status_btn.setEnabled(False)
                     status_btn.setToolTip("Not applicable for read-only tests")
-                    status_btn.setFocusPolicy(Qt.NoFocus)
-                    status_btn.setStyleSheet(locked_style)
                 else:
-                    status_btn = self._make_action_button("Status")
-                    status_btn.setToolTip("Show live CLI status details")
                     status_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
                 self._install_hover_tracking(status_btn, r)
-                status_layout.addWidget(status_btn)
-                self._install_hover_tracking(status_widget, r)
-                self.table.setCellWidget(r, 5, status_widget)
+                self.table.setCellWidget(r, 5, status_btn)
 
                 # Column 6: Category
                 cat_item = QTableWidgetItem(self._category_label(str(k.category)))
@@ -3852,9 +3842,10 @@ def main() -> int:
                         widget = self.table.cellWidget(r, col)
                         if widget is None:
                             continue
-                        if widget.property("status_widget"):
-                            for btn in widget.findChildren(QPushButton):
-                                btn.setStyleSheet(locked_style)
+                        if widget.property("status_button"):
+                            widget.setStyleSheet(
+                                f"text-align: left; color: {locked_fg.name()}; background: transparent; border: none;"
+                            )
                             continue
                         if (
                             k.id == "power_profile_performance"
