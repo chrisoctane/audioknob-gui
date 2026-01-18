@@ -3300,7 +3300,7 @@ def main() -> int:
                         self.table.removeCellWidget(r, c)
                     self.table.setSpan(r, 0, 1, self.table.columnCount())
                     header_item = QTableWidgetItem(label)
-                    header_item.setFlags(Qt.ItemIsEnabled)
+                    header_item.setFlags(Qt.NoItemFlags)
                     header_item.setForeground(QColor("#cfcfcf"))
                     header_item.setBackground(header_bg)
                     header_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -3312,7 +3312,7 @@ def main() -> int:
                     self.table.setItem(r, 0, header_item)
                     for c in range(1, self.table.columnCount()):
                         filler = QTableWidgetItem("")
-                        filler.setFlags(Qt.ItemIsEnabled)
+                        filler.setFlags(Qt.NoItemFlags)
                         filler.setBackground(header_bg)
                         self.table.setItem(r, c, filler)
                     continue
@@ -3321,7 +3321,7 @@ def main() -> int:
                     for c in range(self.table.columnCount()):
                         self.table.removeCellWidget(r, c)
                     sep = QTableWidgetItem("")
-                    sep.setFlags(Qt.ItemIsEnabled)
+                    sep.setFlags(Qt.NoItemFlags)
                     sep.setForeground(QColor("#9e9e9e"))
                     sep.setBackground(sep_bg)
                     sep.setTextAlignment(Qt.AlignCenter)
@@ -3329,7 +3329,7 @@ def main() -> int:
                     self.table.setItem(r, 0, sep)
                     for c in range(1, self.table.columnCount()):
                         filler = QTableWidgetItem("")
-                        filler.setFlags(Qt.ItemIsEnabled)
+                        filler.setFlags(Qt.NoItemFlags)
                         filler.setBackground(sep_bg)
                         self.table.setItem(r, c, filler)
                     try:
@@ -4016,6 +4016,10 @@ def main() -> int:
                 }
                 QTableWidget::item:alternate {
                     background-color: #353535;
+                }
+                QTableWidget::item:disabled {
+                    background-color: #1f1f1f;
+                    color: #cfcfcf;
                 }
                 QTableWidget::item:selected {
                     background-color: #46525d;

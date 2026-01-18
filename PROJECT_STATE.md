@@ -112,6 +112,7 @@ Notes:
 - System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
 - Main window can be resized up to the screen size (no max-height clamp to content).
 - Category headers and separators clear all cell widgets so no stray info buttons appear.
+- Category separator rows now use the background color (disabled items) so empty rows don’t look like knob rows.
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
