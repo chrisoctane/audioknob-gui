@@ -48,7 +48,7 @@
 
 ### GUI Layout
 ```
-Columns: Info | Knob | Action | Config | Requirements | Status | Category | Risk | CLI
+Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
          (0)  (1)    (2)      (3)      (4)           (5)     (6)       (7)    (8)
 
 Notes:
@@ -57,10 +57,10 @@ Notes:
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
-- "Requirements" shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
+- "Req." shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
-- Sorting by Category/Requirements/Status/Risk keeps grouped headers; other columns sort flat.
+- Sorting by Category/Req./Status/Risk keeps grouped headers; other columns sort flat.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
 - IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also sweeps non-audio IRQs off the selected audio cores (using IRQ Housekeeping cores if set, otherwise all cores minus audio cores) and enables `audioknob-irq-pinning.service` so pinning persists across reboots. IRQ Housekeeping supports an Auto mode that inverts selected audio cores.
 - Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
@@ -113,15 +113,22 @@ Notes:
 - Main window can be resized up to the screen size (no max-height clamp to content).
 - Category headers and separators clear all cell widgets so no stray info buttons appear.
 - Category separator rows now use the background color (disabled items) so empty rows don’t look like knob rows.
-- Buttons now use transparent backgrounds so row text stands out without extra button shading.
+- Action/Config/Status cells keep the row background (cell widgets are wrapped on row-colored containers), with dark buttons layered on top.
+- Global widget background styling no longer overrides per-cell widget backgrounds (prevents black blocks in widget columns).
+- Widget cells now paint row backgrounds via a custom cell container, so sorting/tab switches no longer introduce white/black patches.
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
+- Sorting/grouping now uses the correct column indices after adding the CLI column (category/risk grouping restored).
+- Table cell backgrounds now reset on every populate so row colors stay consistent after sorting or tab switches.
 - Sysctl status checks now resolve the `sysctl` command path even when GUI PATH omits sbin.
 - Baseline labeling no longer overrides `partial` statuses.
 - CPU governor status includes cpupower config/service details for persistence checks.
 - Status/Check now includes unit names, group gaps, udev rule matches, PipeWire runtime state, and last jitter test summary.
 - Restoring CPU governor effects now resolves systemd restores via the worker ops module to avoid UnboundLocalError.
+- Reset defaults now parses JSON output even on non-zero exit codes to avoid false “Root reset failed” errors.
+- Sysfs restore errors are now reported per-path instead of aborting the entire reset with a generic root effects failure.
+- IRQ affinity restore errors are now reported per-path instead of aborting the entire reset with a generic root effects failure.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
@@ -947,7 +954,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Requirements, Status, Category, Risk, CLI). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
+**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Req., Status, Category, Risk, CLI). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
 
 **Detection needed:**
 ```python

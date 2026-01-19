@@ -1390,17 +1390,24 @@ def write_sysfs_values(glob_pat: str | list[str], value: str) -> list[dict[str, 
     return effects
 
 
-def restore_sysfs(effects: list[dict[str, Any]]) -> None:
+def restore_sysfs(effects: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
     for e in effects:
         if e.get("kind") != "sysfs_write":
             continue
         before = e.get("before")
         if before is None:
             continue
-        Path(str(e["path"])).write_text(str(before) + "\n", encoding="utf-8")
+        path = Path(str(e["path"]))
+        try:
+            path.write_text(str(before) + "\n", encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"sysfs restore failed: {path}: {exc}")
+    return errors
 
 
-def restore_irq_affinity(effects: list[dict[str, Any]]) -> None:
+def restore_irq_affinity(effects: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
     for e in effects:
         if e.get("kind") != "irq_affinity":
             continue
@@ -1411,7 +1418,11 @@ def restore_irq_affinity(effects: list[dict[str, Any]]) -> None:
         path = Path(f"/proc/irq/{irq}/smp_affinity_list")
         if not path.exists():
             continue
-        path.write_text(str(before).strip() + "\n", encoding="utf-8")
+        try:
+            path.write_text(str(before).strip() + "\n", encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"irq affinity restore failed: {path}: {exc}")
+    return errors
 
 
 def user_service_unmask(services: list[str]) -> None:

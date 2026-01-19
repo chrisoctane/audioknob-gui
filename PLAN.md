@@ -296,13 +296,13 @@ In `gui/app.py` → `_populate()`:
 | Read-only test | — | "Test"/"Scan" button | "i" button |
 | Group join knob | — | "Join/Leave" button (immediate) | "i" button |
 
-**Columns**: Info | Knob | Action | Config | Requirements | Status | Category | Risk | CLI
+**Columns**: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 **Advanced mode**: Single table; advanced knobs are gated by the "Advanced knobs" checkbox.
 
-**Sorting**: Click any column header to sort. Category/Requirements/Status/Risk sorts show grouped headers; other columns sort as a flat list.
+**Sorting**: Click any column header to sort. Category/Req./Status/Risk sorts show grouped headers; other columns sort as a flat list.
 
-**Requirements column**: Shows A/R/G markers for Advanced/Reboot/Groups (tooltip includes the key).
+**Req. column**: Shows A/R/G markers for Advanced/Reboot/Groups (tooltip includes the key).
 
 **CLI column**: Shows the target command/file/parameter shorthand for each knob.
 

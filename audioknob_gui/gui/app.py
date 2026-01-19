@@ -653,7 +653,7 @@ def main() -> int:
             QVBoxLayout,
             QWidget,
         )
-        from PySide6.QtGui import QColor, QCursor
+        from PySide6.QtGui import QColor, QCursor, QPainter
         from shiboken6 import isValid
     except Exception as e:  # pragma: no cover
         print(
@@ -948,6 +948,18 @@ def main() -> int:
                     out.append(key)
             return out
 
+    class CellContainer(QWidget):
+        def __init__(self, bg: QColor, parent: QWidget | None = None) -> None:
+            super().__init__(parent)
+            self._bg = QColor(bg)
+            self.setAutoFillBackground(False)
+            self.setAttribute(Qt.WA_StyledBackground, True)
+            self.set_bg(self._bg)
+
+        def set_bg(self, bg: QColor) -> None:
+            self._bg = QColor(bg)
+            self.setStyleSheet(f"background-color: {self._bg.name()};")
+
     class MainWindow(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
@@ -958,7 +970,15 @@ def main() -> int:
             self._task_threads: list[QThread] = []
             self.state = load_state()
             self.registry = load_registry(_registry_path())
-            self._dependency_index = self._build_dependency_index()
+            build_dep = getattr(self, "_build_dependency_index", None)
+            if callable(build_dep):
+                self._dependency_index = build_dep()
+            else:
+                index: dict[str, list[str]] = {}
+                for knob in self.registry:
+                    for dep in getattr(knob, "depends_on", ()):
+                        index.setdefault(dep, []).append(knob.id)
+                self._dependency_index = index
             _get_gui_logger().info("gui started")
             self._ensure_system_profile()
             self._baseline_ready = self._baseline_available()
@@ -1105,7 +1125,7 @@ def main() -> int:
 
             self.table = QTableWidget(0, 9)
             self.table.setHorizontalHeaderLabels(
-                ["Info", "Knob", "Action", "Config", "Requirements", "Status", "Category", "Risk", "CLI"]
+                ["Info", "Knob", "Action", "Config", "Req.", "Status", "Category", "Risk", "CLI"]
             )
             self.table.horizontalHeader().setStretchLastSection(False)
             self.table.setSortingEnabled(False)
@@ -1590,7 +1610,7 @@ def main() -> int:
             if k.requires_groups:
                 parts.append("G")
             if not parts:
-                return "—"
+                return ""
             return " ".join(parts)
 
         def _requirements_key_tooltip(self) -> str:
@@ -1611,7 +1631,7 @@ def main() -> int:
 
         def _requirements_group_tooltip(self, label: str) -> str:
             legend = self._requirements_key_tooltip()
-            if label == "—":
+            if not label or label == "—":
                 return f"{legend}\nNo requirements"
             parts: list[str] = []
             for letter in label.split():
@@ -1626,13 +1646,13 @@ def main() -> int:
             return f"{legend}\nRequires: {', '.join(parts)}"
 
         def _grouping_mode(self) -> str | None:
-            if self._sort_column is None or self._sort_column == 7:
+            if self._sort_column is None or self._sort_column == 6:
                 return "category"
             if self._sort_column == 4:
                 return "requirements"
             if self._sort_column == 5:
                 return "status"
-            if self._sort_column == 8:
+            if self._sort_column == 7:
                 return "risk"
             return None
 
@@ -2778,7 +2798,9 @@ def main() -> int:
             self.btn_apply_queue_reboot.setEnabled(enabled and self._queue_requires_reboot())
             self.btn_reset.setEnabled(self._baseline_ready)
 
-        def _apply_queue_button_state(self, btn: QPushButton, knob_id: str, action: str) -> None:
+        def _apply_queue_button_state(
+            self, btn: QPushButton, knob_id: str, action: str, *, row_dim: bool = False
+        ) -> None:
             if self._queued_actions.get(knob_id) == action:
                 btn.setStyleSheet(
                     "QPushButton {"
@@ -2798,7 +2820,7 @@ def main() -> int:
                     tip = "Queued to reset. Click to remove from queue."
                 btn.setToolTip(tip)
             else:
-                btn.setStyleSheet("")
+                self._style_table_button(btn, row_dim=row_dim)
 
         def _on_recheck_state(self) -> None:
             if self._status_busy:
@@ -3045,27 +3067,78 @@ def main() -> int:
         def _make_apply_button(self, text: str = "Apply") -> QPushButton:
             """Create an Apply button."""
             btn = QPushButton(text)
-            # Ensure button labels don't clip at common font sizes and narrow columns.
-            btn.setMinimumWidth(80)
-            btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn.setMinimumWidth(0)
             btn.setFocusPolicy(Qt.NoFocus)
+            self._style_table_button(btn)
             return btn
 
         def _make_reset_button(self, text: str = "Reset") -> QPushButton:
             """Create a Reset button."""
             btn = QPushButton(text)
-            btn.setMinimumWidth(80)
-            btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn.setMinimumWidth(0)
             btn.setFocusPolicy(Qt.NoFocus)
+            self._style_table_button(btn)
             return btn
 
         def _make_action_button(self, text: str) -> QPushButton:
             """Create an action button."""
             btn = QPushButton(text)
-            btn.setMinimumWidth(80)
-            btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn.setMinimumWidth(0)
             btn.setFocusPolicy(Qt.NoFocus)
+            self._style_table_button(btn)
             return btn
+
+        def _style_table_button(self, btn: QPushButton, *, row_dim: bool = False) -> None:
+            bg = "#1f1f1f" if row_dim else "#2a2a2a"
+            btn.setStyleSheet(
+                "QPushButton {"
+                f" background-color: {bg};"
+                " color: #e0e0e0;"
+                " border: 1px solid #1f1f1f;"
+                " border-radius: 6px;"
+                " padding: 2px 6px;"
+                "}"
+                "QPushButton:hover {"
+                " background-color: #333333;"
+                "}"
+                "QPushButton:pressed {"
+                " background-color: #1f1f1f;"
+                "}"
+                "QPushButton:disabled {"
+                " color: #7a7a7a;"
+                " background-color: #1f1f1f;"
+                "}"
+            )
+
+        def _style_table_combo(self, widget: QWidget) -> None:
+            widget.setStyleSheet(
+                """
+                QComboBox, QSpinBox {
+                    background-color: #2a2a2a;
+                    color: #e0e0e0;
+                    border: 1px solid #1f1f1f;
+                    padding: 2px 6px;
+                    border-radius: 6px;
+                }
+                QComboBox:disabled, QSpinBox:disabled {
+                    background-color: #1f1f1f;
+                    color: #7a7a7a;
+                    border: 1px solid #2a2a2a;
+                }
+                QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {
+                    border: 1px solid #1f1f1f;
+                    background-color: #2a2a2a;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #2a2a2a;
+                    color: #e0e0e0;
+                    selection-background-color: #333333;
+                }
+                """
+            )
 
         def _apply_busy_state(self, btn: QPushButton, *, busy: bool) -> None:
             if busy:
@@ -3087,11 +3160,62 @@ def main() -> int:
             widget.setMouseTracking(True)
             widget.installEventFilter(self)
 
+        def _row_bg_color(self, row: int) -> QColor:
+            row_dim = False
+            if getattr(self, "_row_dim", None) and row < len(self._row_dim):
+                row_dim = self._row_dim[row]
+            if row_dim:
+                return QColor("#1f1f1f")
+            return QColor("#353535" if row % 2 else "#2f2f2f")
+
+        def _ensure_widget_cell_bg(self, row: int, col: int) -> None:
+            item = self.table.item(row, col)
+            if item is None:
+                item = QTableWidgetItem("")
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.table.setItem(row, col, item)
+            item.setBackground(self._row_bg_color(row))
+
+        def _clear_row_widgets(self, row: int) -> None:
+            for col in range(self.table.columnCount()):
+                if self.table.cellWidget(row, col) is not None:
+                    self.table.setCellWidget(row, col, None)
+
+        def _wrap_cell_widget(self, row: int, col: int, widget: QWidget) -> None:
+            self._ensure_widget_cell_bg(row, col)
+            container = CellContainer(self._row_bg_color(row))
+            container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(4, 2, 4, 2)
+            if widget.sizePolicy().horizontalPolicy() in (QSizePolicy.Expanding, QSizePolicy.MinimumExpanding):
+                layout.setAlignment(Qt.AlignVCenter)
+                layout.addWidget(widget, 1)
+            else:
+                layout.setAlignment(Qt.AlignCenter)
+                layout.addWidget(widget)
+            self._install_hover_tracking(container, row)
+            self.table.setCellWidget(row, col, container)
+
+        def _set_info_cell(self, row: int, widget: QWidget) -> None:
+            self._install_hover_tracking(widget, row)
+            self._wrap_cell_widget(row, 0, widget)
+
         def _set_action_cell(self, row: int, widget: QWidget) -> None:
             self._install_hover_tracking(widget, row)
             if isinstance(widget, QPushButton):
                 self._apply_baseline_lock(widget)
-            self.table.setCellWidget(row, 2, widget)
+            self._wrap_cell_widget(row, 2, widget)
+
+        def _set_config_cell(self, row: int, widget: QWidget) -> None:
+            self._install_hover_tracking(widget, row)
+            if isinstance(widget, (QComboBox, QSpinBox)):
+                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                self._style_table_combo(widget)
+            self._wrap_cell_widget(row, 3, widget)
+
+        def _set_status_cell(self, row: int, widget: QWidget) -> None:
+            self._install_hover_tracking(widget, row)
+            self._wrap_cell_widget(row, 5, widget)
 
         def _status_display(self, status: str) -> tuple[str, str]:
             """Return (display_text, color) for a status."""
@@ -3119,6 +3243,7 @@ def main() -> int:
             # Disable sorting during population to avoid issues
             self.table.setSortingEnabled(False)
             self.table.clearSpans()
+            self.table.clearContents()
             self._refresh_core_plan_summary()
             reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
             advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
@@ -3210,7 +3335,7 @@ def main() -> int:
                 for k in visible_knobs:
                     label = self._requirements_label(k, advanced_knobs)
                     by_req.setdefault(label, []).append(k)
-                req_order = ["—", "A", "R", "G", "A R", "A G", "R G", "A R G"]
+                req_order = ["", "A", "R", "G", "A R", "A G", "R G", "A R G"]
                 extra_labels = sorted(set(by_req.keys()) - set(req_order))
                 ordered_labels = req_order + extra_labels
                 if self._sort_descending:
@@ -3219,7 +3344,8 @@ def main() -> int:
                     items = by_req.get(label, [])
                     if not items:
                         continue
-                    ordered.append((CATEGORY_HEADER, label, self._requirements_group_tooltip(label)))
+                    header_label = label or "None"
+                    ordered.append((CATEGORY_HEADER, header_label, self._requirements_group_tooltip(label)))
                     ordered.extend(_sorted_items(items, force_title=True))
                     ordered.append(CATEGORY_SEPARATOR)
                 if ordered and ordered[-1] is CATEGORY_SEPARATOR:
@@ -3292,6 +3418,7 @@ def main() -> int:
             self._row_dim = [False] * len(ordered)
 
             for r, k in enumerate(ordered):
+                self._clear_row_widgets(r)
                 if isinstance(k, tuple) and k and k[0] is CATEGORY_HEADER:
                     label = str(k[1])
                     tooltip = str(k[2]) if len(k) > 2 and k[2] else ""
@@ -3359,9 +3486,9 @@ def main() -> int:
                 locked_bg = QColor("#1f1f1f")
                 locked_fg = QColor("#7a7a7a")
                 locked_style = (
-                    "QPushButton { background-color: transparent; color: #7a7a7a; border: 1px solid #2a2a2a; }"
-                    "QPushButton:hover { background-color: transparent; color: #7a7a7a; border: 1px solid #2a2a2a; }"
-                    "QPushButton:pressed { background-color: transparent; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                    "QPushButton { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 2px 6px; }"
+                    "QPushButton:hover { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                    "QPushButton:pressed { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
                 )
 
                 # Check requirements
@@ -3399,23 +3526,18 @@ def main() -> int:
                 info_btn.setFixedWidth(28)
                 info_btn.setToolTip("Show details")
                 info_btn.setFocusPolicy(Qt.NoFocus)
+                self._style_table_button(info_btn, row_dim=row_dim)
                 info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
-                self._install_hover_tracking(info_btn, r)
                 if row_dim:
                     info_btn.setStyleSheet(locked_style)
-                info_bg = QTableWidgetItem("")
-                info_bg.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                if row_dim:
-                    info_bg.setBackground(locked_bg)
-                self.table.setItem(r, 0, info_bg)
-                self.table.setCellWidget(r, 0, info_btn)
+                self._set_info_cell(r, info_btn)
 
                 # Column 1: Knob title (gray if locked)
                 title_item = QTableWidgetItem(k.title)
                 title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
+                title_item.setBackground(self._row_bg_color(r))
                 if row_dim:
                     title_item.setForeground(locked_fg)
-                    title_item.setBackground(locked_bg)
                 if locked:
                     title_item.setToolTip(lock_reason)
                 elif not_applicable:
@@ -3425,9 +3547,10 @@ def main() -> int:
                 # Column 4: Requirements
                 req_item = QTableWidgetItem(self._requirements_label(k, advanced_knobs))
                 req_item.setToolTip(self._requirements_tooltip(k, advanced_knobs))
+                req_item.setBackground(self._row_bg_color(r))
+                req_item.setTextAlignment(Qt.AlignCenter)
                 if row_dim:
                     req_item.setForeground(locked_fg)
-                    req_item.setBackground(locked_bg)
                 self.table.setItem(r, 4, req_item)
 
                 # Column 5: Status (with color)
@@ -3460,49 +3583,69 @@ def main() -> int:
                         status_tip = "Test result."
                     else:
                         status_tip = tooltip_map.get(display_status, "")
-                status_item = QTableWidgetItem(status_text)
+                status_item = QTableWidgetItem("")
+                status_item.setData(Qt.UserRole, status_text)
                 status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                if row_dim:
-                    status_item.setBackground(locked_bg)
+                status_item.setBackground(self._row_bg_color(r))
+                if status_tip:
+                    status_item.setToolTip(status_tip)
                 self.table.setItem(r, 5, status_item)
                 status_btn = QPushButton(status_text)
                 status_btn.setFocusPolicy(Qt.NoFocus)
-                status_btn.setFlat(True)
+                status_btn.setFlat(False)
                 status_btn.setProperty("status_button", True)
                 status_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 status_btn.setCursor(Qt.PointingHandCursor)
+                button_bg = "#2a2a2a"
+                if row_dim:
+                    button_bg = "#1f1f1f"
                 status_btn.setStyleSheet(
-                    f"text-align: left; color: {status_color}; background: transparent; border: none;"
+                    "QPushButton {"
+                    f" text-align: center; color: {status_color};"
+                    f" background-color: {button_bg};"
+                    " border: 1px solid #1f1f1f;"
+                    " border-radius: 6px;"
+                    " padding: 2px 6px;"
+                    "}"
+                    "QPushButton:hover {"
+                    " background-color: #333333;"
+                    "}"
+                    "QPushButton:disabled {"
+                    " color: #9e9e9e;"
+                    " background-color: #2a2a2a;"
+                    "}"
                 )
                 if status_tip:
                     status_btn.setToolTip(status_tip)
+                status_btn.setMinimumWidth(0)
                 if k.impl and k.impl.kind == "read_only":
                     status_btn.setEnabled(False)
                     status_btn.setToolTip("Not applicable for read-only tests")
                 else:
                     status_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
-                self._install_hover_tracking(status_btn, r)
-                self.table.setCellWidget(r, 5, status_btn)
+                self._set_status_cell(r, status_btn)
 
                 # Column 6: Category
                 cat_item = QTableWidgetItem(self._category_label(str(k.category)))
+                cat_item.setBackground(self._row_bg_color(r))
+                cat_item.setTextAlignment(Qt.AlignCenter)
                 if row_dim:
                     cat_item.setForeground(locked_fg)
-                    cat_item.setBackground(locked_bg)
                 self.table.setItem(r, 6, cat_item)
 
                 # Column 7: Risk
                 risk_item = QTableWidgetItem(str(k.risk_level))
+                risk_item.setBackground(self._row_bg_color(r))
+                risk_item.setTextAlignment(Qt.AlignCenter)
                 if row_dim:
                     risk_item.setForeground(locked_fg)
-                    risk_item.setBackground(locked_bg)
                 self.table.setItem(r, 7, risk_item)
 
                 # Column 8: CLI
                 sys_item = QTableWidgetItem(self._sys_label_for_knob(k))
+                sys_item.setBackground(self._row_bg_color(r))
                 if row_dim:
                     sys_item.setForeground(locked_fg)
-                    sys_item.setBackground(locked_bg)
                 self.table.setItem(r, 8, sys_item)
 
                 # Column 2: Action button (context-sensitive)
@@ -3584,17 +3727,17 @@ def main() -> int:
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                        self._apply_queue_button_state(btn, k.id, "reset")
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                        self._apply_queue_button_state(btn, k.id, "apply")
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
                     self._apply_busy_state(btn, busy=busy)
                     self._set_action_cell(r, btn)
 
                     # Config column: quantum selector
                     q_combo = QComboBox()
-                    q_combo.setMinimumWidth(80)
+                    q_combo.setMinimumWidth(0)
                     q_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
                     values = [32, 64, 128, 256, 512, 1024]
                     for v in values:
@@ -3623,7 +3766,7 @@ def main() -> int:
 
                     q_combo.currentIndexChanged.connect(_on_change)
                     self._install_hover_tracking(q_combo, r)
-                    self.table.setCellWidget(r, 3, q_combo)
+                    self._set_config_cell(r, q_combo)
 
                 elif k.id == "pipewire_sample_rate" and not locked:
                     # Action column: Apply/Reset button
@@ -3631,17 +3774,17 @@ def main() -> int:
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                        self._apply_queue_button_state(btn, k.id, "reset")
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                        self._apply_queue_button_state(btn, k.id, "apply")
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
                     self._apply_busy_state(btn, busy=busy)
                     self._set_action_cell(r, btn)
 
                     # Config column: sample rate selector
                     r_combo = QComboBox()
-                    r_combo.setMinimumWidth(80)
+                    r_combo.setMinimumWidth(0)
                     r_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
                     values = [44100, 48000, 88200, 96000, 192000]
                     for v in values:
@@ -3667,18 +3810,18 @@ def main() -> int:
 
                     r_combo.currentIndexChanged.connect(_on_rate_change)
                     self._install_hover_tracking(r_combo, r)
-                    self.table.setCellWidget(r, 3, r_combo)
+                    self._set_config_cell(r, r_combo)
                 elif k.id == "qjackctl_server_prefix_rt":
                     # Normal apply/reset button in Action column
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                        self._apply_queue_button_state(btn, k.id, "reset")
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                        self._apply_queue_button_state(btn, k.id, "apply")
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
                     self._apply_busy_state(btn, busy=busy)
                     if locked:
                         btn.setStyleSheet(locked_style)
@@ -3693,24 +3836,24 @@ def main() -> int:
                     if locked:
                         cfg_btn.setEnabled(False)
                         cfg_btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 3, cfg_btn)
+                    self._set_config_cell(r, cfg_btn)
                 elif k.id == "power_profile_performance":
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                        self._apply_queue_button_state(btn, k.id, "reset")
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                        self._apply_queue_button_state(btn, k.id, "apply")
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
                     self._apply_busy_state(btn, busy=busy)
                     if locked:
                         btn.setStyleSheet(locked_style)
                     self._set_action_cell(r, btn)
 
                     backend_combo = QComboBox()
-                    backend_combo.setMinimumWidth(130)
+                    backend_combo.setMinimumWidth(0)
                     backend_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
                     backend_combo.addItem("Auto", "auto")
                     backend_combo.addItem("powerprofilesctl", "powerprofilesctl")
@@ -3742,20 +3885,17 @@ def main() -> int:
                     config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
                     if config_locked:
                         backend_combo.setEnabled(False)
-                        backend_combo.setStyleSheet(
-                            "QComboBox { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
-                        )
-                    self.table.setCellWidget(r, 3, backend_combo)
+                    self._set_config_cell(r, backend_combo)
                 elif k.id == "irq_pinning":
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                        self._apply_queue_button_state(btn, k.id, "reset")
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                        self._apply_queue_button_state(btn, k.id, "apply")
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
                     self._apply_busy_state(btn, busy=busy)
                     if locked:
                         btn.setStyleSheet(locked_style)
@@ -3769,17 +3909,17 @@ def main() -> int:
                     if locked:
                         cfg_btn.setEnabled(False)
                         cfg_btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 3, cfg_btn)
+                    self._set_config_cell(r, cfg_btn)
                 elif k.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
                     status = self._knob_statuses.get(k.id, "unknown")
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                        self._apply_queue_button_state(btn, k.id, "reset")
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                        self._apply_queue_button_state(btn, k.id, "apply")
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
                     self._apply_busy_state(btn, busy=busy)
                     if locked:
                         btn.setStyleSheet(locked_style)
@@ -3793,7 +3933,7 @@ def main() -> int:
                     if locked:
                         cfg_btn.setEnabled(False)
                         cfg_btn.setStyleSheet(locked_style)
-                    self.table.setCellWidget(r, 3, cfg_btn)
+                    self._set_config_cell(r, cfg_btn)
                 elif k.impl is None:
                     # Placeholder knob - not implemented yet
                     btn = self._make_action_button("—")
@@ -3806,11 +3946,11 @@ def main() -> int:
                     if status in ("applied", "pending_reboot"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                        self._apply_queue_button_state(btn, k.id, "reset")
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
                     else:
                         btn = self._make_apply_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                        self._apply_queue_button_state(btn, k.id, "apply")
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
                     self._apply_busy_state(btn, busy=busy)
                     self._set_action_cell(r, btn)
 
@@ -3828,15 +3968,7 @@ def main() -> int:
                     "kernel_irqaffinity",
                 ):
                     self.table.removeCellWidget(r, 3)
-                if row_dim and self.table.item(r, 3) is None:
-                    dim_item = QTableWidgetItem("")
-                    dim_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                    dim_item.setBackground(locked_bg)
-                    self.table.setItem(r, 3, dim_item)
-                elif not row_dim:
-                    item = self.table.item(r, 3)
-                    if item is not None and item.text() == "":
-                        self.table.takeItem(r, 3)
+                self._ensure_widget_cell_bg(r, 3)
 
                 if row_dim:
                     config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
@@ -3845,9 +3977,7 @@ def main() -> int:
                         if widget is None:
                             continue
                         if widget.property("status_button"):
-                            widget.setStyleSheet(
-                                f"text-align: left; color: {locked_fg.name()}; background: transparent; border: none;"
-                            )
+                            widget.setStyleSheet(locked_style)
                             continue
                         if (
                             k.id == "power_profile_performance"
@@ -3952,7 +4082,7 @@ def main() -> int:
 
             action_texts = ["Apply", "Reset", "Install", "View", "Test", "Scan", "Join", "Leave", "Action"]
             action_width = max(_w(t, pad=40) for t in action_texts)
-            action_width = max(action_width, 80)
+            action_width = max(action_width, 100)
 
             config_texts = ["Config", "Cores", "Devices", "44100 Hz", "192000 Hz", "512", "1024"]
             config_width = max(_w(t, pad=44) for t in config_texts)
@@ -3964,6 +4094,7 @@ def main() -> int:
                 0: 32,
                 2: action_width,
                 3: config_width,
+                5: status_width,
             }
 
             self.table.setColumnWidth(0, 32)  # Info button
@@ -4004,8 +4135,11 @@ def main() -> int:
         def _apply_stylesheet(self) -> None:
             """Apply clean dark theme."""
             self.setStyleSheet("""
-                QMainWindow, QWidget {
+                QMainWindow, QDialog {
                     background-color: #1f1f1f;
+                    color: #e0e0e0;
+                }
+                QWidget {
                     color: #e0e0e0;
                 }
                 QTableWidget {
@@ -4030,23 +4164,6 @@ def main() -> int:
                     background-color: #46525d;
                     color: #e0e0e0;
                 }
-                QPushButton {
-                    background-color: transparent;
-                    color: #e0e0e0;
-                    border: 1px solid #2a2a2a;
-                    padding: 4px 8px;
-                }
-                QPushButton:hover {
-                    background-color: transparent;
-                }
-                QPushButton:pressed {
-                    background-color: transparent;
-                }
-                QPushButton:disabled {
-                    color: #7a7a7a;
-                    background-color: transparent;
-                    border: 1px solid #2a2a2a;
-                }
                 QHeaderView::section {
                     background-color: #1f1f1f;
                     color: #e0e0e0;
@@ -4054,6 +4171,13 @@ def main() -> int:
                     font-weight: normal;
                     border: none;
                     border-bottom: 1px solid #2a2a2a;
+                }
+                QHeaderView {
+                    background-color: #1f1f1f;
+                }
+                QTableCornerButton::section {
+                    background-color: #1f1f1f;
+                    border: 1px solid #1f1f1f;
                 }
                 QTabBar::tab {
                     background-color: #2b2b2b;
@@ -4068,6 +4192,31 @@ def main() -> int:
                 }
                 QTabBar::tab:!selected {
                     margin-top: 2px;
+                }
+                QTextEdit, QPlainTextEdit, QLineEdit, QAbstractScrollArea {
+                    background-color: #1f1f1f;
+                    color: #e0e0e0;
+                    border: 1px solid #2a2a2a;
+                }
+                QScrollArea {
+                    background-color: #1f1f1f;
+                }
+                QMenu {
+                    background-color: #1f1f1f;
+                    color: #e0e0e0;
+                    border: 1px solid #2a2a2a;
+                }
+                QMenu::item {
+                    background-color: #1f1f1f;
+                    padding: 4px 10px;
+                }
+                QMenu::item:selected {
+                    background-color: #333333;
+                }
+                QMenu::separator {
+                    height: 1px;
+                    background: #2a2a2a;
+                    margin: 4px 0;
                 }
                 QPushButton {
                     background-color: #4a4a4a;
@@ -4088,21 +4237,39 @@ def main() -> int:
                     border: 1px solid #3a3a3a;
                 }
                 QComboBox, QSpinBox {
-                    background-color: #404040;
+                    background-color: #2a2a2a;
                     color: #e0e0e0;
-                    border: 1px solid #555555;
-                    padding: 4px;
-                    border-radius: 3px;
+                    border: 1px solid #1f1f1f;
+                    padding: 2px 6px;
+                    border-radius: 6px;
                 }
                 QComboBox:disabled, QSpinBox:disabled {
-                    background-color: #2f2f2f;
+                    background-color: #1f1f1f;
                     color: #7a7a7a;
-                    border: 1px solid #3a3a3a;
+                    border: 1px solid #2a2a2a;
+                }
+                QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {
+                    border: 1px solid #1f1f1f;
+                    background-color: #2a2a2a;
                 }
                 QComboBox QAbstractItemView {
-                    background-color: #404040;
+                    background-color: #2a2a2a;
                     color: #e0e0e0;
-                    selection-background-color: #505050;
+                    selection-background-color: #333333;
+                }
+                QCheckBox {
+                    color: #e0e0e0;
+                }
+                QCheckBox::indicator {
+                    width: 14px;
+                    height: 14px;
+                    border: 1px solid #2a2a2a;
+                    background-color: #1f1f1f;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #9a9a9a;
+                    border: 1px solid #2a2a2a;
+                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M3 7l2 2 6-6' stroke='%23000' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
                 }
                 QScrollBar:vertical {
                     background-color: #333333;
@@ -4114,6 +4281,23 @@ def main() -> int:
                 }
                 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     height: 0px;
+                }
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                    background-color: #333333;
+                }
+                QScrollBar:horizontal {
+                    background-color: #333333;
+                    height: 10px;
+                }
+                QScrollBar::handle:horizontal {
+                    background-color: #555555;
+                    min-width: 20px;
+                }
+                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                    width: 0px;
+                }
+                QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                    background-color: #333333;
                 }
             """)
 
@@ -4235,21 +4419,28 @@ def main() -> int:
                 return
             if row >= len(self._row_dim) or not self._row_dim[row]:
                 return
+            bg = self._row_bg_color(row)
             for col in range(self.table.columnCount()):
                 item = self.table.item(row, col)
                 if item is not None:
-                    item.setBackground(QColor())
+                    item.setBackground(bg)
+                widget = self.table.cellWidget(row, col)
+                if isinstance(widget, CellContainer):
+                    widget.set_bg(bg)
 
         def _restore_dim_row(self, row: int) -> None:
             if getattr(self, "_row_dim", None) is None:
                 return
             if row >= len(self._row_dim) or not self._row_dim[row]:
                 return
-            dim_bg = QColor("#2f2f2f")
+            dim_bg = self._row_bg_color(row)
             for col in range(self.table.columnCount()):
                 item = self.table.item(row, col)
                 if item is not None:
                     item.setBackground(dim_bg)
+                widget = self.table.cellWidget(row, col)
+                if isinstance(widget, CellContainer):
+                    widget.set_bg(dim_bg)
 
         def _qjackctl_cpu_cores_from_state(self) -> list[int] | None:
             raw = self.state.get("qjackctl_cpu_cores")
@@ -7658,18 +7849,23 @@ def main() -> int:
                         "--scope", "user",
                     ]
                     p = subprocess.run(argv, text=True, capture_output=True, timeout=120)
-                    if p.returncode != 0:
-                        err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
-                        errors.append(f"User reset failed: {err_msg}")
-                    elif p.stdout:
+                    parsed = None
+                    stdout_text = (p.stdout or "").strip()
+                    if stdout_text:
                         try:
-                            result = json.loads(p.stdout)
-                            if result.get("reset_count", 0) > 0:
-                                results_text.append(f"Reset {result['reset_count']} user file(s)")
-                            errors.extend(result.get("errors", []))
-                            needs_reboot = bool(result.get("needs_reboot", False)) or needs_reboot
-                        except json.JSONDecodeError as e:
-                            errors.append(f"User reset: invalid response: {e}")
+                            parsed = json.loads(stdout_text)
+                        except json.JSONDecodeError:
+                            parsed = None
+                    if parsed is not None:
+                        if parsed.get("reset_count", 0) > 0:
+                            results_text.append(f"Reset {parsed['reset_count']} user file(s)")
+                        errors.extend(parsed.get("errors", []))
+                        needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
+                    elif p.returncode != 0:
+                        err_msg = p.stderr.strip() or stdout_text or f"Exit code {p.returncode}"
+                        errors.append(f"User reset failed: {err_msg}")
+                    elif stdout_text:
+                        errors.append("User reset: invalid response")
                 except Exception as e:
                     errors.append(f"User reset failed: {e}")
 
@@ -7684,18 +7880,23 @@ def main() -> int:
                             "--scope", "root",
                         ]
                         p = subprocess.run(argv, text=True, capture_output=True, timeout=300)
-                        if p.returncode != 0:
-                            err_msg = p.stderr.strip() or p.stdout.strip() or f"Exit code {p.returncode}"
-                            errors.append(f"Root reset failed: {err_msg}")
-                        elif p.stdout:
+                        parsed = None
+                        stdout_text = (p.stdout or "").strip()
+                        if stdout_text:
                             try:
-                                result = json.loads(p.stdout)
-                                if result.get("reset_count", 0) > 0:
-                                    results_text.append(f"Reset {result['reset_count']} system file(s)")
-                                errors.extend(result.get("errors", []))
-                                needs_reboot = bool(result.get("needs_reboot", False)) or needs_reboot
-                            except json.JSONDecodeError as e:
-                                errors.append(f"Root reset: invalid response: {e}")
+                                parsed = json.loads(stdout_text)
+                            except json.JSONDecodeError:
+                                parsed = None
+                        if parsed is not None:
+                            if parsed.get("reset_count", 0) > 0:
+                                results_text.append(f"Reset {parsed['reset_count']} system file(s)")
+                            errors.extend(parsed.get("errors", []))
+                            needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
+                        elif p.returncode != 0:
+                            err_msg = p.stderr.strip() or stdout_text or f"Exit code {p.returncode}"
+                            errors.append(f"Root reset failed: {err_msg}")
+                        elif stdout_text:
+                            errors.append("Root reset: invalid response")
                     except Exception as e:
                         errors.append(f"Root reset failed: {e}")
 

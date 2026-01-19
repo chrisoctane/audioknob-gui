@@ -1355,12 +1355,16 @@ def cmd_restore(args: argparse.Namespace) -> int:
         systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
         irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
 
-        restore_sysfs(sysfs)
+        sysfs_errors = restore_sysfs(sysfs)
         for e in systemd:
             worker_ops.systemd_restore(e)
-        restore_irq_affinity(irq_affinity)
+        irq_errors = restore_irq_affinity(irq_affinity)
         power_errors: list[str] = []
         _restore_power_profile_effects(effects, power_errors)
+        if sysfs_errors:
+            power_errors.extend(sysfs_errors)
+        if irq_errors:
+            power_errors.extend(irq_errors)
     
     # User-scope effects
     from audioknob_gui.worker.ops import user_service_restore, baloo_enable
@@ -1560,10 +1564,10 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
             irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
 
             try:
-                restore_sysfs(sysfs)
+                sysfs_errors = restore_sysfs(sysfs)
                 for e in systemd:
                     worker_ops.systemd_restore(e)
-                restore_irq_affinity(irq_affinity)
+                irq_errors = restore_irq_affinity(irq_affinity)
                 power_errors: list[str] = []
                 power_restored = _restore_power_profile_effects(effects, power_errors)
                 if sysfs or systemd or irq_affinity or power_restored:
@@ -1578,6 +1582,10 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                     })
                 if power_errors:
                     errors.extend(power_errors)
+                if sysfs_errors:
+                    errors.extend(sysfs_errors)
+                if irq_errors:
+                    errors.extend(irq_errors)
             except Exception as ex:
                 errors.append(f"Failed to restore root effects: {ex}")
         
@@ -2361,10 +2369,10 @@ def _restore_knob_once(knob_id: str) -> dict:
         irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
 
         try:
-            restore_sysfs(sysfs)
+            sysfs_errors = restore_sysfs(sysfs)
             for e in systemd:
                 worker_ops.systemd_restore(e)
-            restore_irq_affinity(irq_affinity)
+            irq_errors = restore_irq_affinity(irq_affinity)
             power_errors: list[str] = []
             power_restored = _restore_power_profile_effects(effects, power_errors)
             if sysfs or systemd or irq_affinity or power_restored:
@@ -2373,6 +2381,10 @@ def _restore_knob_once(knob_id: str) -> dict:
                 )
             if power_errors:
                 errors.extend(power_errors)
+            if sysfs_errors:
+                errors.extend(sysfs_errors)
+            if irq_errors:
+                errors.extend(irq_errors)
         except Exception as ex:
             errors.append(f"Failed to restore effects: {ex}")
 
