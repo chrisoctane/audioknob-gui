@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.5.1
+- **Release version**: 0.5.2
 - **31 knobs defined** (ALL 31 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -116,6 +116,7 @@ Notes:
 - Action/Config/Status cells keep the row background (cell widgets are wrapped on row-colored containers), with dark buttons layered on top.
 - Global widget background styling no longer overrides per-cell widget backgrounds (prevents black blocks in widget columns).
 - Widget cells now paint row backgrounds via a custom cell container, so sorting/tab switches no longer introduce white/black patches.
+- Header bar buttons and core plan controls now use the same dark button style as table actions; dropdown text selection no longer flashes white.
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.

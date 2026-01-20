@@ -4198,6 +4198,10 @@ def main() -> int:
                     color: #e0e0e0;
                     border: 1px solid #2a2a2a;
                 }
+                QLineEdit {
+                    selection-background-color: #333333;
+                    selection-color: #e0e0e0;
+                }
                 QScrollArea {
                     background-color: #1f1f1f;
                 }
@@ -4219,22 +4223,22 @@ def main() -> int:
                     margin: 4px 0;
                 }
                 QPushButton {
-                    background-color: #4a4a4a;
+                    background-color: #2a2a2a;
                     color: #e0e0e0;
-                    border: 1px solid #555555;
-                    padding: 5px 10px;
-                    border-radius: 3px;
+                    border: 1px solid #1f1f1f;
+                    padding: 2px 6px;
+                    border-radius: 6px;
                 }
                 QPushButton:hover {
-                    background-color: #555555;
-                }
-                QPushButton:pressed {
                     background-color: #333333;
                 }
+                QPushButton:pressed {
+                    background-color: #1f1f1f;
+                }
                 QPushButton:disabled {
-                    background-color: #2f2f2f;
+                    background-color: #1f1f1f;
                     color: #7a7a7a;
-                    border: 1px solid #3a3a3a;
+                    border: 1px solid #2a2a2a;
                 }
                 QComboBox, QSpinBox {
                     background-color: #2a2a2a;
@@ -4251,6 +4255,11 @@ def main() -> int:
                 QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {
                     border: 1px solid #1f1f1f;
                     background-color: #2a2a2a;
+                }
+                QComboBox QLineEdit, QSpinBox QLineEdit {
+                    background-color: #2a2a2a;
+                    selection-background-color: #333333;
+                    selection-color: #e0e0e0;
                 }
                 QComboBox QAbstractItemView {
                     background-color: #2a2a2a;
