@@ -4276,9 +4276,9 @@ def main() -> int:
                     background-color: #1f1f1f;
                 }
                 QCheckBox::indicator:checked {
-                    background-color: #9a9a9a;
-                    border: 1px solid #2a2a2a;
-                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M3 7l2 2 6-6' stroke='%23000' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+                    background-color: #2f2f2f;
+                    border: 1px solid #6a6a6a;
+                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M3 7l2 2 6-6' stroke='%23e0e0e0' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
                 }
                 QScrollBar:vertical {
                     background-color: #333333;
