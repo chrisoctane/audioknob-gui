@@ -4222,23 +4222,44 @@ def main() -> int:
                     background: #2a2a2a;
                     margin: 4px 0;
                 }
-                QPushButton {
+                QPushButton, QToolButton {
                     background-color: #2a2a2a;
                     color: #e0e0e0;
                     border: 1px solid #1f1f1f;
                     padding: 2px 6px;
                     border-radius: 6px;
                 }
-                QPushButton:hover {
+                QPushButton:hover, QToolButton:hover {
                     background-color: #333333;
                 }
-                QPushButton:pressed {
+                QPushButton:pressed, QToolButton:pressed {
                     background-color: #1f1f1f;
                 }
-                QPushButton:disabled {
+                QPushButton:disabled, QToolButton:disabled {
                     background-color: #1f1f1f;
                     color: #7a7a7a;
                     border: 1px solid #2a2a2a;
+                }
+                QToolButton:checked {
+                    background-color: #333333;
+                }
+                QAbstractSpinBox {
+                    background-color: #2a2a2a;
+                    color: #e0e0e0;
+                    border: 1px solid #1f1f1f;
+                    padding: 2px 6px;
+                    border-radius: 6px;
+                    selection-background-color: #333333;
+                    selection-color: #e0e0e0;
+                }
+                QAbstractSpinBox:disabled {
+                    background-color: #1f1f1f;
+                    color: #7a7a7a;
+                    border: 1px solid #2a2a2a;
+                }
+                QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {
+                    border: 1px solid #1f1f1f;
+                    background-color: #2a2a2a;
                 }
                 QComboBox, QSpinBox {
                     background-color: #2a2a2a;
