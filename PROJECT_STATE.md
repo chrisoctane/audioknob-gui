@@ -117,6 +117,7 @@ Notes:
 - Global widget background styling no longer overrides per-cell widget backgrounds (prevents black blocks in widget columns).
 - Widget cells now paint row backgrounds via a custom cell container, so sorting/tab switches no longer introduce white/black patches.
 - Header bar buttons and core plan controls now use the same dark button style as table actions; dropdown text selection no longer flashes white.
+- Advanced settings warning text now clarifies "other intensive workloads."
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.

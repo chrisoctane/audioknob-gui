@@ -1102,7 +1102,7 @@ def main() -> int:
             root.addWidget(self.reboot_banner)
 
             advanced_note = QLabel(
-                "Advanced settings can reduce performance in intensive workloads. "
+                "Advanced settings can reduce performance in other intensive workloads. "
                 "Use the Advanced knobs toggle to make changes; reboot may be required."
             )
             advanced_note.setWordWrap(True)
