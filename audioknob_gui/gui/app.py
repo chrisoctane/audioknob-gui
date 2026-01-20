@@ -3148,6 +3148,8 @@ def main() -> int:
         def _apply_baseline_lock(self, btn: QPushButton) -> None:
             if self._baseline_ready:
                 return
+            if bool(btn.property("baseline_exempt")):
+                return
             label = btn.text().strip().lower()
             if label not in ("apply", "reset", "install", "join", "leave"):
                 return
@@ -3697,6 +3699,8 @@ def main() -> int:
                     btn = self._make_action_button("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
                     btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
+                    btn.setProperty("baseline_exempt", True)
+                    btn.setCursor(Qt.PointingHandCursor)
                     btn.setStyleSheet(locked_style)
                     self._set_action_cell(r, btn)
                 elif not_applicable:

@@ -174,6 +174,8 @@ pkexec so root-only knobs are included. This baseline is used to label knobs as
 **Sys Default** when the current state matches the initial state. A **Re-check State**
 button in the header re-runs current status checks for development/testing. Apply/reset
 actions are disabled until baseline capture completes.
+Package install actions remain available so missing dependencies can be installed
+before the baseline is captured.
 
 Use the **Baseline** menu in the header to manage baselines:
 - **Capture Baseline...** snapshots the current system and saves a JSON file.
