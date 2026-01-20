@@ -4241,7 +4241,13 @@ def main() -> int:
                     border: 1px solid #2a2a2a;
                 }
                 QToolButton:checked {
+                    background-color: #2a2a2a;
+                }
+                QToolButton:checked:hover {
                     background-color: #333333;
+                }
+                QToolButton:focus {
+                    outline: none;
                 }
                 QAbstractSpinBox {
                     background-color: #2a2a2a;

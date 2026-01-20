@@ -120,6 +120,7 @@ Notes:
 - Advanced settings warning text now clarifies "other intensive workloads."
 - Checkbox indicator now shows a clear tick mark for enabled state.
 - Core plan toggle uses the same dark button styling as table actions; spinbox selection no longer flashes white.
+- Audio Core Plan toggle no longer shows a white highlight when expanded (checked state styled to match theme).
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
