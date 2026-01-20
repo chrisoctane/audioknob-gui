@@ -3151,6 +3151,8 @@ def main() -> int:
             if bool(btn.property("baseline_exempt")):
                 return
             label = btn.text().strip().lower()
+            if label == "install":
+                return
             if label not in ("apply", "reset", "install", "join", "leave"):
                 return
             btn.setEnabled(False)

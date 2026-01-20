@@ -1,6 +1,6 @@
 [project]
 name = "audioknob-gui"
-version = "0.5.5"
+version = "0.5.6"
 description = "GUI-first realtime audio tuning app (preview/apply/undo with transactions)"
 requires-python = ">=3.10"
 authors = [{ name = "audioknob-gui contributors" }]
