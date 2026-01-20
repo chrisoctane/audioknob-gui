@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.5.6
+- **Release version**: 0.5.7
 - **31 knobs defined** (ALL 31 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -123,6 +123,7 @@ Notes:
 - Audio Core Plan toggle no longer shows a white highlight when expanded (checked state styled to match theme).
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
 - Package Install buttons are no longer blocked by pending baseline capture.
+- Install buttons now pass per-row command lists and log clicks; missing command mappings warn instead of silently doing nothing.
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
 - Sorting/grouping now uses the correct column indices after adding the CLI column (category/risk grouping restored).

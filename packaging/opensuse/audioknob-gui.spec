@@ -1,4 +1,4 @@
-%global pkg_version 0.5.6
+%global pkg_version 0.5.7
 
 Name:           audioknob-gui
 Version:        %{pkg_version}

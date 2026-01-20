@@ -3700,7 +3700,8 @@ def main() -> int:
                     # Locked: needs package install
                     btn = self._make_action_button("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
-                    btn.clicked.connect(lambda _, cmds=missing_cmds: self._on_install_packages(cmds))
+                    btn.setProperty("install_cmds", list(missing_cmds))
+                    btn.clicked.connect(self._on_install_button_clicked)
                     btn.setProperty("baseline_exempt", True)
                     btn.setCursor(Qt.PointingHandCursor)
                     btn.setStyleSheet(locked_style)
@@ -6774,6 +6775,7 @@ def main() -> int:
                 return
 
             logger = _get_gui_logger()
+            logger.info("install clicked commands=%s", ",".join(commands))
             # Map commands to package names
             packages = []
             unknown = []
@@ -7044,7 +7046,22 @@ def main() -> int:
                         "error": str(e),
                     },
                 )
-                self._install_busy = False
+
+        def _on_install_button_clicked(self) -> None:
+            btn = self.sender()
+            commands: list[str] = []
+            if btn is not None:
+                try:
+                    cmds = btn.property("install_cmds")
+                except Exception:
+                    cmds = None
+                if isinstance(cmds, (list, tuple)):
+                    commands = [str(c) for c in cmds if c]
+            if not commands:
+                _get_gui_logger().warning("install clicked with no commands")
+                QMessageBox.warning(self, "Install", "No installable commands were detected.")
+                return
+            self._on_install_packages(commands)
 
         def _on_apply_knob(self, knob_id: str) -> None:
             """Apply a single knob optimization."""
