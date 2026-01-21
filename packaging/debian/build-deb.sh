@@ -39,6 +39,18 @@ python3 -m pip install --progress-bar off --disable-pip-version-check \
   --no-warn-script-location \
   "${wheel_dir}"/*.whl
 
+# Debian/Ubuntu use dist-packages on sys.path; relocate from site-packages.
+site_root="$(find "${pkg_root}/usr/lib" -type d -name site-packages -print -quit)"
+if [ -n "${site_root}" ] && [ -d "${site_root}" ]; then
+  deb_root="${pkg_root}/usr/lib/python3/dist-packages"
+  mkdir -p "${deb_root}"
+  if [ -n "$(ls -A "${site_root}")" ]; then
+    mv "${site_root}"/* "${deb_root}/"
+  fi
+  rmdir "${site_root}" 2>/dev/null || true
+  rmdir "$(dirname "${site_root}")" 2>/dev/null || true
+fi
+
 # Root worker wrapper + polkit policy + desktop entry
 install -d \
   "${pkg_root}/usr/libexec" \
