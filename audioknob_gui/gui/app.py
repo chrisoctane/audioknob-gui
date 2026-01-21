@@ -4231,6 +4231,20 @@ def main() -> int:
                 QScrollArea {
                     background-color: #1f1f1f;
                 }
+                QAbstractScrollArea::viewport {
+                    background-color: #1f1f1f;
+                }
+                QGroupBox {
+                    background-color: #1f1f1f;
+                    border: 1px solid #2a2a2a;
+                    margin-top: 8px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 4px;
+                    color: #cfcfcf;
+                }
                 QMenu {
                     background-color: #1f1f1f;
                     color: #e0e0e0;
