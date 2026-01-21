@@ -210,6 +210,9 @@ The local-RPM flow above requires `--no-gpg-checks` because the RPM is unsigned.
 
 The production path is to publish a **signed** RPM via the openSUSE **Open Build Service (OBS)** so users can install from a repo.
 
+## Backlog
+
+- Debian/Ubuntu packaging should list system deps and avoid bundling PySide6 wheels in the .deb (currently pip wheels are bundled due to repo gaps).
 
 ## Development
 

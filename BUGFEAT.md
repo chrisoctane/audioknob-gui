@@ -14,6 +14,7 @@ This file collects future ideas only. Nothing here is committed work until it is
 
 ## Bugfix Backlog (Next Release)
 
+- Debian/Ubuntu packaging should list system deps and avoid bundling PySide6 wheels in the .deb (currently pip wheels are bundled due to repo gaps).
 - ~~Test bug: "this is a test, bug. fix me."~~ (fixed)
 - ~~Kernel cmdline knobs should allow restoring to Tumbleweed defaults even if they were set before audioknob~~ (fixed):
   - ~~threadirqs~~
