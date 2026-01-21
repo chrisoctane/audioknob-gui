@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.5.7.6
+- **Release version**: 0.5.7.7
 - **31 knobs defined** (ALL 31 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -141,6 +141,7 @@ Notes:
 - IRQ affinity restore errors are now reported per-path instead of aborting the entire reset with a generic root effects failure.
 - Packaged installs now include GUI/worker subpackages so installed entrypoints do not crash with ModuleNotFoundError.
 - Debian packages now relocate Python modules into dist-packages so system Python can import them.
+- Debian packages now move bundled PySide6 from lib64 site-packages into dist-packages for importability.
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)

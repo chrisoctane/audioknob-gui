@@ -40,16 +40,18 @@ python3 -m pip install --progress-bar off --disable-pip-version-check \
   "${wheel_dir}"/*.whl
 
 # Debian/Ubuntu use dist-packages on sys.path; relocate from site-packages.
-site_root="$(find "${pkg_root}/usr/lib" -type d -name site-packages -print -quit)"
-if [ -n "${site_root}" ] && [ -d "${site_root}" ]; then
-  deb_root="${pkg_root}/usr/lib/python3/dist-packages"
-  mkdir -p "${deb_root}"
-  if [ -n "$(ls -A "${site_root}")" ]; then
-    mv "${site_root}"/* "${deb_root}/"
-  fi
-  rmdir "${site_root}" 2>/dev/null || true
-  rmdir "$(dirname "${site_root}")" 2>/dev/null || true
-fi
+deb_root="${pkg_root}/usr/lib/python3/dist-packages"
+mkdir -p "${deb_root}"
+for base in "${pkg_root}/usr/lib" "${pkg_root}/usr/lib64"; do
+  [ -d "${base}" ] || continue
+  while IFS= read -r site_root; do
+    if [ -n "$(ls -A "${site_root}")" ]; then
+      mv "${site_root}"/* "${deb_root}/"
+    fi
+    rmdir "${site_root}" 2>/dev/null || true
+    rmdir "$(dirname "${site_root}")" 2>/dev/null || true
+  done < <(find "${base}" -type d -name site-packages -print)
+done
 
 # Root worker wrapper + polkit policy + desktop entry
 install -d \
