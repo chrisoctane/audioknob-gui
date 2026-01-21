@@ -653,7 +653,7 @@ def main() -> int:
             QVBoxLayout,
             QWidget,
         )
-        from PySide6.QtGui import QColor, QCursor, QPainter
+        from PySide6.QtGui import QColor, QCursor, QPainter, QPalette
         from shiboken6 import isValid
     except Exception as e:  # pragma: no cover
         print(
@@ -861,6 +861,10 @@ def main() -> int:
             device_scroll = QScrollArea()
             device_scroll.setWidgetResizable(True)
             device_container = QWidget()
+            device_container.setAutoFillBackground(True)
+            device_palette = device_container.palette()
+            device_palette.setColor(QPalette.Window, QColor("#1f1f1f"))
+            device_container.setPalette(device_palette)
             device_container_layout = QVBoxLayout(device_container)
 
             for device in devices:

@@ -126,6 +126,7 @@ Notes:
 - Install buttons now bind per-row command lists directly to the click handler (no sender/property dependency) and warn when no commands are detected.
 - Row-dim styling now targets the inner cell widget so Install buttons remain clickable when packages are missing.
 - IRQ Overview and IRQ Pinning dialogs now use the dark theme throughout (including group boxes and scroll viewports).
+- IRQ pinning device list now forces a dark scroll-content background to avoid white panels on some distros.
 - Status/scan dialogs no longer crash when closed mid-refresh; background workers persist and skip UI updates if the dialog is gone.
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
