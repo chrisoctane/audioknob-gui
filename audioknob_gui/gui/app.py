@@ -2268,9 +2268,11 @@ def main() -> int:
                                 result = _run_worker_restore_user(tx)
                             return True, result, ""
 
-                        worker = QueueTaskWorker(_task, parent=dialog)
+                        worker = QueueTaskWorker(_task, parent=self)
 
                         def _on_done(success: bool, payload: object, message: str) -> None:
+                            if not isValid(dialog) or not dialog.isVisible():
+                                return
                             if not success:
                                 if message == _PKEXEC_CANCELLED:
                                     return
@@ -2319,9 +2321,11 @@ def main() -> int:
                         return False, payload, "No history data"
                     return True, payload, ""
 
-                worker = QueueTaskWorker(_task, parent=dialog)
+                worker = QueueTaskWorker(_task, parent=self)
 
                 def _on_done(success: bool, payload: object, message: str) -> None:
+                    if not isValid(dialog) or not dialog.isVisible():
+                        return
                     refresh_btn.setEnabled(True)
                     if not success:
                         QMessageBox.warning(dialog, "Tx History", message or "History load failed")
@@ -6392,9 +6396,11 @@ def main() -> int:
                         "live_checks": self._collect_live_checks(k),
                     }, ""
 
-                worker = QueueTaskWorker(_task, parent=dialog)
+                worker = QueueTaskWorker(_task, parent=self)
 
                 def _on_done(success: bool, payload: object, message: str) -> None:
+                    if not isValid(dialog) or not dialog.isVisible():
+                        return
                     refresh_btn.setEnabled(True)
                     if not success:
                         cli_status_label.setText(f"CLI status: error: {message or 'unknown'}")
@@ -6492,9 +6498,11 @@ def main() -> int:
                     "score": result.score,
                 }, ""
 
-            worker = QueueTaskWorker(_task, parent=dialog)
+            worker = QueueTaskWorker(_task, parent=self)
 
             def _on_done(success: bool, payload: object, message: str) -> None:
+                if not isValid(dialog) or not dialog.isVisible():
+                    return
                 if not success or not isinstance(payload, dict):
                     status_label.setText("Scan failed")
                     text.setPlainText(message or "Scan failed")
