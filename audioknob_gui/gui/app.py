@@ -960,6 +960,15 @@ def main() -> int:
             self._bg = QColor(bg)
             self.setStyleSheet(f"background-color: {self._bg.name()};")
 
+        def content_widget(self) -> QWidget | None:
+            layout = self.layout()
+            if layout is None or layout.count() == 0:
+                return None
+            item = layout.itemAt(0)
+            if item is None:
+                return None
+            return item.widget()
+
     class MainWindow(QMainWindow):
         def __init__(self) -> None:
             super().__init__()
@@ -3700,8 +3709,9 @@ def main() -> int:
                     # Locked: needs package install
                     btn = self._make_action_button("Install")
                     btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
-                    btn.setProperty("install_cmds", list(missing_cmds))
-                    btn.clicked.connect(self._on_install_button_clicked)
+                    cmds = list(missing_cmds)
+                    btn.setProperty("install_cmds", cmds)
+                    btn.clicked.connect(lambda _, cmds=cmds: self._on_install_packages(cmds))
                     btn.setProperty("baseline_exempt", True)
                     btn.setCursor(Qt.PointingHandCursor)
                     btn.setStyleSheet(locked_style)
@@ -3980,9 +3990,15 @@ def main() -> int:
                 if row_dim:
                     config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
                     for col in range(self.table.columnCount()):
-                        widget = self.table.cellWidget(r, col)
-                        if widget is None:
+                        cell_widget = self.table.cellWidget(r, col)
+                        if cell_widget is None:
                             continue
+                        widget = cell_widget
+                        if isinstance(widget, CellContainer):
+                            content = widget.content_widget()
+                            if content is None:
+                                continue
+                            widget = content
                         if widget.property("status_button"):
                             widget.setStyleSheet(locked_style)
                             continue
@@ -6776,6 +6792,10 @@ def main() -> int:
 
             logger = _get_gui_logger()
             logger.info("install clicked commands=%s", ",".join(commands))
+            if not commands:
+                QMessageBox.warning(self, "Install", "No installable commands were detected.")
+                logger.warning("install clicked with no commands")
+                return
             # Map commands to package names
             packages = []
             unknown = []
@@ -7046,22 +7066,6 @@ def main() -> int:
                         "error": str(e),
                     },
                 )
-
-        def _on_install_button_clicked(self) -> None:
-            btn = self.sender()
-            commands: list[str] = []
-            if btn is not None:
-                try:
-                    cmds = btn.property("install_cmds")
-                except Exception:
-                    cmds = None
-                if isinstance(cmds, (list, tuple)):
-                    commands = [str(c) for c in cmds if c]
-            if not commands:
-                _get_gui_logger().warning("install clicked with no commands")
-                QMessageBox.warning(self, "Install", "No installable commands were detected.")
-                return
-            self._on_install_packages(commands)
 
         def _on_apply_knob(self, knob_id: str) -> None:
             """Apply a single knob optimization."""
