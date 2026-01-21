@@ -828,6 +828,8 @@ def main() -> int:
             parent: QWidget | None = None,
         ) -> None:
             super().__init__(parent)
+            if parent is not None:
+                self.setStyleSheet(parent.styleSheet())
             self.setWindowTitle("Configure IRQ pinning")
             self.resize(620, 520)
 
@@ -1535,6 +1537,7 @@ def main() -> int:
                 housekeeping = sorted(set(self._kernel_cores_from_state("kernel_irqaffinity") or []))
 
             dialog = QDialog(self)
+            dialog.setStyleSheet(self.styleSheet())
             dialog.setWindowTitle("IRQ Overview")
             dialog.resize(720, 520)
             layout = QVBoxLayout(dialog)

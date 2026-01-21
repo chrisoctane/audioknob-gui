@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.5.7.1
+- **Release version**: 0.5.7.2
 - **31 knobs defined** (ALL 31 IMPLEMENTED)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -125,6 +125,7 @@ Notes:
 - Package Install buttons are no longer blocked by pending baseline capture.
 - Install buttons now bind per-row command lists directly to the click handler (no sender/property dependency) and warn when no commands are detected.
 - Row-dim styling now targets the inner cell widget so Install buttons remain clickable when packages are missing.
+- IRQ Overview and IRQ Pinning dialogs now inherit the dark theme instead of rendering with white backgrounds.
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
 - Sorting/grouping now uses the correct column indices after adding the CLI column (category/risk grouping restored).
