@@ -89,10 +89,12 @@ Phase 3 (done):
 - `audioknob_gui/gui/main_window.py` -> MainWindow + high-level UI flow (no worker plumbing)
 - `audioknob_gui/gui/table.py` -> table population, column setup, row rendering, sorting behavior
 
+Phase 4 (done):
+- `audioknob_gui/gui/widgets/` -> shared widget helpers (CellContainer)
+- `audioknob_gui/gui/knobs/` -> knob-specific UI hooks + registry
+
 Next phases (planned, incremental):
-- `audioknob_gui/gui/app.py`: entrypoint + minimal wiring only
-- `audioknob_gui/gui/widgets/`: CellContainer and shared table widgets
-- `audioknob_gui/gui/knobs/`: complex knob UI logic + small registry
+- (plan complete)
 
 ### Bugs Fixed (Prevent Regression)
 - Prevented accidental editing of table cells (table is now non-editable).

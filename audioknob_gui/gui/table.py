@@ -14,29 +14,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from audioknob_gui.gui.state import save_state
-
-class CellContainer(QWidget):
-    def __init__(self, bg: QColor, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._bg = QColor(bg)
-        self.setAutoFillBackground(False)
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.set_bg(self._bg)
-
-    def set_bg(self, bg: QColor) -> None:
-        self._bg = QColor(bg)
-        self.setStyleSheet(f"background-color: {self._bg.name()};")
-
-    def content_widget(self) -> QWidget | None:
-        layout = self.layout()
-        if layout is None or layout.count() == 0:
-            return None
-        item = layout.itemAt(0)
-        if item is None:
-            return None
-        return item.widget()
-
+from audioknob_gui.gui.knobs.registry import (
+    RowContext,
+    allow_config_when_row_dim,
+    get_action_override,
+    get_config_widget_builder,
+)
+from audioknob_gui.gui.widgets.cell_container import CellContainer
 
 
 class TableMixin:
@@ -816,18 +800,27 @@ class TableMixin:
                 sys_item.setForeground(locked_fg)
             self.table.setItem(r, 8, sys_item)
 
+            ctx = RowContext(
+                row=r,
+                status=status,
+                busy=busy,
+                locked=locked,
+                row_dim=row_dim,
+                lock_reason=lock_reason,
+                not_applicable=not_applicable,
+                not_applicable_reason=not_applicable_reason,
+                group_pending_lock=group_pending_lock,
+                reboot_dep_lock=reboot_dep_lock,
+                reboot_gate_lock=reboot_gate_lock,
+                advanced_gate_lock=advanced_gate_lock,
+                commands_ok=commands_ok,
+                missing_cmds=list(missing_cmds),
+            )
+
             # Column 2: Action button (context-sensitive)
-            if k.id == "audio_group_membership":
-                # Special: group membership knob
-                label = "Leave" if status == "applied" else "Join"
-                btn = self._make_reset_button(label) if label == "Leave" else self._make_apply_button(label)
-                if label == "Leave":
-                    btn.clicked.connect(self._on_leave_groups)
-                else:
-                    btn.clicked.connect(self._on_join_groups)
-                self._apply_busy_state(btn, busy=busy)
-                if locked:
-                    btn.setStyleSheet(locked_style)
+            action_priority, action_override = get_action_override(k.id)
+            if action_override and action_priority == "pre_lock":
+                btn = action_override(self, k, ctx)
                 self._set_action_cell(r, btn)
             elif group_pending_lock:
                 btn = self._make_action_button("🔒")
@@ -877,273 +870,46 @@ class TableMixin:
                 btn.setToolTip(not_applicable_reason)
                 btn.setStyleSheet(locked_style)
                 self._set_action_cell(r, btn)
-            elif k.id == "stack_detect":
-                btn = self._make_action_button("View")
-                btn.clicked.connect(self.on_view_stack)
-                self._set_action_cell(r, btn)
-            elif k.id == "scheduler_jitter_test":
-                btn = self._make_action_button("Test")
-                if busy:
-                    btn.setText("Working...")
-                    btn.setEnabled(False)
-                else:
-                    btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
-                self._set_action_cell(r, btn)
-            elif k.id == "blocker_check":
-                btn = self._make_action_button("Scan")
-                btn.clicked.connect(self.on_check_blockers)
-                self._set_action_cell(r, btn)
-            elif k.id == "pipewire_quantum" and not locked:
-                # Action column: Apply/Reset button
-                status = self._knob_statuses.get(k.id, "unknown")
-                if status in ("applied", "pending_reboot"):
-                    btn = self._make_reset_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
-                else:
-                    btn = self._make_apply_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
-                self._apply_busy_state(btn, busy=busy)
-                self._set_action_cell(r, btn)
-
-                # Config column: quantum selector
-                q_combo = QComboBox()
-                q_combo.setMinimumWidth(0)
-                q_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-                values = [32, 64, 128, 256, 512, 1024]
-                for v in values:
-                    q_combo.addItem(str(v), v)
-
-                current = self._pipewire_quantum_from_state()
-                if current is None and k.impl:
-                    try:
-                        current = int(k.impl.params.get("quantum")) if k.impl.params.get("quantum") is not None else None
-                    except Exception:
-                        current = None
-                q_combo.blockSignals(True)
-                if current in values:
-                    q_combo.setCurrentIndex(values.index(int(current)))
-                q_combo.blockSignals(False)
-
-                def _on_change(_: int, *, _combo: QComboBox = q_combo) -> None:
-                    # Capture the correct combo; otherwise a later reassignment in _populate()
-                    # can cause late-binding bugs (e.g. writing sample rate into quantum).
-                    self.state["pipewire_quantum"] = int(_combo.currentData())
-                    save_state(self.state)
-                    # Optimistic UI: config changed, so action should become Apply until proven otherwise.
-                    self._knob_statuses["pipewire_quantum"] = "not_applied"
-                    self._refresh_statuses()
-                    self._populate()
-
-                q_combo.currentIndexChanged.connect(_on_change)
-                self._install_hover_tracking(q_combo, r)
-                self._set_config_cell(r, q_combo)
-
-            elif k.id == "pipewire_sample_rate" and not locked:
-                # Action column: Apply/Reset button
-                status = self._knob_statuses.get(k.id, "unknown")
-                if status in ("applied", "pending_reboot"):
-                    btn = self._make_reset_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
-                else:
-                    btn = self._make_apply_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
-                self._apply_busy_state(btn, busy=busy)
-                self._set_action_cell(r, btn)
-
-                # Config column: sample rate selector
-                r_combo = QComboBox()
-                r_combo.setMinimumWidth(0)
-                r_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-                values = [44100, 48000, 88200, 96000, 192000]
-                for v in values:
-                    r_combo.addItem(f"{v} Hz", v)
-
-                current = self._pipewire_sample_rate_from_state()
-                if current is None and k.impl:
-                    try:
-                        current = int(k.impl.params.get("rate")) if k.impl.params.get("rate") is not None else None
-                    except Exception:
-                        current = None
-                r_combo.blockSignals(True)
-                if current in values:
-                    r_combo.setCurrentIndex(values.index(int(current)))
-                r_combo.blockSignals(False)
-
-                def _on_rate_change(_: int, *, _combo: QComboBox = r_combo) -> None:
-                    self.state["pipewire_sample_rate"] = int(_combo.currentData())
-                    save_state(self.state)
-                    self._knob_statuses["pipewire_sample_rate"] = "not_applied"
-                    self._refresh_statuses()
-                    self._populate()
-
-                r_combo.currentIndexChanged.connect(_on_rate_change)
-                self._install_hover_tracking(r_combo, r)
-                self._set_config_cell(r, r_combo)
-            elif k.id == "qjackctl_server_prefix_rt":
-                # Normal apply/reset button in Action column
-                status = self._knob_statuses.get(k.id, "unknown")
-                if status in ("applied", "pending_reboot"):
-                    btn = self._make_reset_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
-                else:
-                    btn = self._make_apply_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
-                self._apply_busy_state(btn, busy=busy)
-                if locked:
-                    btn.setStyleSheet(locked_style)
-                self._set_action_cell(r, btn)
-
-                # Config column: CPU core selection
-                cfg_btn = self._make_action_button("Cores")
-                cfg_btn.setToolTip("Configure CPU cores for pinning")
-                cfg_btn.setFocusPolicy(Qt.NoFocus)
-                cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
-                self._install_hover_tracking(cfg_btn, r)
-                if locked:
-                    cfg_btn.setEnabled(False)
-                    cfg_btn.setStyleSheet(locked_style)
-                self._set_config_cell(r, cfg_btn)
-            elif k.id == "power_profile_performance":
-                status = self._knob_statuses.get(k.id, "unknown")
-                if status in ("applied", "pending_reboot"):
-                    btn = self._make_reset_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
-                else:
-                    btn = self._make_apply_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
-                self._apply_busy_state(btn, busy=busy)
-                if locked:
-                    btn.setStyleSheet(locked_style)
-                self._set_action_cell(r, btn)
-
-                backend_combo = QComboBox()
-                backend_combo.setMinimumWidth(0)
-                backend_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-                backend_combo.addItem("Auto", "auto")
-                backend_combo.addItem("powerprofilesctl", "powerprofilesctl")
-                backend_combo.addItem("tuned", "tuned")
-                backend_combo.setToolTip(
-                    "Power profile backend: auto uses the active backend; tuned uses latency-performance."
-                )
-                current_backend = self._power_profile_backend_from_state()
-                if current_backend not in ("auto", "powerprofilesctl", "tuned"):
-                    current_backend = "auto"
-                backend_combo.blockSignals(True)
-                for idx in range(backend_combo.count()):
-                    if backend_combo.itemData(idx) == current_backend:
-                        backend_combo.setCurrentIndex(idx)
-                        break
-                backend_combo.blockSignals(False)
-
-                def _on_backend_change(_: int, *, _combo: QComboBox = backend_combo) -> None:
-                    self.state["power_profile_backend"] = str(_combo.currentData())
-                    save_state(self.state)
-                    # Config changed; force re-evaluation until apply succeeds.
-                    self._knob_statuses["power_profile_performance"] = "not_applied"
-                    self._refresh_statuses()
-                    self._populate()
-
-                backend_combo.currentIndexChanged.connect(_on_backend_change)
-                self._install_hover_tracking(backend_combo, r)
-
-                config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
-                if config_locked:
-                    backend_combo.setEnabled(False)
-                self._set_config_cell(r, backend_combo)
-            elif k.id == "irq_pinning":
-                status = self._knob_statuses.get(k.id, "unknown")
-                if status in ("applied", "pending_reboot"):
-                    btn = self._make_reset_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
-                else:
-                    btn = self._make_apply_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
-                self._apply_busy_state(btn, busy=busy)
-                if locked:
-                    btn.setStyleSheet(locked_style)
-                self._set_action_cell(r, btn)
-
-                cfg_btn = self._make_action_button("Devices")
-                cfg_btn.setToolTip("Configure devices and CPU cores")
-                cfg_btn.setFocusPolicy(Qt.NoFocus)
-                cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
-                self._install_hover_tracking(cfg_btn, r)
-                if locked:
-                    cfg_btn.setEnabled(False)
-                    cfg_btn.setStyleSheet(locked_style)
-                self._set_config_cell(r, cfg_btn)
-            elif k.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
-                status = self._knob_statuses.get(k.id, "unknown")
-                if status in ("applied", "pending_reboot"):
-                    btn = self._make_reset_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
-                else:
-                    btn = self._make_apply_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
-                self._apply_busy_state(btn, busy=busy)
-                if locked:
-                    btn.setStyleSheet(locked_style)
-                self._set_action_cell(r, btn)
-
-                cfg_btn = self._make_action_button("Cores")
-                cfg_btn.setToolTip("Configure CPU cores")
-                cfg_btn.setFocusPolicy(Qt.NoFocus)
-                cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
-                self._install_hover_tracking(cfg_btn, r)
-                if locked:
-                    cfg_btn.setEnabled(False)
-                    cfg_btn.setStyleSheet(locked_style)
-                self._set_config_cell(r, cfg_btn)
-            elif k.impl is None:
-                # Placeholder knob - not implemented yet
-                btn = self._make_action_button("—")
-                btn.setEnabled(False)
-                btn.setToolTip("Not implemented yet")
-                self._set_action_cell(r, btn)
             else:
-                # Normal knob: show Apply or Reset based on current status
-                status = self._knob_statuses.get(k.id, "unknown")
-                if status in ("applied", "pending_reboot"):
-                    btn = self._make_reset_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
-                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                if action_override and action_priority == "post_lock":
+                    btn = action_override(self, k, ctx)
+                    self._set_action_cell(r, btn)
+                elif k.impl is None:
+                    # Placeholder knob - not implemented yet
+                    btn = self._make_action_button("—")
+                    btn.setEnabled(False)
+                    btn.setToolTip("Not implemented yet")
+                    self._set_action_cell(r, btn)
                 else:
-                    btn = self._make_apply_button()
-                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
-                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
-                self._apply_busy_state(btn, busy=busy)
-                self._set_action_cell(r, btn)
+                    # Normal knob: show Apply or Reset based on current status
+                    status = self._knob_statuses.get(k.id, "unknown")
+                    if status in ("applied", "pending_reboot"):
+                        btn = self._make_reset_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                        self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                    else:
+                        btn = self._make_apply_button()
+                        btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                        self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                    self._apply_busy_state(btn, busy=busy)
+                    self._set_action_cell(r, btn)
 
-            # Column 3: Config - clear if no widget was set for this row
-            # (PipeWire rows set their own widgets above; other rows need clearing)
-            if k.id not in (
-                "pipewire_quantum",
-                "pipewire_sample_rate",
-                "power_profile_performance",
-                "qjackctl_server_prefix_rt",
-                "irq_pinning",
-                "kernel_isolcpus",
-                "kernel_nohz_full",
-                "kernel_rcu_nocbs",
-                "kernel_irqaffinity",
-            ):
+            # Column 3: Config widgets
+            config_builder = get_config_widget_builder(k.id)
+            config_widget = None
+            if config_builder:
+                config_widget = config_builder(self, k, ctx)
+            if config_widget is not None:
+                if locked and isinstance(config_widget, QPushButton):
+                    config_widget.setEnabled(False)
+                    config_widget.setStyleSheet(locked_style)
+                self._set_config_cell(r, config_widget)
+            else:
                 self.table.removeCellWidget(r, 3)
             self._ensure_widget_cell_bg(r, 3)
 
             if row_dim:
-                config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
+                allow_config = allow_config_when_row_dim(k.id, ctx)
                 for col in range(self.table.columnCount()):
                     cell_widget = self.table.cellWidget(r, col)
                     if cell_widget is None:
@@ -1157,12 +923,7 @@ class TableMixin:
                     if widget.property("status_button"):
                         widget.setStyleSheet(locked_style)
                         continue
-                    if (
-                        k.id == "power_profile_performance"
-                        and col == 3
-                        and isinstance(widget, QComboBox)
-                        and not config_locked
-                    ):
+                    if col == 3 and isinstance(widget, QComboBox) and allow_config:
                         continue
                     if isinstance(widget, QPushButton):
                         widget.setStyleSheet(locked_style)
@@ -1357,4 +1118,3 @@ class TableMixin:
             widget = self.table.cellWidget(row, col)
             if isinstance(widget, CellContainer):
                 widget.set_bg(dim_bg)
-
