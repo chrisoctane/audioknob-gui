@@ -70,6 +70,28 @@ Notes:
 - Main window title includes app version and git short SHA when available.
 ```
 
+### Module Map (GUI refactor plan)
+
+Goal: split `audioknob_gui/gui/app.py` into feature-based modules without behavior or UX changes.
+
+Phase 1 (done):
+- `audioknob_gui/gui/dialogs/confirm.py` -> ConfirmDialog
+- `audioknob_gui/gui/dialogs/cpu_cores.py` -> CpuCoreDialog
+- `audioknob_gui/gui/dialogs/irq_pinning.py` -> IrqPinningDialog
+- `audioknob_gui/gui/dialogs/pipewire.py` -> PipeWireQuantumDialog, PipeWireSampleRateDialog
+- `audioknob_gui/gui/dialogs/tests.py` -> jitter_test_summary
+
+Phase 2 (done):
+- `audioknob_gui/gui/state.py` -> load_state(), save_state(), migrations/defaults
+- `audioknob_gui/gui/worker_api.py` -> _run_worker_* helpers, pkexec path picking, error parsing
+
+Next phases (planned, incremental):
+- `audioknob_gui/gui/app.py`: entrypoint + minimal wiring only
+- `audioknob_gui/gui/main_window.py`: MainWindow + high-level UI flow (no worker plumbing)
+- `audioknob_gui/gui/widgets/`: CellContainer and shared table widgets
+- `audioknob_gui/gui/knobs/`: complex knob UI logic + small registry
+- `audioknob_gui/gui/table.py`: table population, column setup, row rendering, sorting behavior
+
 ### Bugs Fixed (Prevent Regression)
 - Prevented accidental editing of table cells (table is now non-editable).
 - Clarified the Info column header/tooltip to match the per-row "i" button.
