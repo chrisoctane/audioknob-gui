@@ -1,0 +1,1360 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QColor, QCursor
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QTableWidgetItem,
+    QWidget,
+)
+
+from audioknob_gui.gui.state import save_state
+
+class CellContainer(QWidget):
+    def __init__(self, bg: QColor, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._bg = QColor(bg)
+        self.setAutoFillBackground(False)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.set_bg(self._bg)
+
+    def set_bg(self, bg: QColor) -> None:
+        self._bg = QColor(bg)
+        self.setStyleSheet(f"background-color: {self._bg.name()};")
+
+    def content_widget(self) -> QWidget | None:
+        layout = self.layout()
+        if layout is None or layout.count() == 0:
+            return None
+        item = layout.itemAt(0)
+        if item is None:
+            return None
+        return item.widget()
+
+
+
+class TableMixin:
+    def _requirements_label(self, k, advanced_knobs: set[str]) -> str:
+        parts: list[str] = []
+        if k.id in advanced_knobs:
+            parts.append("A")
+        if k.requires_reboot:
+            parts.append("R")
+        if k.requires_groups:
+            parts.append("G")
+        if not parts:
+            return ""
+        return " ".join(parts)
+
+
+    def _requirements_key_tooltip(self) -> str:
+        return "A=Advanced, R=Reboot required, G=Groups required"
+
+
+    def _requirements_tooltip(self, k, advanced_knobs: set[str]) -> str:
+        legend = self._requirements_key_tooltip()
+        parts: list[str] = []
+        if k.id in advanced_knobs:
+            parts.append("Advanced")
+        if k.requires_reboot:
+            parts.append("Reboot required")
+        if k.requires_groups:
+            parts.append("Groups required")
+        if not parts:
+            return f"{legend}\nNo requirements"
+        return f"{legend}\nRequires: {', '.join(parts)}"
+
+
+    def _requirements_group_tooltip(self, label: str) -> str:
+        legend = self._requirements_key_tooltip()
+        if not label or label == "—":
+            return f"{legend}\nNo requirements"
+        parts: list[str] = []
+        for letter in label.split():
+            if letter == "A":
+                parts.append("Advanced")
+            elif letter == "R":
+                parts.append("Reboot required")
+            elif letter == "G":
+                parts.append("Groups required")
+        if not parts:
+            return legend
+        return f"{legend}\nRequires: {', '.join(parts)}"
+
+
+    def _grouping_mode(self) -> str | None:
+        if self._sort_column is None or self._sort_column == 6:
+            return "category"
+        if self._sort_column == 4:
+            return "requirements"
+        if self._sort_column == 5:
+            return "status"
+        if self._sort_column == 7:
+            return "risk"
+        return None
+
+
+    def _category_label(self, key: str) -> str:
+        mapping = {
+            "cpu": "CPU",
+            "irq": "IRQ",
+            "kernel": "Kernel",
+            "permissions": "Permissions",
+            "power": "Power",
+            "services": "Services",
+            "stack": "Stack",
+            "testing": "Testing",
+            "vm": "Memory",
+        }
+        if key in mapping:
+            return mapping[key]
+        cleaned = key.replace("_", " ").strip()
+        return cleaned.title() if cleaned else key
+
+
+    def _sys_label_for_knob(self, k) -> str:
+        if k.impl is None:
+            return "—"
+        kind = k.impl.kind
+        params = k.impl.params or {}
+
+        if kind == "kernel_cmdline":
+            param = self._kernel_cmdline_param_for_state(k.id)
+            if not param:
+                param = str(params.get("param", "")).strip()
+            if param:
+                return param.split("=", 1)[0].strip() or param
+            return "cmdline"
+
+        if kind == "sysctl_conf":
+            lines = params.get("lines") or []
+            keys: list[str] = []
+            for line in lines:
+                raw = str(line).strip()
+                if not raw or raw.startswith("#") or "=" not in raw:
+                    continue
+                key = raw.split("=", 1)[0].strip()
+                if key and key not in keys:
+                    keys.append(key)
+            return ",".join(keys) if keys else "sysctl"
+
+        if kind == "sysfs_glob_kv":
+            glob = str(params.get("glob", "")).strip()
+            return Path(glob).name if glob else "sysfs"
+
+        if kind == "udev_rule":
+            path = str(params.get("path", "")).strip()
+            return Path(path).name if path else "udev"
+
+        if kind == "pam_limits_audio_group":
+            path = str(params.get("path", "")).strip()
+            return Path(path).name if path else "limits"
+
+        if kind == "power_profile":
+            backend = self._power_profile_backend_from_state()
+            if backend == "powerprofilesctl":
+                return "powerprofilesctl"
+            if backend == "tuned":
+                return "tuned-adm"
+            return "powerprofilesctl/tuned"
+
+        if kind == "qjackctl_server_prefix":
+            return "QjackCtl.conf"
+
+        if kind == "pipewire_conf":
+            return "pipewire.conf.d"
+
+        if kind == "systemd_unit_toggle":
+            unit = str(params.get("unit", "")).strip()
+            return unit or "systemd"
+
+        if kind == "rtirq_config":
+            profile = self.state.get("system_profile")
+            if isinstance(profile, dict):
+                paths = profile.get("paths")
+                if isinstance(paths, dict):
+                    rtirq_path = str(paths.get("rtirq_config") or "")
+                    if rtirq_path:
+                        return Path(rtirq_path).name
+            return "rtirq.conf"
+
+        if kind == "irq_affinity":
+            return "/proc/irq"
+
+        if kind == "group_membership":
+            return "groups"
+
+        if kind == "user_service_mask":
+            if k.id == "disable_tracker":
+                return "tracker"
+            services = params.get("services")
+            if isinstance(services, list):
+                items = [str(s) for s in services if s]
+                if items:
+                    return ",".join(items)
+            unit = str(params.get("unit", "")).strip()
+            return unit or "user service"
+
+        if kind == "baloo_disable":
+            return "balooctl"
+
+        if kind == "read_only":
+            what = str(params.get("what", "")).strip()
+            return what or "read_only"
+
+        return kind
+
+
+    def _make_apply_button(self, text: str = "Apply") -> QPushButton:
+        """Create an Apply button."""
+        btn = QPushButton(text)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setMinimumWidth(0)
+        btn.setFocusPolicy(Qt.NoFocus)
+        self._style_table_button(btn)
+        return btn
+
+
+    def _make_reset_button(self, text: str = "Reset") -> QPushButton:
+        """Create a Reset button."""
+        btn = QPushButton(text)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setMinimumWidth(0)
+        btn.setFocusPolicy(Qt.NoFocus)
+        self._style_table_button(btn)
+        return btn
+
+
+    def _make_action_button(self, text: str) -> QPushButton:
+        """Create an action button."""
+        btn = QPushButton(text)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setMinimumWidth(0)
+        btn.setFocusPolicy(Qt.NoFocus)
+        self._style_table_button(btn)
+        return btn
+
+
+    def _style_table_button(self, btn: QPushButton, *, row_dim: bool = False) -> None:
+        bg = "#1f1f1f" if row_dim else "#2a2a2a"
+        btn.setStyleSheet(
+            "QPushButton {"
+            f" background-color: {bg};"
+            " color: #e0e0e0;"
+            " border: 1px solid #1f1f1f;"
+            " border-radius: 6px;"
+            " padding: 2px 6px;"
+            "}"
+            "QPushButton:hover {"
+            " background-color: #333333;"
+            "}"
+            "QPushButton:pressed {"
+            " background-color: #1f1f1f;"
+            "}"
+            "QPushButton:disabled {"
+            " color: #7a7a7a;"
+            " background-color: #1f1f1f;"
+            "}"
+        )
+
+
+    def _style_table_combo(self, widget: QWidget) -> None:
+        widget.setStyleSheet(
+            """
+            QComboBox, QSpinBox {
+                background-color: #2a2a2a;
+                color: #e0e0e0;
+                border: 1px solid #1f1f1f;
+                padding: 2px 6px;
+                border-radius: 6px;
+            }
+            QComboBox:disabled, QSpinBox:disabled {
+                background-color: #1f1f1f;
+                color: #7a7a7a;
+                border: 1px solid #2a2a2a;
+            }
+            QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {
+                border: 1px solid #1f1f1f;
+                background-color: #2a2a2a;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2a2a2a;
+                color: #e0e0e0;
+                selection-background-color: #333333;
+            }
+            """
+        )
+
+
+    def _apply_busy_state(self, btn: QPushButton, *, busy: bool) -> None:
+        if busy:
+            btn.setText("Working...")
+            btn.setEnabled(False)
+
+
+    def _apply_baseline_lock(self, btn: QPushButton) -> None:
+        if self._baseline_ready:
+            return
+        if bool(btn.property("baseline_exempt")):
+            return
+        label = btn.text().strip().lower()
+        if label == "install":
+            return
+        if label not in ("apply", "reset", "install", "join", "leave"):
+            return
+        btn.setEnabled(False)
+        btn.setToolTip("Initial state scan pending. Finish baseline scan before changes.")
+
+
+
+    def _install_hover_tracking(self, widget: QWidget, row: int) -> None:
+        widget.setProperty("hover_row", row)
+        widget.setMouseTracking(True)
+        widget.installEventFilter(self)
+
+
+    def _row_bg_color(self, row: int) -> QColor:
+        row_dim = False
+        if getattr(self, "_row_dim", None) and row < len(self._row_dim):
+            row_dim = self._row_dim[row]
+        if row_dim:
+            return QColor("#1f1f1f")
+        return QColor("#353535" if row % 2 else "#2f2f2f")
+
+
+    def _ensure_widget_cell_bg(self, row: int, col: int) -> None:
+        item = self.table.item(row, col)
+        if item is None:
+            item = QTableWidgetItem("")
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.table.setItem(row, col, item)
+        item.setBackground(self._row_bg_color(row))
+
+
+    def _clear_row_widgets(self, row: int) -> None:
+        for col in range(self.table.columnCount()):
+            if self.table.cellWidget(row, col) is not None:
+                self.table.setCellWidget(row, col, None)
+
+
+    def _wrap_cell_widget(self, row: int, col: int, widget: QWidget) -> None:
+        self._ensure_widget_cell_bg(row, col)
+        container = CellContainer(self._row_bg_color(row))
+        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 2, 4, 2)
+        if widget.sizePolicy().horizontalPolicy() in (QSizePolicy.Expanding, QSizePolicy.MinimumExpanding):
+            layout.setAlignment(Qt.AlignVCenter)
+            layout.addWidget(widget, 1)
+        else:
+            layout.setAlignment(Qt.AlignCenter)
+            layout.addWidget(widget)
+        self._install_hover_tracking(container, row)
+        self.table.setCellWidget(row, col, container)
+
+
+    def _set_info_cell(self, row: int, widget: QWidget) -> None:
+        self._install_hover_tracking(widget, row)
+        self._wrap_cell_widget(row, 0, widget)
+
+
+    def _set_action_cell(self, row: int, widget: QWidget) -> None:
+        self._install_hover_tracking(widget, row)
+        if isinstance(widget, QPushButton):
+            self._apply_baseline_lock(widget)
+        self._wrap_cell_widget(row, 2, widget)
+
+
+    def _set_config_cell(self, row: int, widget: QWidget) -> None:
+        self._install_hover_tracking(widget, row)
+        if isinstance(widget, (QComboBox, QSpinBox)):
+            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._style_table_combo(widget)
+        self._wrap_cell_widget(row, 3, widget)
+
+
+    def _set_status_cell(self, row: int, widget: QWidget) -> None:
+        self._install_hover_tracking(widget, row)
+        self._wrap_cell_widget(row, 5, widget)
+
+
+    def _status_display(self, status: str) -> tuple[str, str]:
+        """Return (display_text, color) for a status."""
+        # Handle test results: "result:12 µs" → "12 µs"
+        if status.startswith("result:"):
+            return (status[7:], "#1976d2")  # Blue
+        
+        mapping = {
+            "applied": ("✓ Applied", "#2e7d32"),      # Green
+            "sys_default": ("Sys Default", "#1976d2"), # Blue
+            "deviated": ("Deviated", "#607d8b"),      # Blue-gray
+            "not_applied": ("—", "#757575"),          # Gray dash
+            "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
+            "partial": ("◐ Partial", "#f57c00"),      # Orange
+            "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
+            "read_only": ("—", "#9e9e9e"),            # Gray dash
+            "unknown": ("—", "#9e9e9e"),              # Gray dash
+            "running": ("⏳ Updating", "#1976d2"),    # Blue spinner
+            "done": ("✓", "#2e7d32"),                 # Green check
+            "error": ("✗", "#d32f2f"),                # Red X
+        }
+        return mapping.get(status, ("—", "#9e9e9e"))
+
+
+    def _populate(self) -> None:
+        # Disable sorting during population to avoid issues
+        self.table.setSortingEnabled(False)
+        self.table.clearSpans()
+        self.table.clearContents()
+        self._refresh_core_plan_summary()
+        reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
+        advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
+        group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
+        desktop_kind = self._detect_desktop()
+        advanced_knobs = self._advanced_knob_ids()
+        visible_knobs = self._visible_knobs()
+        ordered: list[object] = []
+        grouping_mode = self._grouping_mode()
+
+        def _sort_key(k, col: int) -> tuple:
+            status = self._knob_statuses.get(k.id, "unknown")
+            status_order = {
+                "applied": 0,
+                "pending_reboot": 1,
+                "deviated": 2,
+                "partial": 3,
+                "sys_default": 4,
+                "not_applied": 5,
+                "not_applicable": 6,
+                "unknown": 7,
+            }
+            risk_order = {"low": 0, "medium": 1, "high": 2}
+
+            if col == 4:
+                req = self._requirements_label(k, advanced_knobs).lower()
+                return (req, k.title.lower())
+            if col == 5:
+                return (status_order.get(status, 99), k.title.lower())
+            if col == 6:
+                return (str(k.category).lower(), k.title.lower())
+            if col == 7:
+                return (risk_order.get(str(k.risk_level), 99), k.title.lower())
+            if col == 8:
+                sys_label = self._sys_label_for_knob(k).lower()
+                return (sys_label, k.title.lower())
+            if col in (0, 1, 2, 3):
+                return (k.title.lower(),)
+            return (status_order.get(status, 99), k.title.lower())
+
+        category_order = [
+            "cpu",
+            "irq",
+            "kernel",
+            "permissions",
+            "power",
+            "services",
+            "stack",
+            "vm",
+            "testing",
+        ]
+
+        def _sorted_items(items: list[object], *, force_title: bool = False) -> list[object]:
+            if self._sort_column is None:
+                return items
+            if force_title:
+                return sorted(items, key=lambda k: k.title.lower(), reverse=self._sort_descending)
+            col = int(self._sort_column)
+            return sorted(items, key=lambda k: _sort_key(k, col), reverse=self._sort_descending)
+
+        CATEGORY_HEADER = object()
+        CATEGORY_SEPARATOR = object()
+        if grouping_mode is None:
+            ordered = _sorted_items(list(visible_knobs))
+        elif grouping_mode == "category":
+            by_category: dict[str, list[object]] = {}
+            for k in visible_knobs:
+                key = str(getattr(k, "category", "uncategorized"))
+                by_category.setdefault(key, []).append(k)
+            known_categories = set(category_order)
+            extra_categories = sorted(set(by_category.keys()) - known_categories)
+            ordered_categories = (
+                [(c, self._category_label(c)) for c in category_order]
+                + [(c, self._category_label(c)) for c in extra_categories]
+            )
+            if self._sort_column == 6 and self._sort_descending:
+                ordered_categories = list(reversed(ordered_categories))
+            for cat_key, cat_label in ordered_categories:
+                items = by_category.get(cat_key, [])
+                if not items:
+                    continue
+                ordered.append((CATEGORY_HEADER, cat_label))
+                ordered.extend(_sorted_items(items, force_title=self._sort_column is not None))
+                ordered.append(CATEGORY_SEPARATOR)
+            if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                ordered.pop()
+        elif grouping_mode == "requirements":
+            by_req: dict[str, list[object]] = {}
+            for k in visible_knobs:
+                label = self._requirements_label(k, advanced_knobs)
+                by_req.setdefault(label, []).append(k)
+            req_order = ["", "A", "R", "G", "A R", "A G", "R G", "A R G"]
+            extra_labels = sorted(set(by_req.keys()) - set(req_order))
+            ordered_labels = req_order + extra_labels
+            if self._sort_descending:
+                ordered_labels = list(reversed(ordered_labels))
+            for label in ordered_labels:
+                items = by_req.get(label, [])
+                if not items:
+                    continue
+                header_label = label or "None"
+                ordered.append((CATEGORY_HEADER, header_label, self._requirements_group_tooltip(label)))
+                ordered.extend(_sorted_items(items, force_title=True))
+                ordered.append(CATEGORY_SEPARATOR)
+            if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                ordered.pop()
+        elif grouping_mode == "status":
+            status_labels = {
+                "applied": "Applied",
+                "pending_reboot": "Reboot Required",
+                "deviated": "Deviated",
+                "partial": "Partial",
+                "sys_default": "Sys Default",
+                "not_applied": "Not Applied",
+                "not_applicable": "N/A",
+                "read_only": "Read Only",
+                "unknown": "Unknown",
+            }
+            status_order = [
+                "applied",
+                "pending_reboot",
+                "deviated",
+                "partial",
+                "sys_default",
+                "not_applied",
+                "not_applicable",
+                "read_only",
+                "unknown",
+            ]
+            by_status: dict[str, list[object]] = {}
+            for k in visible_knobs:
+                status = self._knob_statuses.get(k.id, "unknown")
+                key = status if status in status_labels else "unknown"
+                by_status.setdefault(key, []).append(k)
+            extra_statuses = sorted(set(by_status.keys()) - set(status_order))
+            ordered_statuses = status_order + extra_statuses
+            if self._sort_descending:
+                ordered_statuses = list(reversed(ordered_statuses))
+            for key in ordered_statuses:
+                items = by_status.get(key, [])
+                if not items:
+                    continue
+                label = status_labels.get(key, key)
+                ordered.append((CATEGORY_HEADER, label))
+                ordered.extend(_sorted_items(items, force_title=True))
+                ordered.append(CATEGORY_SEPARATOR)
+            if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                ordered.pop()
+        elif grouping_mode == "risk":
+            risk_labels = {"low": "Low", "medium": "Medium", "high": "High", "unknown": "Unknown"}
+            risk_order = ["low", "medium", "high", "unknown"]
+            by_risk: dict[str, list[object]] = {}
+            for k in visible_knobs:
+                risk = str(getattr(k, "risk_level", "unknown")).lower()
+                key = risk if risk in risk_labels else "unknown"
+                by_risk.setdefault(key, []).append(k)
+            extra_risks = sorted(set(by_risk.keys()) - set(risk_order))
+            ordered_risks = risk_order + extra_risks
+            if self._sort_descending:
+                ordered_risks = list(reversed(ordered_risks))
+            for key in ordered_risks:
+                items = by_risk.get(key, [])
+                if not items:
+                    continue
+                ordered.append((CATEGORY_HEADER, risk_labels.get(key, key.title())))
+                ordered.extend(_sorted_items(items, force_title=True))
+                ordered.append(CATEGORY_SEPARATOR)
+            if ordered and ordered[-1] is CATEGORY_SEPARATOR:
+                ordered.pop()
+
+        self.table.setRowCount(len(ordered))
+        self._row_dim = [False] * len(ordered)
+
+        for r, k in enumerate(ordered):
+            self._clear_row_widgets(r)
+            if isinstance(k, tuple) and k and k[0] is CATEGORY_HEADER:
+                label = str(k[1])
+                tooltip = str(k[2]) if len(k) > 2 and k[2] else ""
+                header_bg = QColor("#1f1f1f")
+                for c in range(self.table.columnCount()):
+                    self.table.removeCellWidget(r, c)
+                self.table.setSpan(r, 0, 1, self.table.columnCount())
+                header_item = QTableWidgetItem(label)
+                header_item.setFlags(Qt.NoItemFlags)
+                header_item.setForeground(QColor("#cfcfcf"))
+                header_item.setBackground(header_bg)
+                header_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                header_font = header_item.font()
+                header_font.setBold(True)
+                header_item.setFont(header_font)
+                if tooltip:
+                    header_item.setToolTip(tooltip)
+                self.table.setItem(r, 0, header_item)
+                for c in range(1, self.table.columnCount()):
+                    filler = QTableWidgetItem("")
+                    filler.setFlags(Qt.NoItemFlags)
+                    filler.setBackground(header_bg)
+                    self.table.setItem(r, c, filler)
+                continue
+            if k is CATEGORY_SEPARATOR:
+                sep_bg = QColor("#1f1f1f")
+                for c in range(self.table.columnCount()):
+                    self.table.removeCellWidget(r, c)
+                sep = QTableWidgetItem("")
+                sep.setFlags(Qt.NoItemFlags)
+                sep.setForeground(QColor("#9e9e9e"))
+                sep.setBackground(sep_bg)
+                sep.setTextAlignment(Qt.AlignCenter)
+                self.table.setSpan(r, 0, 1, self.table.columnCount())
+                self.table.setItem(r, 0, sep)
+                for c in range(1, self.table.columnCount()):
+                    filler = QTableWidgetItem("")
+                    filler.setFlags(Qt.NoItemFlags)
+                    filler.setBackground(sep_bg)
+                    self.table.setItem(r, c, filler)
+                try:
+                    self.table.setRowHeight(r, 10)
+                except Exception:
+                    pass
+                continue
+            status = self._knob_statuses.get(k.id, "unknown")
+            busy = k.id in self._busy_knobs
+            display_status = "running" if busy else status
+            not_applicable = (status == "not_applicable")
+            not_applicable_reason = "Not available on this system"
+            if k.id == "disable_tracker" and desktop_kind == "kde":
+                not_applicable = True
+                not_applicable_reason = "Requires GNOME desktop"
+            elif k.id == "disable_baloo" and desktop_kind == "gnome":
+                not_applicable = True
+                not_applicable_reason = "Requires KDE desktop"
+            elif k.id == "power_profile_performance" and not_applicable:
+                backend = self._power_profile_backend_from_state()
+                if backend == "powerprofilesctl":
+                    not_applicable_reason = "Requires powerprofilesctl"
+                elif backend == "tuned":
+                    not_applicable_reason = "Requires tuned-adm"
+                else:
+                    not_applicable_reason = "Requires powerprofilesctl or tuned-adm"
+            locked_bg = QColor("#1f1f1f")
+            locked_fg = QColor("#7a7a7a")
+            locked_style = (
+                "QPushButton { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 2px 6px; }"
+                "QPushButton:hover { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                "QPushButton:pressed { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+            )
+
+            # Check requirements
+            group_ok = self._knob_group_ok(k)
+            group_pending_lock = bool(k.requires_groups) and group_pending
+            if group_pending_lock:
+                group_ok = False
+            commands_ok = self._knob_commands_ok(k)
+            missing_cmds = self._knob_missing_commands(k)
+            reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
+            advanced_gate_lock = k.id in advanced_knobs and not advanced_enabled and status not in ("applied", "pending_reboot")
+            reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
+            locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock or advanced_gate_lock
+            row_dim = locked or not_applicable
+            self._row_dim[r] = row_dim
+            row_dim = locked or not_applicable
+            
+            # Determine lock reason
+            lock_reason = ""
+            if group_pending_lock:
+                lock_reason = f"Groups pending reboot: {', '.join(k.requires_groups)}"
+            elif reboot_dep_lock:
+                lock_reason = f"Requires groups: {', '.join(k.requires_groups)} (Turn on Reboot-required changes)"
+            elif not group_ok:
+                lock_reason = f"Join groups: {', '.join(k.requires_groups)}"
+            elif reboot_gate_lock:
+                lock_reason = f"Reboot required: {k.title}"
+            elif advanced_gate_lock:
+                lock_reason = "Turn on Advanced knobs"
+            elif not commands_ok:
+                lock_reason = f"Install: {', '.join(missing_cmds)}"
+            
+            # Column 0: Info button
+            info_btn = QPushButton("i")
+            info_btn.setFixedWidth(28)
+            info_btn.setToolTip("Show details")
+            info_btn.setFocusPolicy(Qt.NoFocus)
+            self._style_table_button(info_btn, row_dim=row_dim)
+            info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
+            if row_dim:
+                info_btn.setStyleSheet(locked_style)
+            self._set_info_cell(r, info_btn)
+
+            # Column 1: Knob title (gray if locked)
+            title_item = QTableWidgetItem(k.title)
+            title_item.setData(Qt.UserRole, k.id)  # Store ID for lookup
+            title_item.setBackground(self._row_bg_color(r))
+            if row_dim:
+                title_item.setForeground(locked_fg)
+            if locked:
+                title_item.setToolTip(lock_reason)
+            elif not_applicable:
+                title_item.setToolTip(not_applicable_reason)
+            self.table.setItem(r, 1, title_item)
+
+            # Column 4: Requirements
+            req_item = QTableWidgetItem(self._requirements_label(k, advanced_knobs))
+            req_item.setToolTip(self._requirements_tooltip(k, advanced_knobs))
+            req_item.setBackground(self._row_bg_color(r))
+            req_item.setTextAlignment(Qt.AlignCenter)
+            if row_dim:
+                req_item.setForeground(locked_fg)
+            self.table.setItem(r, 4, req_item)
+
+            # Column 5: Status (with color)
+            status_tip = ""
+            if locked:
+                status_text = "Locked"
+                status_color = locked_fg.name()
+                status_tip = lock_reason
+            elif not_applicable:
+                status_text = "N/A"
+                status_color = locked_fg.name()
+                status_tip = not_applicable_reason
+            else:
+                status_text, status_color = self._status_display(display_status)
+                tooltip_map = {
+                    "applied": "Baseline captured; patch applied successfully.",
+                    "sys_default": "Baseline; captured before optimisation.",
+                    "deviated": "Differs from both baseline and optimisation.",
+                    "partial": "See Status details.",
+                    "pending_reboot": "Applied in boot config; reboot required.",
+                    "not_applied": "Not applied.",
+                    "not_applicable": "Not available on this system.",
+                    "read_only": "Read-only check.",
+                    "unknown": "Status unknown.",
+                    "running": "Updating...",
+                    "done": "Completed.",
+                    "error": "Error during operation.",
+                }
+                if display_status.startswith("result:"):
+                    status_tip = "Test result."
+                else:
+                    status_tip = tooltip_map.get(display_status, "")
+            status_item = QTableWidgetItem("")
+            status_item.setData(Qt.UserRole, status_text)
+            status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            status_item.setBackground(self._row_bg_color(r))
+            if status_tip:
+                status_item.setToolTip(status_tip)
+            self.table.setItem(r, 5, status_item)
+            status_btn = QPushButton(status_text)
+            status_btn.setFocusPolicy(Qt.NoFocus)
+            status_btn.setFlat(False)
+            status_btn.setProperty("status_button", True)
+            status_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            status_btn.setCursor(Qt.PointingHandCursor)
+            button_bg = "#2a2a2a"
+            if row_dim:
+                button_bg = "#1f1f1f"
+            status_btn.setStyleSheet(
+                "QPushButton {"
+                f" text-align: center; color: {status_color};"
+                f" background-color: {button_bg};"
+                " border: 1px solid #1f1f1f;"
+                " border-radius: 6px;"
+                " padding: 2px 6px;"
+                "}"
+                "QPushButton:hover {"
+                " background-color: #333333;"
+                "}"
+                "QPushButton:disabled {"
+                " color: #9e9e9e;"
+                " background-color: #2a2a2a;"
+                "}"
+            )
+            if status_tip:
+                status_btn.setToolTip(status_tip)
+            status_btn.setMinimumWidth(0)
+            if k.impl and k.impl.kind == "read_only":
+                status_btn.setEnabled(False)
+                status_btn.setToolTip("Not applicable for read-only tests")
+            else:
+                status_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
+            self._set_status_cell(r, status_btn)
+
+            # Column 6: Category
+            cat_item = QTableWidgetItem(self._category_label(str(k.category)))
+            cat_item.setBackground(self._row_bg_color(r))
+            cat_item.setTextAlignment(Qt.AlignCenter)
+            if row_dim:
+                cat_item.setForeground(locked_fg)
+            self.table.setItem(r, 6, cat_item)
+
+            # Column 7: Risk
+            risk_item = QTableWidgetItem(str(k.risk_level))
+            risk_item.setBackground(self._row_bg_color(r))
+            risk_item.setTextAlignment(Qt.AlignCenter)
+            if row_dim:
+                risk_item.setForeground(locked_fg)
+            self.table.setItem(r, 7, risk_item)
+
+            # Column 8: CLI
+            sys_item = QTableWidgetItem(self._sys_label_for_knob(k))
+            sys_item.setBackground(self._row_bg_color(r))
+            if row_dim:
+                sys_item.setForeground(locked_fg)
+            self.table.setItem(r, 8, sys_item)
+
+            # Column 2: Action button (context-sensitive)
+            if k.id == "audio_group_membership":
+                # Special: group membership knob
+                label = "Leave" if status == "applied" else "Join"
+                btn = self._make_reset_button(label) if label == "Leave" else self._make_apply_button(label)
+                if label == "Leave":
+                    btn.clicked.connect(self._on_leave_groups)
+                else:
+                    btn.clicked.connect(self._on_join_groups)
+                self._apply_busy_state(btn, busy=busy)
+                if locked:
+                    btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif group_pending_lock:
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif reboot_dep_lock:
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif not group_ok:
+                # Locked: user needs to join groups first
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif reboot_gate_lock:
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif advanced_gate_lock:
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif not commands_ok:
+                # Locked: needs package install
+                btn = self._make_action_button("Install")
+                btn.setToolTip(f"Install: {', '.join(missing_cmds)}")
+                cmds = list(missing_cmds)
+                btn.setProperty("install_cmds", cmds)
+                btn.clicked.connect(lambda _, cmds=cmds: self._on_install_packages(cmds))
+                btn.setProperty("baseline_exempt", True)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif not_applicable:
+                btn = self._make_action_button("N/A")
+                btn.setEnabled(False)
+                btn.setToolTip(not_applicable_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif k.id == "stack_detect":
+                btn = self._make_action_button("View")
+                btn.clicked.connect(self.on_view_stack)
+                self._set_action_cell(r, btn)
+            elif k.id == "scheduler_jitter_test":
+                btn = self._make_action_button("Test")
+                if busy:
+                    btn.setText("Working...")
+                    btn.setEnabled(False)
+                else:
+                    btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
+                self._set_action_cell(r, btn)
+            elif k.id == "blocker_check":
+                btn = self._make_action_button("Scan")
+                btn.clicked.connect(self.on_check_blockers)
+                self._set_action_cell(r, btn)
+            elif k.id == "pipewire_quantum" and not locked:
+                # Action column: Apply/Reset button
+                status = self._knob_statuses.get(k.id, "unknown")
+                if status in ("applied", "pending_reboot"):
+                    btn = self._make_reset_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                else:
+                    btn = self._make_apply_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                self._apply_busy_state(btn, busy=busy)
+                self._set_action_cell(r, btn)
+
+                # Config column: quantum selector
+                q_combo = QComboBox()
+                q_combo.setMinimumWidth(0)
+                q_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+                values = [32, 64, 128, 256, 512, 1024]
+                for v in values:
+                    q_combo.addItem(str(v), v)
+
+                current = self._pipewire_quantum_from_state()
+                if current is None and k.impl:
+                    try:
+                        current = int(k.impl.params.get("quantum")) if k.impl.params.get("quantum") is not None else None
+                    except Exception:
+                        current = None
+                q_combo.blockSignals(True)
+                if current in values:
+                    q_combo.setCurrentIndex(values.index(int(current)))
+                q_combo.blockSignals(False)
+
+                def _on_change(_: int, *, _combo: QComboBox = q_combo) -> None:
+                    # Capture the correct combo; otherwise a later reassignment in _populate()
+                    # can cause late-binding bugs (e.g. writing sample rate into quantum).
+                    self.state["pipewire_quantum"] = int(_combo.currentData())
+                    save_state(self.state)
+                    # Optimistic UI: config changed, so action should become Apply until proven otherwise.
+                    self._knob_statuses["pipewire_quantum"] = "not_applied"
+                    self._refresh_statuses()
+                    self._populate()
+
+                q_combo.currentIndexChanged.connect(_on_change)
+                self._install_hover_tracking(q_combo, r)
+                self._set_config_cell(r, q_combo)
+
+            elif k.id == "pipewire_sample_rate" and not locked:
+                # Action column: Apply/Reset button
+                status = self._knob_statuses.get(k.id, "unknown")
+                if status in ("applied", "pending_reboot"):
+                    btn = self._make_reset_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                else:
+                    btn = self._make_apply_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                self._apply_busy_state(btn, busy=busy)
+                self._set_action_cell(r, btn)
+
+                # Config column: sample rate selector
+                r_combo = QComboBox()
+                r_combo.setMinimumWidth(0)
+                r_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+                values = [44100, 48000, 88200, 96000, 192000]
+                for v in values:
+                    r_combo.addItem(f"{v} Hz", v)
+
+                current = self._pipewire_sample_rate_from_state()
+                if current is None and k.impl:
+                    try:
+                        current = int(k.impl.params.get("rate")) if k.impl.params.get("rate") is not None else None
+                    except Exception:
+                        current = None
+                r_combo.blockSignals(True)
+                if current in values:
+                    r_combo.setCurrentIndex(values.index(int(current)))
+                r_combo.blockSignals(False)
+
+                def _on_rate_change(_: int, *, _combo: QComboBox = r_combo) -> None:
+                    self.state["pipewire_sample_rate"] = int(_combo.currentData())
+                    save_state(self.state)
+                    self._knob_statuses["pipewire_sample_rate"] = "not_applied"
+                    self._refresh_statuses()
+                    self._populate()
+
+                r_combo.currentIndexChanged.connect(_on_rate_change)
+                self._install_hover_tracking(r_combo, r)
+                self._set_config_cell(r, r_combo)
+            elif k.id == "qjackctl_server_prefix_rt":
+                # Normal apply/reset button in Action column
+                status = self._knob_statuses.get(k.id, "unknown")
+                if status in ("applied", "pending_reboot"):
+                    btn = self._make_reset_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                else:
+                    btn = self._make_apply_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                self._apply_busy_state(btn, busy=busy)
+                if locked:
+                    btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+
+                # Config column: CPU core selection
+                cfg_btn = self._make_action_button("Cores")
+                cfg_btn.setToolTip("Configure CPU cores for pinning")
+                cfg_btn.setFocusPolicy(Qt.NoFocus)
+                cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                self._install_hover_tracking(cfg_btn, r)
+                if locked:
+                    cfg_btn.setEnabled(False)
+                    cfg_btn.setStyleSheet(locked_style)
+                self._set_config_cell(r, cfg_btn)
+            elif k.id == "power_profile_performance":
+                status = self._knob_statuses.get(k.id, "unknown")
+                if status in ("applied", "pending_reboot"):
+                    btn = self._make_reset_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                else:
+                    btn = self._make_apply_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                self._apply_busy_state(btn, busy=busy)
+                if locked:
+                    btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+
+                backend_combo = QComboBox()
+                backend_combo.setMinimumWidth(0)
+                backend_combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+                backend_combo.addItem("Auto", "auto")
+                backend_combo.addItem("powerprofilesctl", "powerprofilesctl")
+                backend_combo.addItem("tuned", "tuned")
+                backend_combo.setToolTip(
+                    "Power profile backend: auto uses the active backend; tuned uses latency-performance."
+                )
+                current_backend = self._power_profile_backend_from_state()
+                if current_backend not in ("auto", "powerprofilesctl", "tuned"):
+                    current_backend = "auto"
+                backend_combo.blockSignals(True)
+                for idx in range(backend_combo.count()):
+                    if backend_combo.itemData(idx) == current_backend:
+                        backend_combo.setCurrentIndex(idx)
+                        break
+                backend_combo.blockSignals(False)
+
+                def _on_backend_change(_: int, *, _combo: QComboBox = backend_combo) -> None:
+                    self.state["power_profile_backend"] = str(_combo.currentData())
+                    save_state(self.state)
+                    # Config changed; force re-evaluation until apply succeeds.
+                    self._knob_statuses["power_profile_performance"] = "not_applied"
+                    self._refresh_statuses()
+                    self._populate()
+
+                backend_combo.currentIndexChanged.connect(_on_backend_change)
+                self._install_hover_tracking(backend_combo, r)
+
+                config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
+                if config_locked:
+                    backend_combo.setEnabled(False)
+                self._set_config_cell(r, backend_combo)
+            elif k.id == "irq_pinning":
+                status = self._knob_statuses.get(k.id, "unknown")
+                if status in ("applied", "pending_reboot"):
+                    btn = self._make_reset_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                else:
+                    btn = self._make_apply_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                self._apply_busy_state(btn, busy=busy)
+                if locked:
+                    btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+
+                cfg_btn = self._make_action_button("Devices")
+                cfg_btn.setToolTip("Configure devices and CPU cores")
+                cfg_btn.setFocusPolicy(Qt.NoFocus)
+                cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                self._install_hover_tracking(cfg_btn, r)
+                if locked:
+                    cfg_btn.setEnabled(False)
+                    cfg_btn.setStyleSheet(locked_style)
+                self._set_config_cell(r, cfg_btn)
+            elif k.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
+                status = self._knob_statuses.get(k.id, "unknown")
+                if status in ("applied", "pending_reboot"):
+                    btn = self._make_reset_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                else:
+                    btn = self._make_apply_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                self._apply_busy_state(btn, busy=busy)
+                if locked:
+                    btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+
+                cfg_btn = self._make_action_button("Cores")
+                cfg_btn.setToolTip("Configure CPU cores")
+                cfg_btn.setFocusPolicy(Qt.NoFocus)
+                cfg_btn.clicked.connect(lambda _, kid=k.id: self.on_configure_knob(kid))
+                self._install_hover_tracking(cfg_btn, r)
+                if locked:
+                    cfg_btn.setEnabled(False)
+                    cfg_btn.setStyleSheet(locked_style)
+                self._set_config_cell(r, cfg_btn)
+            elif k.impl is None:
+                # Placeholder knob - not implemented yet
+                btn = self._make_action_button("—")
+                btn.setEnabled(False)
+                btn.setToolTip("Not implemented yet")
+                self._set_action_cell(r, btn)
+            else:
+                # Normal knob: show Apply or Reset based on current status
+                status = self._knob_statuses.get(k.id, "unknown")
+                if status in ("applied", "pending_reboot"):
+                    btn = self._make_reset_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
+                    self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
+                else:
+                    btn = self._make_apply_button()
+                    btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "apply"))
+                    self._apply_queue_button_state(btn, k.id, "apply", row_dim=row_dim)
+                self._apply_busy_state(btn, busy=busy)
+                self._set_action_cell(r, btn)
+
+            # Column 3: Config - clear if no widget was set for this row
+            # (PipeWire rows set their own widgets above; other rows need clearing)
+            if k.id not in (
+                "pipewire_quantum",
+                "pipewire_sample_rate",
+                "power_profile_performance",
+                "qjackctl_server_prefix_rt",
+                "irq_pinning",
+                "kernel_isolcpus",
+                "kernel_nohz_full",
+                "kernel_rcu_nocbs",
+                "kernel_irqaffinity",
+            ):
+                self.table.removeCellWidget(r, 3)
+            self._ensure_widget_cell_bg(r, 3)
+
+            if row_dim:
+                config_locked = group_pending_lock or reboot_dep_lock or reboot_gate_lock or advanced_gate_lock
+                for col in range(self.table.columnCount()):
+                    cell_widget = self.table.cellWidget(r, col)
+                    if cell_widget is None:
+                        continue
+                    widget = cell_widget
+                    if isinstance(widget, CellContainer):
+                        content = widget.content_widget()
+                        if content is None:
+                            continue
+                        widget = content
+                    if widget.property("status_button"):
+                        widget.setStyleSheet(locked_style)
+                        continue
+                    if (
+                        k.id == "power_profile_performance"
+                        and col == 3
+                        and isinstance(widget, QComboBox)
+                        and not config_locked
+                    ):
+                        continue
+                    if isinstance(widget, QPushButton):
+                        widget.setStyleSheet(locked_style)
+                    else:
+                        widget.setEnabled(False)
+        
+        # Keep built-in sorting disabled; we handle per-category sorting.
+        self.table.setSortingEnabled(False)
+        # Reflow row heights so text/widgets don't clip when font size changes.
+        try:
+            self.table.resizeRowsToContents()
+        except Exception:
+            pass
+
+
+    def _apply_default_column_widths(self) -> None:
+        try:
+            from PySide6.QtGui import QFontMetrics
+        except Exception:
+            return
+
+        fm = QFontMetrics(self.table.font())
+
+        def _w(text: str, pad: int = 24) -> int:
+            return fm.horizontalAdvance(text) + pad
+
+        knob_titles = [k.title for k in self.registry] or ["Knob"]
+        knob_width = max([_w("Knob")] + [_w(t) for t in knob_titles])
+
+        status_texts = [
+            "Locked",
+            "✓ Applied",
+            "Sys Default",
+            "⚠ Deviated",
+            "⟳ Reboot",
+            "◐ Partial",
+            "N/A",
+            "⏳ Updating",
+            "—",
+        ]
+        status_width = max([_w("Status")] + [_w(t) for t in status_texts])
+
+        requirements_texts = [
+            "Requirements",
+            "A",
+            "R",
+            "G",
+            "A R",
+            "A G",
+            "R G",
+            "A R G",
+            "—",
+        ]
+        requirements_width = max(_w(t) for t in requirements_texts)
+
+        category_texts = [str(k.category) for k in self.registry] + ["Category"]
+        category_width = max(_w(t) for t in category_texts)
+
+        risk_texts = [str(k.risk_level) for k in self.registry] + ["Risk"]
+        risk_width = max(_w(t) for t in risk_texts)
+
+        sys_texts = [self._sys_label_for_knob(k) for k in self.registry] + ["CLI"]
+        sys_width = max(_w(t[:24] + ("..." if len(t) > 24 else "")) for t in sys_texts)
+
+        action_texts = ["Apply", "Reset", "Install", "View", "Test", "Scan", "Join", "Leave", "Action"]
+        action_width = max(_w(t, pad=40) for t in action_texts)
+        action_width = max(action_width, 100)
+
+        config_texts = ["Config", "Cores", "Devices", "44100 Hz", "192000 Hz", "512", "1024"]
+        config_width = max(_w(t, pad=44) for t in config_texts)
+        config_width = max(config_width, 128)
+
+        status_width = max(status_width, _w("Status", pad=60))
+
+        self._min_column_widths = {
+            0: 32,
+            2: action_width,
+            3: config_width,
+            5: status_width,
+        }
+
+        self.table.setColumnWidth(0, 32)  # Info button
+        self.table.setColumnWidth(1, knob_width)
+        self.table.setColumnWidth(2, action_width)
+        self.table.setColumnWidth(3, config_width)
+        self.table.setColumnWidth(4, requirements_width)
+        self.table.setColumnWidth(5, status_width)
+        self.table.setColumnWidth(6, category_width)
+        self.table.setColumnWidth(7, risk_width)
+        self.table.setColumnWidth(8, sys_width)
+        self._enforce_min_column_widths()
+
+
+    def _enforce_min_column_widths(self) -> None:
+        header = self.table.horizontalHeader()
+        for col, min_w in self._min_column_widths.items():
+            if header.sectionSize(col) < min_w:
+                header.resizeSection(col, min_w)
+
+
+    def _on_section_resized(self, logical: int, _old: int, new: int) -> None:
+        min_w = self._min_column_widths.get(int(logical))
+        if min_w and new < min_w:
+            self.table.horizontalHeader().resizeSection(logical, min_w)
+
+
+    def _on_header_sort(self, column: int) -> None:
+        if self._sort_column == column:
+            self._sort_descending = not self._sort_descending
+        else:
+            self._sort_column = column
+            self._sort_descending = False
+        order = Qt.DescendingOrder if self._sort_descending else Qt.AscendingOrder
+        self.table.horizontalHeader().setSortIndicator(column, order)
+        self._populate()
+
+
+    def _on_row_hover(self, row: int, _column: int) -> None:
+        if row >= 0:
+            self._set_dim_hover_row(row)
+            self.table.selectRow(row)
+
+
+    def eventFilter(self, obj, event):
+        if obj is self and event.type() in (QEvent.Leave, QEvent.WindowDeactivate, QEvent.FocusOut):
+            self.table.clearSelection()
+            self._clear_dim_hover()
+            return False
+        if obj in (self.table.viewport(), self.table.horizontalHeader(), self.table) and event.type() == QEvent.Leave:
+            pos = self.table.mapFromGlobal(QCursor.pos())
+            if not self.table.rect().contains(pos):
+                self.table.clearSelection()
+                self._clear_dim_hover()
+            return False
+        hover_row = obj.property("hover_row")
+        if isinstance(hover_row, int):
+            if event.type() in (QEvent.Enter, QEvent.MouseMove):
+                self._set_dim_hover_row(hover_row)
+                self.table.selectRow(hover_row)
+            elif event.type() == QEvent.Leave:
+                pos = self.table.mapFromGlobal(QCursor.pos())
+                if not self.table.rect().contains(pos):
+                    self.table.clearSelection()
+                    self._clear_dim_hover()
+            return False
+        return super().eventFilter(obj, event)
+
+
+    def _set_dim_hover_row(self, row: int) -> None:
+        prev = getattr(self, "_hover_row", None)
+        if prev == row:
+            return
+        if prev is not None:
+            self._restore_dim_row(prev)
+        self._hover_row = row
+        self._clear_dim_row(row)
+
+
+    def _clear_dim_hover(self) -> None:
+        prev = getattr(self, "_hover_row", None)
+        if prev is None:
+            return
+        self._restore_dim_row(prev)
+        self._hover_row = None
+
+
+    def _clear_dim_row(self, row: int) -> None:
+        if getattr(self, "_row_dim", None) is None:
+            return
+        if row >= len(self._row_dim) or not self._row_dim[row]:
+            return
+        bg = self._row_bg_color(row)
+        for col in range(self.table.columnCount()):
+            item = self.table.item(row, col)
+            if item is not None:
+                item.setBackground(bg)
+            widget = self.table.cellWidget(row, col)
+            if isinstance(widget, CellContainer):
+                widget.set_bg(bg)
+
+
+    def _restore_dim_row(self, row: int) -> None:
+        if getattr(self, "_row_dim", None) is None:
+            return
+        if row >= len(self._row_dim) or not self._row_dim[row]:
+            return
+        dim_bg = self._row_bg_color(row)
+        for col in range(self.table.columnCount()):
+            item = self.table.item(row, col)
+            if item is not None:
+                item.setBackground(dim_bg)
+            widget = self.table.cellWidget(row, col)
+            if isinstance(widget, CellContainer):
+                widget.set_bg(dim_bg)
+

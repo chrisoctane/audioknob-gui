@@ -19,6 +19,41 @@ Keep entries concise and actionable.
 
 ## Overseer -> Worker Tasks
 
+### [2026-01-22 13:07] TASK-ID: refactor-ui-phase3
+- Branch: refactor/modularize-cleanup
+- Priority: P1
+- Goal: Extract MainWindow/table rendering from `audioknob_gui/gui/app.py` into dedicated modules with no behavior/UX changes.
+- Context: Read `AGENTS.md`, `PLAN.md`, `PROJECT_STATE.md`, `overseer.md`. Review Phase 2 modules: `audioknob_gui/gui/state.py`, `audioknob_gui/gui/worker_api.py`, `audioknob_gui/gui/dialogs/*`.
+- Scope:
+  - Create `audioknob_gui/gui/main_window.py` for `MainWindow` and related helpers/methods.
+  - Create `audioknob_gui/gui/table.py` for table column setup, row rendering, and sorting/grouping logic.
+  - Leave `audioknob_gui/gui/app.py` as entrypoint + imports/wiring only.
+  - Update the Module Map section in `PROJECT_STATE.md` to mark Phase 3 complete.
+- Out of scope:
+  - No changes to worker/backend logic.
+  - No UI/UX or behavior changes.
+  - No registry/schema edits.
+- Constraints:
+  - Preserve exact behavior, signals, and state interactions.
+  - Avoid moving logic across layers unless required for separation.
+  - Keep function/class names stable where possible to minimize risk.
+- Acceptance Criteria:
+  - `MainWindow` lives in `audioknob_gui/gui/main_window.py`.
+  - Table-specific logic moved into `audioknob_gui/gui/table.py`.
+  - `app.py` contains only app bootstrap + imports; no giant class definitions.
+  - UI behavior remains unchanged.
+  - `PROJECT_STATE.md` module map updated.
+- Docs Required: `PROJECT_STATE.md`
+- Registry Sync Required: No
+- Verification Required:
+  - `python3 scripts/check_repo_consistency.py`
+  - `python3 -m compileall -q audioknob_gui`
+- Rollback Plan: Revert new modules and restore class/functions to `audioknob_gui/gui/app.py`.
+- Stop Conditions:
+  - Missing/conflicting docs
+  - Unexpected local changes
+  - Behavior changes required to proceed
+
 ### [2026-01-22 10:49] TASK-ID: refactor-ui-phase2
 - Branch: refactor/modularize-cleanup
 - Priority: P1
@@ -73,6 +108,25 @@ Keep entries concise and actionable.
 
 ## Worker -> Overseer Updates
 
+### [2026-01-22 13:14] TASK-ID: refactor-ui-phase3
+- Status: ack
+- Branch: refactor/modularize-cleanup
+- Plan: Move MainWindow into `audioknob_gui/gui/main_window.py`, extract table rendering/sorting helpers into `audioknob_gui/gui/table.py`, update `audioknob_gui/gui/app.py` to entrypoint wiring only, update Module Map, run required checks.
+- Changes:
+- Tests Run:
+- Results:
+- Notes/Risks:
+- Questions:
+
+### [2026-01-22 13:23] TASK-ID: refactor-ui-phase3
+- Status: done
+- Branch: refactor/modularize-cleanup
+- Changes: Added `audioknob_gui/gui/main_window.py` for MainWindow + helpers, extracted table logic into `audioknob_gui/gui/table.py`, and simplified `audioknob_gui/gui/app.py` to entrypoint wiring; updated Module Map in `PROJECT_STATE.md`.
+- Tests Run: `python3 scripts/check_repo_consistency.py`; `python3 -m compileall -q audioknob_gui`
+- Results: pass
+- Notes/Risks: None noted.
+- Questions: None.
+
 ### [2026-01-22 10:57] TASK-ID: refactor-ui-phase2
 - Status: ack
 - Branch: refactor/modularize-cleanup
@@ -105,6 +159,11 @@ Keep entries concise and actionable.
 ---
 
 ## Overseer Sign-off
+
+### [2026-01-22 13:36] TASK-ID: refactor-ui-phase3
+- Result: pass
+- Verification: `python3 scripts/check_repo_consistency.py`, `python3 -m compileall -q audioknob_gui`
+- Notes: Verified `audioknob_gui/gui/main_window.py` and `audioknob_gui/gui/table.py` added; `audioknob_gui/gui/app.py` now entrypoint-only; Module Map updated.
 
 ### [2026-01-22 11:48] TASK-ID: refactor-ui-phase2
 - Result: pass

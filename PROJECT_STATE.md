@@ -85,12 +85,14 @@ Phase 2 (done):
 - `audioknob_gui/gui/state.py` -> load_state(), save_state(), migrations/defaults
 - `audioknob_gui/gui/worker_api.py` -> _run_worker_* helpers, pkexec path picking, error parsing
 
+Phase 3 (done):
+- `audioknob_gui/gui/main_window.py` -> MainWindow + high-level UI flow (no worker plumbing)
+- `audioknob_gui/gui/table.py` -> table population, column setup, row rendering, sorting behavior
+
 Next phases (planned, incremental):
 - `audioknob_gui/gui/app.py`: entrypoint + minimal wiring only
-- `audioknob_gui/gui/main_window.py`: MainWindow + high-level UI flow (no worker plumbing)
 - `audioknob_gui/gui/widgets/`: CellContainer and shared table widgets
 - `audioknob_gui/gui/knobs/`: complex knob UI logic + small registry
-- `audioknob_gui/gui/table.py`: table population, column setup, row rendering, sorting behavior
 
 ### Bugs Fixed (Prevent Regression)
 - Prevented accidental editing of table cells (table is now non-editable).
