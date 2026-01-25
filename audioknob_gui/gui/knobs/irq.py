@@ -20,7 +20,7 @@ def build_config_button(ui, knob_id: str) -> QPushButton:
 def configure_dialog(ui) -> None:
     from audioknob_gui.core.irq import list_audio_devices
     from audioknob_gui.platform.detect import get_cpu_count
-    from audioknob_gui.gui.main_window import _get_gui_logger
+    from audioknob_gui.gui.logging_utils import _get_gui_logger
 
     devices = list_audio_devices()
     if not devices:

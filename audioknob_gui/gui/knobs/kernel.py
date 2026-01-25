@@ -17,7 +17,7 @@ def build_config_button(ui, knob_id: str) -> QPushButton:
 
 def configure_core_dialog(ui, knob_id: str) -> None:
     from audioknob_gui.platform.detect import get_cpu_count
-    from audioknob_gui.gui.main_window import _get_gui_logger
+    from audioknob_gui.gui.logging_utils import _get_gui_logger
 
     cpu_count = get_cpu_count()
     allow_auto = knob_id == "kernel_irqaffinity"

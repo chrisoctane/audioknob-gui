@@ -93,6 +93,11 @@ Phase 4 (done):
 - `audioknob_gui/gui/widgets/` -> shared widget helpers (CellContainer)
 - `audioknob_gui/gui/knobs/` -> knob-specific UI hooks + registry
 
+Phase 5 (done):
+- `audioknob_gui/gui/app_info.py` -> _read_git_rev(), _git_rev(), _app_title()
+- `audioknob_gui/gui/logging_utils.py` -> _get_gui_logger(), _get_audit_logger(), _log_gui_audit()
+- `audioknob_gui/gui/system_info.py` -> _kernel_cmdline_tokens(), _param_present(), _kernel_is_rt(), _read_interrupts_map()
+
 Next phases (planned, incremental):
 - (plan complete)
 

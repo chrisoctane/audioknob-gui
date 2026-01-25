@@ -179,6 +179,25 @@ Keep entries concise and actionable.
 
 ## Worker -> Overseer Updates
 
+### [2026-01-22 21:05] TASK-ID: refactor-ui-phase5
+- Status: ack
+- Branch: refactor/modularize-cleanup
+- Plan: Move app info helpers to `audioknob_gui/gui/app_info.py`, logging helpers to `audioknob_gui/gui/logging_utils.py`, system info helpers to `audioknob_gui/gui/system_info.py`, update `audioknob_gui/gui/main_window.py` and knob modules to import them, update Module Map, run required checks.
+- Changes:
+- Tests Run:
+- Results:
+- Notes/Risks:
+- Questions:
+
+### [2026-01-22 21:28] TASK-ID: refactor-ui-phase5
+- Status: done
+- Branch: refactor/modularize-cleanup
+- Changes: Added `audioknob_gui/gui/app_info.py`, `audioknob_gui/gui/logging_utils.py`, and `audioknob_gui/gui/system_info.py`; updated `audioknob_gui/gui/main_window.py` and knob modules to use them; updated Module Map in `PROJECT_STATE.md`.
+- Tests Run: `python3 scripts/check_repo_consistency.py`; `python3 -m compileall -q audioknob_gui`
+- Results: pass
+- Notes/Risks: None noted.
+- Questions: None.
+
 ### [2026-01-22 14:10] TASK-ID: refactor-ui-phase4
 - Status: ack
 - Branch: refactor/modularize-cleanup
@@ -249,6 +268,11 @@ Keep entries concise and actionable.
 ---
 
 ## Overseer Sign-off
+
+### [2026-01-25 09:58] TASK-ID: refactor-ui-phase5
+- Result: pass
+- Verification: `python3 scripts/check_repo_consistency.py`, `python3 -m compileall -q audioknob_gui`
+- Notes: Verified helper modules extracted and Module Map updated.
 
 ### [2026-01-22 16:16] TASK-ID: refactor-ui-phase4
 - Result: pass

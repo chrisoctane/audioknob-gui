@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html as html_lib
 import json
-import logging
 import os
 import re
 import subprocess
@@ -15,7 +14,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from audioknob_gui.gui.app_info import _app_title
+from audioknob_gui.gui.logging_utils import _get_gui_logger, _log_gui_audit
 from audioknob_gui.gui.state import _state_path, load_state, save_state
+from audioknob_gui.gui.system_info import (
+    _kernel_cmdline_tokens,
+    _kernel_is_rt,
+    _param_present,
+    _read_interrupts_map,
+)
 from audioknob_gui.gui.table import TableMixin
 from audioknob_gui.gui.worker_api import (
     _PKEXEC_CANCELLED,
@@ -80,107 +87,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from shiboken6 import isValid
-
-def _read_git_rev(repo_root: Path) -> str:
-    git_dir = repo_root / ".git"
-    if git_dir.is_file():
-        try:
-            line = git_dir.read_text(encoding="utf-8").strip()
-        except Exception:
-            return ""
-        if line.startswith("gitdir:"):
-            git_dir = (repo_root / line.split(":", 1)[1].strip()).resolve()
-        else:
-            return ""
-    if not git_dir.is_dir():
-        return ""
-    head_path = git_dir / "HEAD"
-    try:
-        head = head_path.read_text(encoding="utf-8").strip()
-    except Exception:
-        return ""
-    if head.startswith("ref:"):
-        ref = head.split(" ", 1)[1].strip()
-        ref_path = git_dir / ref
-        try:
-            return ref_path.read_text(encoding="utf-8").strip()[:8]
-        except Exception:
-            return ""
-    return head[:8]
-
-
-def _git_rev() -> str:
-    env_rev = os.environ.get("AUDIOKNOB_GIT_REV", "").strip()
-    if env_rev:
-        return env_rev[:8]
-    repo_env = os.environ.get("AUDIOKNOB_DEV_REPO", "").strip()
-    if repo_env:
-        rev = _read_git_rev(Path(repo_env))
-        if rev:
-            return rev
-    return _read_git_rev(Path(__file__).resolve().parents[2])
-
-
-def _app_title() -> str:
-    try:
-        from audioknob_gui import __version__ as app_version
-    except Exception:
-        app_version = "unknown"
-    rev = _git_rev()
-    if rev:
-        return f"audioknob-gui v{app_version} (git {rev})"
-    return f"audioknob-gui v{app_version}"
-
-
-_GUI_LOGGER: logging.Logger | None = None
-
-
-def _get_gui_logger() -> logging.Logger:
-    global _GUI_LOGGER
-    if _GUI_LOGGER is not None:
-        return _GUI_LOGGER
-
-    log_dir = _state_path().parent / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "gui.log"
-
-    logger = logging.getLogger("audioknob.gui")
-    if not logger.handlers:
-        handler = logging.FileHandler(log_path, encoding="utf-8")
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
-
-    _GUI_LOGGER = logger
-    return logger
-
-
-_AUDIT_LOGGER: logging.Logger | None = None
-
-
-def _get_audit_logger() -> logging.Logger:
-    global _AUDIT_LOGGER
-    if _AUDIT_LOGGER is not None:
-        return _AUDIT_LOGGER
-
-    log_path = Path(_worker_log_path(is_root=False))
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-
-    logger = logging.getLogger("audioknob.audit")
-    if not logger.handlers:
-        handler = logging.FileHandler(log_path, encoding="utf-8")
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
-
-    _AUDIT_LOGGER = logger
-    return logger
-
-
-def _log_gui_audit(action: str, payload: dict[str, Any]) -> None:
-    from audioknob_gui.core.audit import log_audit_event
-
-    log_audit_event(_get_audit_logger(), action, payload)
 
 class KnobTaskWorker(QThread):
     finished = Signal(str, str, bool, object, str)
@@ -745,29 +651,6 @@ class MainWindow(TableMixin, QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "IRQ Overview", f"Failed to load IRQ helpers: {exc}")
             return
-
-        def _read_interrupts_map() -> dict[int, str]:
-            try:
-                raw = Path("/proc/interrupts").read_text(encoding="utf-8")
-            except Exception:
-                return {}
-            lines: dict[int, str] = {}
-            for line in raw.splitlines():
-                stripped = line.strip()
-                if not stripped or not stripped[:1].isdigit():
-                    continue
-                if ":" not in stripped:
-                    continue
-                irq_str, rest = stripped.split(":", 1)
-                irq_str = irq_str.strip()
-                if not irq_str.isdigit():
-                    continue
-                try:
-                    irq = int(irq_str)
-                except Exception:
-                    continue
-                lines[irq] = rest.strip()
-            return lines
 
         cores = sorted(read_cpu_present())
         audio = sorted(set(self._irq_pinning_cpu_cores_from_state() or []))
@@ -2747,51 +2630,6 @@ class MainWindow(TableMixin, QMainWindow):
         if not k:
             return
 
-        def _kernel_cmdline_tokens() -> list[str]:
-            try:
-                raw = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
-            except Exception:
-                return []
-            return [t for t in raw.split() if t]
-
-        def _param_present(tokens: list[str], param: str) -> bool:
-            if "=" in param:
-                return param in tokens
-            for token in tokens:
-                if token == param or token.startswith(param + "="):
-                    return True
-            return False
-
-        def _kernel_is_rt() -> bool:
-            try:
-                rel = os.uname().release.lower()
-            except Exception:
-                return False
-            return bool(re.search(r"(?:^|[-_])rt\\d|(?:^|[-_])rt$|realtime", rel))
-        
-        def _read_interrupts_map() -> dict[int, str]:
-            try:
-                raw = Path("/proc/interrupts").read_text(encoding="utf-8")
-            except Exception:
-                return {}
-            lines: dict[int, str] = {}
-            for line in raw.splitlines():
-                stripped = line.strip()
-                if not stripped or not stripped[:1].isdigit():
-                    continue
-                if ":" not in stripped:
-                    continue
-                irq_str, rest = stripped.split(":", 1)
-                irq_str = irq_str.strip()
-                if not irq_str.isdigit():
-                    continue
-                try:
-                    irq = int(irq_str)
-                except Exception:
-                    continue
-                lines[irq] = rest.strip()
-            return lines
-
         def _shell_single_quote(value: str) -> str:
             return "'" + value.replace("'", "'\"'\"'") + "'"
 
@@ -2986,14 +2824,6 @@ class MainWindow(TableMixin, QMainWindow):
             if len(content) > max_lines:
                 content = content[:max_lines] + ["... (truncated)"]
             return [f"{path}:"] + content
-
-        def _param_present(tokens: list[str], param: str) -> bool:
-            if "=" in param:
-                return param in tokens
-            for token in tokens:
-                if token == param or token.startswith(param + "="):
-                    return True
-            return False
 
         def _find_pids_by_comm(name: str) -> list[int]:
             pids: list[int] = []
