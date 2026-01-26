@@ -211,6 +211,11 @@ Next phases (planned, incremental):
 - The GUI header includes **Logs** (view + copy) and **Clear Logs** (clears GUI
   and user worker logs).
 
+### Changelog policy
+- Every release must update `CHANGELOG.md` with the new version and date.
+- Use short bullets under Added/Changed/Fixed/Removed/Security headings.
+- Call out experimental/dev-only features explicitly.
+
 ### Future Enhancements (P2)
 
 #### Three-State Model for Knob Status
