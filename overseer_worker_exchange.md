@@ -19,6 +19,72 @@ Keep entries concise and actionable.
 
 ## Overseer -> Worker Tasks
 
+### [2026-01-25 14:05] TASK-ID: refactor-ui-phase7
+- Branch: refactor/modularize-cleanup
+- Priority: P2
+- Goal: Extract baseline/status/scan helpers from `audioknob_gui/gui/main_window.py` into `audioknob_gui/gui/status.py` with no behavior/UX changes.
+- Context: Read `AGENTS.md`, `PLAN.md`, `PROJECT_STATE.md`, `overseer.md`. Review Phase 6 actions module.
+- Scope:
+  - Create `audioknob_gui/gui/status.py` for baseline, status refresh, live checks, and CLI status dialog helpers.
+  - Move baseline/state/status helpers out of `main_window.py` and keep thin wrappers.
+  - Update Module Map in `PROJECT_STATE.md` to mark Phase 7 complete.
+- Out of scope:
+  - No UI/UX changes.
+  - No worker/backend changes.
+  - No registry/schema edits.
+- Constraints:
+  - Preserve exact behavior, logging, and error handling.
+  - Keep method signatures stable; use thin wrappers in `MainWindow` if needed.
+- Acceptance Criteria:
+  - Baseline capture/import/export and status refresh behave identically.
+  - `main_window.py` no longer contains moved status/baseline logic.
+  - `PROJECT_STATE.md` module map updated.
+- Docs Required: `PROJECT_STATE.md`
+- Registry Sync Required: No
+- Verification Required:
+  - `python3 scripts/check_repo_consistency.py`
+  - `python3 -m compileall -q audioknob_gui`
+- Rollback Plan: Revert `status.py` and restore methods to `main_window.py`.
+- Stop Conditions:
+  - Missing/conflicting docs
+  - Unexpected local changes
+  - Behavior changes required to proceed
+
+### [2026-01-25 12:48] TASK-ID: refactor-ui-phase6
+- Branch: refactor/modularize-cleanup
+- Priority: P2
+- Goal: Extract action/queue/apply/reset logic from `audioknob_gui/gui/main_window.py` into `audioknob_gui/gui/actions.py` with no behavior/UX changes.
+- Context: Read `AGENTS.md`, `PLAN.md`, `PROJECT_STATE.md`, `overseer.md`. Review recent refactor modules and Phase 5 helpers.
+- Scope:
+  - Create `audioknob_gui/gui/actions.py` with queue/apply/reset/force-reset helpers.
+  - Move these methods (and any tightly-coupled helpers) out of `main_window.py`:
+    - `_on_apply_knob`, `_on_queue_knob`, `_run_knob_task`, `_on_knob_task_finished`
+    - `_restore_knob_internal`, `_restore_knob`, `_run_force_reset`, `_run_force_reset_many`
+    - Reset All flow helpers (`_reset_defaults` / task worker + completion handler)
+  - Update `main_window.py` to call the new module functions.
+  - Update Module Map in `PROJECT_STATE.md` to mark Phase 6 complete.
+- Out of scope:
+  - No UI/UX changes.
+  - No worker/backend changes.
+  - No registry/schema edits.
+- Constraints:
+  - Preserve exact behavior, logging, and error handling.
+  - Keep method signatures stable where possible; use thin wrappers in `MainWindow` if needed.
+- Acceptance Criteria:
+  - Queue/apply/reset flows behave identically.
+  - `main_window.py` no longer contains the moved action logic.
+  - `PROJECT_STATE.md` module map updated.
+- Docs Required: `PROJECT_STATE.md`
+- Registry Sync Required: No
+- Verification Required:
+  - `python3 scripts/check_repo_consistency.py`
+  - `python3 -m compileall -q audioknob_gui`
+- Rollback Plan: Revert `actions.py` and restore methods to `main_window.py`.
+- Stop Conditions:
+  - Missing/conflicting docs
+  - Unexpected local changes
+  - Behavior changes required to proceed
+
 ### [2026-01-22 20:52] TASK-ID: refactor-ui-phase5
 - Branch: refactor/modularize-cleanup
 - Priority: P2
@@ -179,6 +245,44 @@ Keep entries concise and actionable.
 
 ## Worker -> Overseer Updates
 
+### [2026-01-25 14:08] TASK-ID: refactor-ui-phase7
+- Status: ack
+- Branch: refactor/modularize-cleanup
+- Plan: Add `audioknob_gui/gui/status.py` for baseline/status/scan helpers, move related methods out of `audioknob_gui/gui/main_window.py`, update Module Map, run required checks.
+- Changes:
+- Tests Run:
+- Results:
+- Notes/Risks:
+- Questions:
+
+### [2026-01-25 14:32] TASK-ID: refactor-ui-phase7
+- Status: done
+- Branch: refactor/modularize-cleanup
+- Changes: Added `audioknob_gui/gui/status.py` and moved baseline/status/scan logic out of `audioknob_gui/gui/main_window.py` with thin wrappers; updated Module Map in `PROJECT_STATE.md`.
+- Tests Run: `python3 scripts/check_repo_consistency.py`; `python3 -m compileall -q audioknob_gui`
+- Results: pass
+- Notes/Risks: None noted.
+- Questions: None.
+
+### [2026-01-25 13:12] TASK-ID: refactor-ui-phase6
+- Status: ack
+- Branch: refactor/modularize-cleanup
+- Plan: Add `audioknob_gui/gui/actions.py` for queue/apply/reset/force-reset helpers, move listed methods from `audioknob_gui/gui/main_window.py` into it, update Module Map, run required checks.
+- Changes:
+- Tests Run:
+- Results:
+- Notes/Risks:
+- Questions:
+
+### [2026-01-25 13:40] TASK-ID: refactor-ui-phase6
+- Status: done
+- Branch: refactor/modularize-cleanup
+- Changes: Added `audioknob_gui/gui/actions.py` and moved queue/apply/reset/force-reset/reset-all logic out of `audioknob_gui/gui/main_window.py`; updated Module Map in `PROJECT_STATE.md`.
+- Tests Run: `python3 scripts/check_repo_consistency.py`; `python3 -m compileall -q audioknob_gui`
+- Results: pass
+- Notes/Risks: None noted.
+- Questions: None.
+
 ### [2026-01-22 21:05] TASK-ID: refactor-ui-phase5
 - Status: ack
 - Branch: refactor/modularize-cleanup
@@ -268,6 +372,16 @@ Keep entries concise and actionable.
 ---
 
 ## Overseer Sign-off
+
+### [2026-01-26 11:20] TASK-ID: refactor-ui-phase7
+- Result: pass
+- Verification: `python3 scripts/check_repo_consistency.py`, `python3 -m compileall -q audioknob_gui`
+- Notes: Verified `audioknob_gui/gui/status.py` extraction and Module Map update.
+
+### [2026-01-26 11:20] TASK-ID: refactor-ui-phase6
+- Result: pass
+- Verification: `python3 scripts/check_repo_consistency.py`, `python3 -m compileall -q audioknob_gui`
+- Notes: Verified `audioknob_gui/gui/actions.py` extraction and MainWindow wrappers.
 
 ### [2026-01-25 09:58] TASK-ID: refactor-ui-phase5
 - Result: pass

@@ -98,6 +98,12 @@ Phase 5 (done):
 - `audioknob_gui/gui/logging_utils.py` -> _get_gui_logger(), _get_audit_logger(), _log_gui_audit()
 - `audioknob_gui/gui/system_info.py` -> _kernel_cmdline_tokens(), _param_present(), _kernel_is_rt(), _read_interrupts_map()
 
+Phase 6 (done):
+- `audioknob_gui/gui/actions.py` -> queue/apply/reset/force-reset helpers
+
+Phase 7 (done):
+- `audioknob_gui/gui/status.py` -> baseline/status/scan helpers
+
 Next phases (planned, incremental):
 - (plan complete)
 

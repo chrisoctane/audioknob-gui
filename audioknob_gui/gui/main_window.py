@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from audioknob_gui.gui.app_info import _app_title
+from audioknob_gui.gui import actions as actions
+from audioknob_gui.gui import status as status
+from audioknob_gui.gui.actions import KnobTaskWorker, QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger, _log_gui_audit
 from audioknob_gui.gui.state import _state_path, load_state, save_state
 from audioknob_gui.gui.system_info import (
@@ -28,14 +31,10 @@ from audioknob_gui.gui.worker_api import (
     _PKEXEC_CANCELLED,
     _is_force_reset_error,
     _is_no_transaction_error,
-    _is_pkexec_cancel,
-    _pkexec_available,
     _registry_path,
     _run_pkexec_command,
     _run_worker_apply_pkexec,
     _run_worker_apply_user,
-    _run_worker_force_reset_pkexec,
-    _run_worker_force_reset_user,
     _run_worker_history_pkexec,
     _run_worker_history_user,
     _run_worker_restore_many_pkexec,
@@ -55,7 +54,7 @@ from audioknob_gui.gui.knobs.registry import (
 )
 from audioknob_gui.registry import load_registry
 
-from PySide6.QtCore import Qt, QThread, Signal, QEvent
+from PySide6.QtCore import Qt, QThread, QEvent
 from PySide6.QtGui import QColor, QCursor, QPainter, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -87,36 +86,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from shiboken6 import isValid
-
-class KnobTaskWorker(QThread):
-    finished = Signal(str, str, bool, object, str)
-
-    def __init__(self, knob_id: str, action: str, fn, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._knob_id = knob_id
-        self._action = action
-        self._fn = fn
-
-    def run(self) -> None:
-        try:
-            success, payload, message = self._fn()
-        except Exception as e:
-            success, payload, message = False, None, str(e)
-        self.finished.emit(self._knob_id, self._action, bool(success), payload, message or "")
-
-class QueueTaskWorker(QThread):
-    finished = Signal(bool, object, str)
-
-    def __init__(self, fn, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._fn = fn
-
-    def run(self) -> None:
-        try:
-            success, payload, message = self._fn()
-        except Exception as e:
-            success, payload, message = False, None, str(e)
-        self.finished.emit(bool(success), payload, message or "")
 
 class MainWindow(TableMixin, QMainWindow):
     def __init__(self) -> None:
@@ -1403,20 +1372,13 @@ class MainWindow(TableMixin, QMainWindow):
         return dependents
 
     def _baseline_available(self) -> bool:
-        baseline = self.state.get("baseline_statuses")
-        return isinstance(baseline, dict) and bool(baseline)
+        return status.baseline_available(self)
 
     def _baseline_is_manual(self) -> bool:
-        return self.state.get("baseline_source") in ("capture", "import")
+        return status.baseline_is_manual(self)
 
     def _set_baseline_buttons_enabled(self, enabled: bool) -> None:
-        btn = getattr(self, "btn_baseline_menu", None)
-        if isinstance(btn, QToolButton):
-            btn.setEnabled(enabled)
-        for name in ("act_baseline_capture", "act_baseline_import", "act_baseline_export"):
-            action = getattr(self, name, None)
-            if action is not None:
-                action.setEnabled(enabled)
+        status.set_baseline_buttons_enabled(self, enabled)
 
     def _set_baseline_state(
         self,
@@ -1426,105 +1388,25 @@ class MainWindow(TableMixin, QMainWindow):
         captured_at: str | None = None,
         source: str = "initial",
     ) -> None:
-        if not isinstance(statuses, dict) or not statuses:
-            return
-        valid_ids = {k.id for k in self.registry}
-        cleaned = {k: str(v) for k, v in statuses.items() if k in valid_ids}
-        if not cleaned:
-            return
-        if not isinstance(captured_at, str) or not captured_at:
-            captured_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-        self.state["baseline_statuses"] = cleaned
-        self.state["baseline_captured_at"] = captured_at
-        self.state["baseline_txid_user"] = self.state.get("last_user_txid")
-        self.state["baseline_txid_root"] = self.state.get("last_root_txid")
-        self.state["baseline_source"] = source if source in ("initial", "capture", "import") else "initial"
-        if checks is None:
-            self.state["baseline_checks"] = self._build_baseline_checks(cleaned)
-        elif isinstance(checks, dict):
-            clean_checks: dict[str, list[str]] = {}
-            for knob_id, lines in checks.items():
-                if knob_id not in valid_ids:
-                    continue
-                if not isinstance(lines, list):
-                    continue
-                clean_checks[knob_id] = [str(x) for x in lines]
-            self.state["baseline_checks"] = clean_checks
-        else:
-            self.state["baseline_checks"] = {}
-        save_state(self.state)
-        self._baseline_ready = True
-        self._refresh_statuses()
-        self._populate()
+        status.set_baseline_state(
+            self,
+            statuses,
+            checks=checks,
+            captured_at=captured_at,
+            source=source,
+        )
 
     def _baseline_snapshot(self) -> dict[str, object]:
-        from audioknob_gui import __version__
-
-        return {
-            "schema": 1,
-            "baseline_statuses": dict(self.state.get("baseline_statuses") or {}),
-            "baseline_checks": dict(self.state.get("baseline_checks") or {}),
-            "baseline_captured_at": self.state.get("baseline_captured_at"),
-            "baseline_source": self.state.get("baseline_source", "initial"),
-            "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-            "app_version": __version__,
-        }
+        return status.baseline_snapshot(self)
 
     def _write_baseline_snapshot(self, path: str, snapshot: dict[str, object]) -> bool:
-        try:
-            payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
-            Path(path).write_text(payload, encoding="utf-8")
-        except Exception as exc:
-            QMessageBox.warning(self, "Baseline", f"Failed to save baseline:\n{exc}")
-            return False
-        return True
+        return status.write_baseline_snapshot(self, path, snapshot)
 
     def _load_baseline_snapshot(self, path: str) -> dict[str, object] | None:
-        try:
-            raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        except Exception as exc:
-            QMessageBox.warning(self, "Baseline", f"Failed to load baseline:\n{exc}")
-            return None
-        if not isinstance(raw, dict):
-            QMessageBox.warning(self, "Baseline", "Baseline file is not a JSON object.")
-            return None
-        statuses = raw.get("baseline_statuses")
-        if not isinstance(statuses, dict) or not statuses:
-            QMessageBox.warning(self, "Baseline", "Baseline file is missing status data.")
-            return None
-        valid_ids = {k.id for k in self.registry}
-        cleaned = {k: str(v) for k, v in statuses.items() if k in valid_ids}
-        if not cleaned:
-            QMessageBox.warning(self, "Baseline", "Baseline file has no known knob ids.")
-            return None
-        checks = raw.get("baseline_checks")
-        clean_checks: dict[str, list[str]] | None = None
-        if isinstance(checks, dict):
-            clean_checks = {}
-            for knob_id, lines in checks.items():
-                if knob_id not in valid_ids:
-                    continue
-                if not isinstance(lines, list):
-                    continue
-                clean_checks[knob_id] = [str(x) for x in lines]
-        captured_at = raw.get("baseline_captured_at")
-        if not isinstance(captured_at, str) or not captured_at:
-            captured_at = None
-        return {
-            "statuses": cleaned,
-            "checks": clean_checks,
-            "captured_at": captured_at,
-        }
+        return status.load_baseline_snapshot(self, path)
 
     def _confirm_baseline_overwrite(self, summary: str) -> bool:
-        if not self._baseline_ready:
-            return True
-        msg = (
-            f"{summary}\n\n"
-            "This will overwrite the current baseline snapshot.\n\n"
-            "This does not change system settings.\n\nContinue?"
-        )
-        return QMessageBox.question(self, "Baseline", msg) == QMessageBox.Yes
+        return status.confirm_baseline_overwrite(self, summary)
 
     def _start_baseline_scan(
         self,
@@ -1535,179 +1417,29 @@ class MainWindow(TableMixin, QMainWindow):
         on_error_title: str = "Baseline",
         on_error_message: str | None = None,
     ) -> None:
-        if self._baseline_busy:
-            return
-        self._baseline_busy = True
-        self._set_baseline_buttons_enabled(False)
-
-        def _task() -> tuple[bool, object, str]:
-            argv = [
-                sys.executable,
-                "-m",
-                "audioknob_gui.worker.cli",
-                "--registry",
-                _registry_path(),
-                "status",
-            ]
-            if _pkexec_available():
-                worker = _pick_root_worker_path()
-                argv = ["pkexec", worker, "--registry", _registry_path(), "status"]
-            try:
-                p = subprocess.run(argv, text=True, capture_output=True)
-            except Exception as e:
-                return False, {}, str(e)
-            if not p.stdout.strip():
-                err = p.stderr.strip() or "Baseline scan failed"
-                if _is_pkexec_cancel(err):
-                    return False, {}, _PKEXEC_CANCELLED
-                return False, {}, err
-            try:
-                payload = json.loads(p.stdout)
-            except Exception:
-                err = p.stderr.strip() or p.stdout.strip() or "Baseline parse failed"
-                if _is_pkexec_cancel(err):
-                    return False, {}, _PKEXEC_CANCELLED
-                return False, {}, err
-            status_map: dict[str, str] = {}
-            for item in payload.get("statuses", []):
-                if isinstance(item, dict) and item.get("knob_id"):
-                    status_map[str(item["knob_id"])] = str(item.get("status", "unknown"))
-            return True, {"statuses": status_map}, ""
-
-        worker = QueueTaskWorker(_task, parent=self)
-
-        def _on_done(success: bool, payload: object, message: str) -> None:
-            self._baseline_busy = False
-            self._set_baseline_buttons_enabled(True)
-            if not success:
-                if message == _PKEXEC_CANCELLED:
-                    if on_cancel_message:
-                        QMessageBox.information(self, on_cancel_title, on_cancel_message)
-                    return
-                if on_error_message:
-                    QMessageBox.warning(self, on_error_title, on_error_message + f"\n\n{message}")
-                    return
-                _get_gui_logger().warning("baseline scan failed error=%s", message)
-                return
-            if not isinstance(payload, dict):
-                return
-            statuses = payload.get("statuses") or {}
-            if not isinstance(statuses, dict) or not statuses:
-                return
-            on_success(statuses)
-
-        worker.finished.connect(_on_done)
-        worker.finished.connect(worker.deleteLater)
-        self._task_threads.append(worker)
-        worker.start()
+        status.start_baseline_scan(
+            self,
+            on_success=on_success,
+            on_cancel_title=on_cancel_title,
+            on_cancel_message=on_cancel_message,
+            on_error_title=on_error_title,
+            on_error_message=on_error_message,
+        )
 
     def _ensure_baseline_state(self) -> None:
-        if self._baseline_ready or self._baseline_busy:
-            return
-        def _on_success(statuses: dict[str, str]) -> None:
-            self._set_baseline_state(statuses, source="initial")
-            _get_gui_logger().info("baseline scan complete")
-
-        self._start_baseline_scan(
-            on_success=_on_success,
-            on_cancel_title="Baseline Required",
-            on_cancel_message=(
-                "Initial state capture was cancelled.\n\n"
-                "Run 'Re-check State' to capture baseline before making changes."
-            ),
-        )
+        status.ensure_baseline_state(self)
 
     def _build_baseline_checks(self, statuses: dict[str, str]) -> dict[str, list[str]]:
-        baseline_checks: dict[str, list[str]] = {}
-        for knob in self.registry:
-            status = statuses.get(knob.id)
-            if status is None:
-                continue
-            baseline_checks[knob.id] = self._collect_live_checks(knob, status_override=status)
-        return baseline_checks
+        return status.build_baseline_checks(self, statuses)
 
     def _on_capture_baseline(self) -> None:
-        if self._baseline_busy:
-            return
-        default_name = str(Path.home() / "audioknob-baseline.json")
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Baseline Snapshot",
-            default_name,
-            "JSON Files (*.json)",
-        )
-        if not path:
-            return
-        if not path.lower().endswith(".json"):
-            path = path + ".json"
-        if not self._confirm_baseline_overwrite("Capture baseline"):
-            return
-
-        def _on_success(statuses: dict[str, str]) -> None:
-            self._set_baseline_state(statuses, source="capture")
-            snapshot = self._baseline_snapshot()
-            if self._write_baseline_snapshot(path, snapshot):
-                QMessageBox.information(self, "Baseline", f"Baseline saved to:\n{path}")
-
-        self._start_baseline_scan(
-            on_success=_on_success,
-            on_cancel_title="Baseline",
-            on_cancel_message="Baseline capture was cancelled.",
-            on_error_title="Baseline",
-            on_error_message="Failed to capture baseline.",
-        )
+        status.on_capture_baseline(self)
 
     def _on_import_baseline(self) -> None:
-        if self._baseline_busy:
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Baseline Snapshot",
-            str(Path.home()),
-            "JSON Files (*.json)",
-        )
-        if not path:
-            return
-        payload = self._load_baseline_snapshot(path)
-        if not payload:
-            return
-        captured_at = payload.get("captured_at") or "unknown"
-        if not self._confirm_baseline_overwrite(
-            f"Import baseline from:\n{path}\nCaptured: {captured_at}"
-        ):
-            return
-        statuses = payload.get("statuses")
-        checks = payload.get("checks")
-        if not isinstance(statuses, dict):
-            return
-        self._set_baseline_state(
-            statuses,
-            checks=checks if isinstance(checks, dict) else None,
-            captured_at=payload.get("captured_at"),
-            source="import",
-        )
-        QMessageBox.information(self, "Baseline", "Baseline imported.")
+        status.on_import_baseline(self)
 
     def _on_export_baseline(self) -> None:
-        if self._baseline_busy:
-            return
-        if not self._baseline_available():
-            QMessageBox.information(self, "Baseline", "No baseline captured yet.")
-            return
-        default_name = str(Path.home() / "audioknob-baseline.json")
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Baseline Snapshot",
-            default_name,
-            "JSON Files (*.json)",
-        )
-        if not path:
-            return
-        if not path.lower().endswith(".json"):
-            path = path + ".json"
-        snapshot = self._baseline_snapshot()
-        if self._write_baseline_snapshot(path, snapshot):
-            QMessageBox.information(self, "Baseline", f"Baseline exported to:\n{path}")
+        status.on_export_baseline(self)
 
     def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
         if not isinstance(raw, dict):
@@ -1732,19 +1464,7 @@ class MainWindow(TableMixin, QMainWindow):
         return any(k.requires_root for k in self.registry if k.id in queued)
 
     def _prune_queue_from_statuses(self) -> None:
-        if not self._queued_actions:
-            return
-        keep: dict[str, str] = {}
-        for kid, action in self._queued_actions.items():
-            status = self._knob_statuses.get(kid)
-            if action == "apply" and status in ("applied", "pending_reboot"):
-                continue
-            if action == "reset" and status in ("not_applied", "not_applicable", "sys_default"):
-                continue
-            keep[kid] = action
-        if keep != self._queued_actions:
-            self._queued_actions = keep
-            self._save_queue()
+        status.prune_queue_from_statuses(self)
 
     def _update_queue_ui(self) -> None:
         count = len(self._queued_actions)
@@ -1799,216 +1519,28 @@ class MainWindow(TableMixin, QMainWindow):
             self._style_table_button(btn, row_dim=row_dim)
 
     def _on_recheck_state(self) -> None:
-        if self._status_busy:
-            return
-        _get_gui_logger().info("state recheck requested")
-        if not self._baseline_ready:
-            self._ensure_baseline_state()
-            return
-        self._refresh_statuses()
+        status.on_recheck_state(self)
 
     def _refresh_statuses(self) -> None:
-        """Fetch current status of all knobs (async)."""
-        if self._status_busy:
-            return
-        self._status_busy = True
-
-        def _task() -> tuple[bool, object, str]:
-            try:
-                statuses: dict[str, str] = {}
-                argv = [
-                    sys.executable,
-                    "-m",
-                    "audioknob_gui.worker.cli",
-                    "--registry",
-                    _registry_path(),
-                    "status",
-                ]
-                p = subprocess.run(argv, text=True, capture_output=True, timeout=15)
-                if p.returncode == 0:
-                    data = json.loads(p.stdout)
-                    for item in data.get("statuses", []):
-                        statuses[item["knob_id"]] = item["status"]
-                return True, statuses, ""
-            except Exception as exc:
-                return False, {}, str(exc)
-
-        worker = QueueTaskWorker(_task, parent=self)
-
-        def _on_done(success: bool, payload: object, message: str) -> None:
-            self._status_busy = False
-            if success and isinstance(payload, dict):
-                self._knob_statuses = payload
-            else:
-                self._knob_statuses = {}
-            self._apply_session_dependent_statuses()
-            self._update_reboot_banner()
-            self._prune_queue_from_statuses()
-            self._update_queue_ui()
-            self._populate()
-
-        worker.finished.connect(_on_done)
-        worker.finished.connect(worker.deleteLater)
-        self._task_threads.append(worker)
-        worker.start()
+        status.refresh_statuses(self)
 
     def _apply_session_dependent_statuses(self) -> None:
-        status = self._knob_statuses.get("rt_limits_audio_group")
-        if status == "applied" and not self._rt_limits_active():
-            self._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
-        status = self._knob_statuses.get("audio_group_membership")
-        if status == "applied" and not self._audio_groups_active():
-            self._knob_statuses["audio_group_membership"] = "pending_reboot"
-        self._apply_baseline_statuses()
+        status.apply_session_dependent_statuses(self)
 
     def _apply_baseline_statuses(self) -> None:
-        baseline = self.state.get("baseline_statuses")
-        if not isinstance(baseline, dict) or not baseline:
-            return
-        baseline_ts = self._parse_baseline_timestamp()
-        tx_times, root_tx_unknown = self._collect_transaction_times()
-        baseline_user_txid = self.state.get("baseline_txid_user")
-        baseline_root_txid = self.state.get("baseline_txid_root")
-        last_user_txid = self.state.get("last_user_txid")
-        last_root_txid = self.state.get("last_root_txid")
-        manual_baseline = self._baseline_is_manual()
-        user_diverged = (
-            isinstance(baseline_user_txid, str)
-            and isinstance(last_user_txid, str)
-            and baseline_user_txid != last_user_txid
-        )
-        root_diverged = (
-            isinstance(baseline_root_txid, str)
-            and isinstance(last_root_txid, str)
-            and baseline_root_txid != last_root_txid
-        )
-        for knob in self.registry:
-            current = self._knob_statuses.get(knob.id)
-            if current in ("pending_reboot", "running", "unknown", "read_only", "not_applicable", "partial"):
-                continue
-            if not manual_baseline and root_tx_unknown and knob.requires_root:
-                continue
-            base = baseline.get(knob.id)
-            if base is None:
-                continue
-            if base in ("unknown", "not_applicable"):
-                continue
-            tx_time = tx_times.get(knob.id)
-            if not manual_baseline:
-                if tx_time is not None and baseline_ts is not None and baseline_ts >= tx_time:
-                    continue
-                if tx_time is not None and baseline_ts is None:
-                    continue
-                if tx_time is None:
-                    if knob.requires_root and root_diverged:
-                        continue
-                    if not knob.requires_root and user_diverged:
-                        continue
-            if current == base:
-                self._knob_statuses[knob.id] = "sys_default"
-                continue
-            if current == "applied":
-                continue
-            self._knob_statuses[knob.id] = "deviated"
+        status.apply_baseline_statuses(self)
 
     def _parse_baseline_timestamp(self) -> float | None:
-        raw = self.state.get("baseline_captured_at")
-        if not isinstance(raw, str) or not raw:
-            return None
-        try:
-            iso = raw.replace("Z", "+00:00")
-            return datetime.fromisoformat(iso).timestamp()
-        except Exception:
-            return None
+        return status.parse_baseline_timestamp(self)
 
     def _collect_transaction_times(self) -> tuple[dict[str, float], bool]:
-        """Return earliest transaction time per knob id and root access flag."""
-        from audioknob_gui.core.paths import default_paths
-        from audioknob_gui.core.transaction import list_transactions
-
-        tx_times: dict[str, float] = {}
-        root_unknown = False
-        paths = default_paths()
-
-        for tx in list_transactions(paths.user_state_dir):
-            ts = tx.get("timestamp")
-            if not isinstance(ts, (int, float)):
-                continue
-            for knob_id in tx.get("applied", []):
-                if not isinstance(knob_id, str):
-                    continue
-                prev = tx_times.get(knob_id)
-                if prev is None or ts < prev:
-                    tx_times[knob_id] = float(ts)
-
-        root_tx_dir = Path(paths.var_lib_dir) / "transactions"
-        if root_tx_dir.exists():
-            if not os.access(root_tx_dir, os.R_OK | os.X_OK):
-                root_unknown = True
-                return tx_times, root_unknown
-            try:
-                for entry in root_tx_dir.iterdir():
-                    if not entry.is_dir():
-                        continue
-                    manifest_path = entry / "manifest.json"
-                    if manifest_path.exists() and not os.access(manifest_path, os.R_OK):
-                        root_unknown = True
-                        return tx_times, root_unknown
-            except PermissionError:
-                root_unknown = True
-                return tx_times, root_unknown
-            except Exception:
-                root_unknown = True
-                return tx_times, root_unknown
-
-        try:
-            root_txs = list_transactions(paths.var_lib_dir)
-        except PermissionError:
-            root_unknown = True
-            return tx_times, root_unknown
-        except Exception:
-            root_unknown = True
-            return tx_times, root_unknown
-
-        for tx in root_txs:
-            ts = tx.get("timestamp")
-            if not isinstance(ts, (int, float)):
-                continue
-            for knob_id in tx.get("applied", []):
-                if not isinstance(knob_id, str):
-                    continue
-                prev = tx_times.get(knob_id)
-                if prev is None or ts < prev:
-                    tx_times[knob_id] = float(ts)
-
-        return tx_times, root_unknown
+        return status.collect_transaction_times(self)
 
     def _rt_limits_active(self) -> bool:
-        try:
-            import resource
-        except Exception:
-            return False
-
-        try:
-            rt_soft, _ = resource.getrlimit(resource.RLIMIT_RTPRIO)
-            mem_soft, _ = resource.getrlimit(resource.RLIMIT_MEMLOCK)
-        except Exception:
-            return False
-
-        rt_ok = rt_soft == resource.RLIM_INFINITY or rt_soft >= 95
-        mem_ok = mem_soft == resource.RLIM_INFINITY
-        return rt_ok and mem_ok
+        return status.rt_limits_active(self)
 
     def _audio_groups_active(self) -> bool:
-        try:
-            from audioknob_gui.platform.detect import get_missing_groups
-        except Exception:
-            return True
-
-        try:
-            return len(get_missing_groups()) == 0
-        except Exception:
-            return True
+        return status.audio_groups_active(self)
 
     def _is_process_running(self, names: list[str]) -> bool:
         if shutil.which("pgrep"):
@@ -2813,843 +2345,10 @@ class MainWindow(TableMixin, QMainWindow):
         dialog.exec()
 
     def _collect_live_checks(self, knob, *, status_override: str | None = None) -> list[str]:
-        def _read_file(path: str, *, max_lines: int = 40) -> list[str]:
-            p = Path(path).expanduser()
-            if not p.exists():
-                return [f"{path}: missing"]
-            try:
-                content = p.read_text(encoding="utf-8").splitlines()
-            except Exception as e:
-                return [f"{path}: unreadable: {e}"]
-            if len(content) > max_lines:
-                content = content[:max_lines] + ["... (truncated)"]
-            return [f"{path}:"] + content
-
-        def _find_pids_by_comm(name: str) -> list[int]:
-            pids: list[int] = []
-            proc = Path("/proc")
-            for entry in proc.iterdir():
-                if not entry.name.isdigit():
-                    continue
-                try:
-                    comm = (entry / "comm").read_text(encoding="utf-8").strip()
-                except Exception:
-                    continue
-                if comm == name:
-                    pids.append(int(entry.name))
-            return pids
-
-        def _read_proc_cmdline(pid: int) -> str:
-            try:
-                raw = Path(f"/proc/{pid}/cmdline").read_bytes()
-            except Exception:
-                return ""
-            return " ".join(x for x in raw.decode("utf-8", errors="replace").split("\0") if x)
-
-        def _read_proc_cpu_allowed_list(pid: int) -> str | None:
-            try:
-                text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
-            except Exception:
-                return None
-            for line in text.splitlines():
-                if line.startswith("Cpus_allowed_list:"):
-                    _, _, value = line.partition(":")
-                    return value.strip()
-            return None
-
-        def _read_jackd_rt_summary(pids: list[int]) -> tuple[int, int, list[int]]:
-            total_threads = 0
-            rt_threads = 0
-            rt_priorities: list[int] = []
-            for pid in pids:
-                task_dir = Path(f"/proc/{pid}/task")
-                try:
-                    entries = list(task_dir.iterdir())
-                except Exception:
-                    continue
-                for entry in entries:
-                    if not entry.name.isdigit():
-                        continue
-                    total_threads += 1
-                    tid = int(entry.name)
-                    try:
-                        policy = os.sched_getscheduler(tid)
-                    except Exception:
-                        continue
-                    if policy in (os.SCHED_FIFO, os.SCHED_RR):
-                        rt_threads += 1
-                        try:
-                            prio = os.sched_getparam(tid).sched_priority
-                        except Exception:
-                            prio = None
-                        if prio is not None:
-                            rt_priorities.append(prio)
-            return total_threads, rt_threads, sorted(set(rt_priorities))
-
-        lines: list[str] = []
-        lines.append(f"knob_id: {knob.id}")
-        lines.append(f"title: {knob.title}")
-        status = status_override or self._knob_statuses.get(knob.id, "unknown")
-        lines.append(f"status: {status}")
-        lines.append("")
-
-        kind = knob.impl.kind if knob.impl else ""
-        params = dict(knob.impl.params) if knob.impl else {}
-        lines.append(f"kind: {kind}")
-        if knob.id == "power_profile_performance":
-            params["backend"] = self._power_profile_backend_from_state()
-
-        if kind == "qjackctl_server_prefix":
-            path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
-            lines.append("")
-            lines.append("qjackctl_config:")
-            cfg = None
-            try:
-                from audioknob_gui.core.qjackctl import read_config, resolve_server_config_path
-
-                cfg = read_config(Path(path).expanduser())
-            except Exception:
-                cfg = None
-            if cfg is not None:
-                active_preset = cfg.def_preset if cfg.def_preset else "(default)"
-                lines.append(f"active_preset: {active_preset}")
-                cmd = cfg.server_cmd or ""
-                tokens = cmd.split()
-                ensure_rt = bool(params.get("ensure_rt", True))
-                ensure_prio = bool(params.get("ensure_priority", False))
-                expected_prio = 90 if ensure_prio else None
-                rt_cfg_ok = True
-                prio_cfg_ok = True
-                if ensure_rt:
-                    rt_cfg_ok = cfg.realtime is True or any(
-                        t in ("-R", "--realtime") or t.startswith("--realtime") for t in tokens
-                    )
-                if ensure_prio:
-                    prio_cfg_ok = (cfg.priority == expected_prio) or any(
-                        t.startswith("-P") for t in tokens
-                    )
-                expected_cores = self._qjackctl_cpu_cores_from_state()
-                if expected_cores is None:
-                    cpu_cores = params.get("cpu_cores")
-                    if cpu_cores is not None:
-                        try:
-                            from audioknob_gui.core.irq import parse_cpu_list
-
-                            expected_cores = sorted(parse_cpu_list(str(cpu_cores)))
-                        except Exception:
-                            expected_cores = None
-                config_pin_ok = True
-                runtime_pin_ok = None
-                if expected_cores is not None:
-                    expected_list = ",".join(str(c) for c in expected_cores)
-                    if expected_list:
-                        try:
-                            from audioknob_gui.core.qjackctl import (
-                                build_post_start_script,
-                                default_post_start_script_path,
-                            )
-
-                            expected_script = build_post_start_script(expected_list)
-                            expected_path = str(default_post_start_script_path())
-                            config_pin_ok = (
-                                cfg.post_startup_enabled
-                                and cfg.post_startup_shell == expected_path
-                            )
-                            if config_pin_ok:
-                                try:
-                                    script_text = Path(expected_path).read_text(encoding="utf-8")
-                                    config_pin_ok = script_text == expected_script
-                                except Exception:
-                                    config_pin_ok = False
-                        except Exception:
-                            config_pin_ok = False
-                        try:
-                            from audioknob_gui.core.irq import parse_cpu_list
-
-                            expected_set = set(expected_cores)
-                            runtime_pin_ok = True
-                            for pid in _find_pids_by_comm("jackd"):
-                                allowed = _read_proc_cpu_allowed_list(pid)
-                                if not allowed:
-                                    continue
-                                if parse_cpu_list(allowed) != expected_set:
-                                    runtime_pin_ok = False
-                                    break
-                        except Exception:
-                            runtime_pin_ok = None
-                    else:
-                        config_pin_ok = not cfg.post_startup_enabled and not cfg.post_startup_shell
-
-                if status == "partial":
-                    if cfg.server_config_enabled:
-                        lines.append("partial_reason: ServerConfig enabled; QjackCtl may override GUI settings.")
-                    if ensure_rt and not rt_cfg_ok:
-                        lines.append("partial_reason: Realtime not enabled in QjackCtl config.")
-                    if ensure_prio and not prio_cfg_ok:
-                        lines.append("partial_reason: Priority not set to expected value in QjackCtl config.")
-                    if expected_cores is not None and not config_pin_ok:
-                        lines.append("partial_reason: Post-start script missing or mismatched for CPU pinning.")
-                    if runtime_pin_ok is False:
-                        lines.append("partial_reason: running jackd not pinned to selected cores.")
-            include_preset_lines = cfg is not None and bool(cfg.def_preset)
-            base_keys = (
-                "ServerConfig",
-                "ServerConfigName",
-                "PostStartupScript",
-                "PostStartupScriptShell",
-                "\\Server",
-                "\\ServerPrefix",
-                "Realtime",
-                "Priority",
-            )
-            if include_preset_lines:
-                keys = ("Preset", "DefPreset", *base_keys)
-            else:
-                keys = base_keys
-            for line in _read_file(path, max_lines=200):
-                if line.strip().startswith("OldPreset"):
-                    continue
-                if any(key in line for key in keys):
-                    lines.append(line)
-            if cfg is not None and cfg.server_config_enabled:
-                lines.append("")
-                if cfg.server_config_name:
-                    lines.append(f"server_config: {cfg.server_config_name}")
-                    server_path = resolve_server_config_path(cfg.server_config_name)
-                    if server_path is None:
-                        lines.append("server_config_path: unknown")
-                    else:
-                        lines.extend(_read_file(str(server_path), max_lines=40))
-                else:
-                    lines.append("server_config: enabled (missing ServerConfigName)")
-            lines.append("")
-            pids = _find_pids_by_comm("jackd")
-            if not pids:
-                lines.append("jackd: not running")
-            else:
-                lines.append(f"jackd_pids: {', '.join(str(p) for p in pids)}")
-                for pid in pids:
-                    cmdline = _read_proc_cmdline(pid)
-                    if cmdline:
-                        lines.append(f"jackd_cmd[{pid}]: {cmdline}")
-                    allowed = _read_proc_cpu_allowed_list(pid)
-                    if allowed:
-                        lines.append(f"jackd_cpus_allowed_list[{pid}]: {allowed}")
-                total_threads, rt_threads, rt_priorities = _read_jackd_rt_summary(pids)
-                if total_threads:
-                    lines.append(f"jackd_threads: {total_threads}")
-                    lines.append(f"jackd_rt_threads: {rt_threads}")
-                    if rt_priorities:
-                        lines.append(f"jackd_rt_priorities: {', '.join(str(p) for p in rt_priorities)}")
-        elif kind == "irq_affinity":
-            from audioknob_gui.core.irq import collect_target_irqs, resolve_selected_devices
-
-            def _read_irq_affinity(irq: int) -> str | None:
-                p = Path(f"/proc/irq/{irq}/smp_affinity_list")
-                if not p.exists():
-                    return None
-                try:
-                    return p.read_text(encoding="utf-8").strip()
-                except Exception:
-                    return None
-
-            lines.append("")
-            lines.append("irq_pinning:")
-            device_keys = self._irq_pinning_devices_from_state()
-            cores = self._irq_pinning_cpu_cores_from_state()
-            cpu_list = ",".join(str(c) for c in (cores or []))
-            lines.append(f"cpu_cores: {cpu_list or 'unset'}")
-            lines.append(f"device_keys: {', '.join(device_keys) if device_keys else 'unset'}")
-            auto_housekeeping = bool(self.state.get("irq_housekeeping_auto", True))
-            lines.append(f"housekeeping_auto: {auto_housekeeping}")
-            if auto_housekeeping:
-                try:
-                    from audioknob_gui.core.irq import read_cpu_present
-                    audio_set = set(cores or [])
-                    housekeeping = sorted(read_cpu_present() - audio_set)
-                    hk_list = ",".join(str(c) for c in housekeeping)
-                    lines.append(f"housekeeping_cores: {hk_list or 'unset'}")
-                except Exception:
-                    lines.append("housekeeping_cores: unknown")
-            else:
-                manual = self._kernel_cores_from_state("kernel_irqaffinity") or []
-                manual_list = ",".join(str(c) for c in manual)
-                lines.append(f"housekeeping_cores: {manual_list or 'unset'}")
-
-            selected, missing = resolve_selected_devices(device_keys)
-            if missing:
-                lines.append(f"missing_devices: {', '.join(missing)}")
-            if selected:
-                for device in selected:
-                    label = str(device.get("label") or device.get("key"))
-                    bus = str(device.get("bus") or "unknown")
-                    irqs = device.get("irqs") or []
-                    lines.append(f"device: {label} [{bus}] irqs={','.join(str(i) for i in irqs) if irqs else 'none'}")
-                    warning = device.get("warning")
-                    if warning:
-                        lines.append(f"warning: {warning}")
-            else:
-                lines.append("device: none")
-
-            target_irqs = collect_target_irqs(selected)
-            mismatched: list[int] = []
-            if target_irqs:
-                for irq in target_irqs:
-                    current = _read_irq_affinity(irq)
-                    if current is None:
-                        lines.append(f"irq[{irq}]: missing")
-                    else:
-                        lines.append(f"irq[{irq}] affinity: {current}")
-                        try:
-                            from audioknob_gui.core.irq import parse_cpu_list
-
-                            if cores and parse_cpu_list(current) != set(cores):
-                                mismatched.append(irq)
-                        except Exception:
-                            pass
-            if status == "partial" and mismatched:
-                lines.append(
-                    f"partial_reason: IRQs not on selected cores: {', '.join(str(i) for i in mismatched)}"
-                )
-            if status == "partial" and missing:
-                lines.append("partial_reason: missing devices (selection not found); check device list.")
-            if status == "partial" and cores:
-                try:
-                    from audioknob_gui.core.irq import list_irqs, parse_cpu_list, read_irq_affinity_list
-
-                    audio_set = set(cores)
-                    sweep_ok = True
-                    for irq in list_irqs():
-                        if irq in target_irqs:
-                            continue
-                        current = read_irq_affinity_list(irq)
-                        if current is None:
-                            continue
-                        if parse_cpu_list(current) & audio_set:
-                            sweep_ok = False
-                            break
-                    if not sweep_ok:
-                        lines.append(
-                            "partial_reason: some non-audio IRQs still target audio cores (housekeeping sweep)."
-                        )
-                except Exception:
-                    pass
-        elif kind == "rtirq_config":
-            from audioknob_gui.core.rtirq import normalize_rtirq_list, rtirq_block_present
-            from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path
-
-            distro_id = read_os_release().get("ID", "")
-            cfg_path = resolve_rtirq_config_path(distro_id)
-            lines.append(f"rtirq_config: {cfg_path}")
-            name_list = normalize_rtirq_list(params.get("name_list", ["snd", "usb"]))
-            high_list = normalize_rtirq_list(params.get("high_list", name_list))
-            prio_high = int(params.get("prio_high", 90))
-            prio_decr = int(params.get("prio_decr", 5))
-            cfg_ok = False
-            try:
-                content = Path(cfg_path).read_text(encoding="utf-8")
-                cfg_ok = rtirq_block_present(
-                    content,
-                    name_list=name_list,
-                    high_list=high_list,
-                    prio_high=prio_high,
-                    prio_decr=prio_decr,
-                )
-            except Exception:
-                cfg_ok = False
-            lines.append(f"rtirq_block: {cfg_ok}")
-            unit = str(params.get("unit", "rtirq.service"))
-            enabled = None
-            active = None
-            try:
-                enabled = subprocess.run(
-                    ["systemctl", "is-enabled", unit],
-                    capture_output=True,
-                    text=True,
-                ).stdout.strip() or None
-            except Exception:
-                enabled = None
-            try:
-                active = subprocess.run(
-                    ["systemctl", "is-active", unit],
-                    capture_output=True,
-                    text=True,
-                ).stdout.strip() or None
-            except Exception:
-                active = None
-            if enabled is not None:
-                lines.append(f"service_enabled: {enabled}")
-            if active is not None:
-                lines.append(f"service_active: {active}")
-            if status == "partial":
-                if cfg_ok and active != "active":
-                    lines.append("partial_reason: config present but rtirq service not active.")
-                elif not cfg_ok and active == "active":
-                    lines.append("partial_reason: rtirq service active but config block missing.")
-        elif kind == "power_profile":
-            try:
-                from audioknob_gui.worker.ops import read_power_profile, select_power_profile_backend
-            except Exception:
-                read_power_profile = None
-                select_power_profile_backend = None
-            pref = self._power_profile_backend_from_state()
-            params_local = dict(params)
-            params_local["backend"] = pref
-            lines.append("")
-            lines.append(f"backend_preference: {pref}")
-            backend = select_power_profile_backend(params_local) if select_power_profile_backend else None
-            if not backend:
-                lines.append("resolved_backend: none")
-                lines.append("note: powerprofilesctl or tuned-adm required")
-            else:
-                lines.append(f"resolved_backend: {backend.get('backend')}")
-                cmd = backend.get("cmd") or ""
-                if cmd:
-                    lines.append(f"cmd: {cmd}")
-                unit = backend.get("service")
-                if unit:
-                    try:
-                        r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
-                        lines.append(f"service_active: {r.stdout.strip() or r.stderr.strip()}")
-                    except Exception:
-                        pass
-                if read_power_profile:
-                    current = read_power_profile(backend["backend"], backend["cmd"])
-                    if backend["backend"] == "powerprofilesctl":
-                        target = str(params.get("ppd_profile", "performance")).strip() or "performance"
-                    else:
-                        target = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
-                    lines.append(f"current: {current or 'unknown'}")
-                    lines.append(f"target: {target}")
-                try:
-                    if backend["backend"] == "powerprofilesctl":
-                        r = subprocess.run([backend["cmd"], "list"], capture_output=True, text=True)
-                        output = (r.stdout or r.stderr or "").strip()
-                        if output:
-                            lines.append("available_profiles:")
-                            lines.extend(output.splitlines()[:20])
-                    elif backend["backend"] == "tuned":
-                        r = subprocess.run([backend["cmd"], "list"], capture_output=True, text=True)
-                        output = (r.stdout or r.stderr or "").strip()
-                        if output:
-                            lines.append("available_profiles:")
-                            lines.extend(output.splitlines()[:20])
-                except Exception:
-                    pass
-        elif kind == "systemd_unit_toggle":
-            unit = str(params.get("unit", ""))
-            if unit:
-                lines.append(f"unit: {unit}")
-                for label, cmd in (
-                    ("is-enabled", ["systemctl", "is-enabled", unit]),
-                    ("is-active", ["systemctl", "is-active", unit]),
-                ):
-                    r = subprocess.run(cmd, capture_output=True, text=True)
-                    lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-        elif kind == "user_service_mask":
-            services = params.get("services")
-            if isinstance(services, list):
-                from audioknob_gui.worker.ops import resolve_user_services
-
-                resolved = resolve_user_services([str(s) for s in services if s])
-                if resolved:
-                    lines.append(f"user_services: {', '.join(resolved)}")
-                if not resolved:
-                    lines.append("user units: [no matches]")
-                for svc in resolved:
-                    lines.append(f"user unit: {svc}")
-                    for label, cmd in (
-                        ("user is-enabled", ["systemctl", "--user", "is-enabled", svc]),
-                        ("user is-active", ["systemctl", "--user", "is-active", svc]),
-                    ):
-                        r = subprocess.run(cmd, capture_output=True, text=True)
-                        lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-            else:
-                unit = str(params.get("unit", ""))
-                if unit:
-                    lines.append(f"user_services: {unit}")
-                    for label, cmd in (
-                        ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
-                        ("user is-active", ["systemctl", "--user", "is-active", unit]),
-                    ):
-                        r = subprocess.run(cmd, capture_output=True, text=True)
-                        lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-        elif kind == "sysctl_conf":
-            path = str(params.get("path", ""))
-            if path:
-                lines.extend(_read_file(path))
-                if status == "partial":
-                    wanted_lines = [str(x) for x in params.get("lines", [])]
-                    try:
-                        content = Path(path).read_text(encoding="utf-8")
-                        missing = [line for line in wanted_lines if line not in content]
-                    except Exception:
-                        missing = []
-                    if missing:
-                        lines.append(f"partial_reason: missing lines: {', '.join(missing)}")
-            keys: list[str] = []
-            expected: dict[str, str] = {}
-            for line in params.get("lines", []) or []:
-                raw = str(line).strip()
-                if not raw or raw.startswith("#") or "=" not in raw:
-                    continue
-                key, _, value = raw.partition("=")
-                key = key.strip()
-                value = value.strip()
-                if key and key not in keys:
-                    keys.append(key)
-                    expected[key] = value
-            if keys:
-                try:
-                    from audioknob_gui.platform.packages import which_command
-                except Exception:
-                    which_command = None
-                sysctl_cmd = None
-                if which_command:
-                    sysctl_cmd = which_command("sysctl")
-                if not sysctl_cmd:
-                    sysctl_cmd = shutil.which("sysctl") or "sysctl"
-                for key in keys:
-                    try:
-                        r = subprocess.run([sysctl_cmd, "-n", key], capture_output=True, text=True)
-                        current = r.stdout.strip() or r.stderr.strip() or "unknown"
-                    except Exception as e:
-                        current = f"error: {e}"
-                    exp = expected.get(key)
-                    if exp is not None:
-                        lines.append(f"sysctl {key}: {current} (expected: {exp})")
-                    else:
-                        lines.append(f"sysctl {key}: {current}")
-        elif kind == "sysfs_glob_kv":
-            pattern = str(params.get("glob", ""))
-            if pattern:
-                paths = sorted(glob.glob(pattern))
-                expected_val = str(params.get("value", "")).strip()
-                total = len(paths)
-                match = 0
-                unreadable = 0
-                for p in paths:
-                    try:
-                        val = Path(p).read_text(encoding="utf-8").strip()
-                        if expected_val and val == expected_val:
-                            match += 1
-                    except Exception:
-                        unreadable += 1
-                mismatch = max(0, total - match - unreadable)
-                if expected_val:
-                    lines.append(
-                        f"sysfs_summary: total={total} match={match} mismatch={mismatch} unreadable={unreadable} "
-                        f"(expected: {expected_val})"
-                    )
-                else:
-                    lines.append(
-                        f"sysfs_summary: total={total} unreadable={unreadable}"
-                    )
-                for p in paths[:8]:
-                    try:
-                        val = Path(p).read_text(encoding="utf-8").strip()
-                        lines.append(f"{p}: {val}")
-                    except Exception as e:
-                        lines.append(f"{p}: unreadable: {e}")
-                if knob.id == "cpu_governor_performance_persistent":
-                    try:
-                        from audioknob_gui.worker.ops import (
-                            read_os_release,
-                            resolve_cpupower_config_path,
-                            resolve_cpu_governor_service,
-                        )
-                        os_release = read_os_release()
-                        distro_id = os_release.get("ID", "")
-                        cfg_path = resolve_cpupower_config_path(distro_id)
-                        lines.append(f"cpupower_config: {cfg_path}")
-                        try:
-                            cfg_text = Path(cfg_path).read_text(encoding="utf-8")
-                        except Exception as e:
-                            cfg_text = None
-                            lines.append(f"cpupower_config_read_error: {e}")
-                        if cfg_text:
-                            for line in cfg_text.splitlines():
-                                if "GOVERNOR" in line:
-                                    lines.append(f"cpupower_config_governor: {line.strip()}")
-                                    break
-                        service = resolve_cpu_governor_service(distro_id)
-                        if service:
-                            for label, cmd in (
-                                ("service_enabled", ["systemctl", "is-enabled", service]),
-                                ("service_active", ["systemctl", "is-active", service]),
-                            ):
-                                r = subprocess.run(cmd, capture_output=True, text=True)
-                                lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-                    except Exception:
-                        pass
-        elif kind == "kernel_cmdline":
-            param = str(params.get("param", ""))
-            override = self._kernel_cmdline_param_for_state(knob.id)
-            if override:
-                param = override
-            running_has = None
-            boot_has = None
-            if param:
-                try:
-                    running = Path("/proc/cmdline").read_text(encoding="utf-8").strip()
-                    lines.append(f"/proc/cmdline: {running}")
-                    tokens = running.split()
-                    running_has = _param_present(tokens, param)
-                    lines.append(f"/proc/cmdline has {param}: {running_has}")
-                except Exception as e:
-                    lines.append(f"/proc/cmdline read error: {e}")
-                try:
-                    from audioknob_gui.worker.ops import detect_distro
-                    import shlex
-                    distro = detect_distro()
-                    boot_path = distro.kernel_cmdline_file
-                    if boot_path:
-                        boot_text = Path(boot_path).read_text(encoding="utf-8")
-                        in_boot = False
-                        if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
-                            in_boot = _param_present(boot_text.split(), param)
-                        elif distro.boot_system == "grub2":
-                            for line in boot_text.splitlines():
-                                if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
-                                    _, _, rhs = line.partition("=")
-                                    rhs = rhs.strip().strip('"')
-                                    try:
-                                        tokens = shlex.split(rhs)
-                                    except Exception:
-                                        tokens = rhs.split()
-                                    in_boot = _param_present(tokens, param)
-                                    break
-                        boot_has = in_boot
-                        lines.append(f"{boot_path} has {param}: {in_boot}")
-                except Exception as e:
-                    lines.append(f"boot config read error: {e}")
-            if status == "partial" and param and running_has is not None and boot_has is not None:
-                if boot_has and not running_has:
-                    lines.append("partial_reason: boot config set but reboot not applied yet.")
-                elif running_has and not boot_has:
-                    lines.append("partial_reason: running kernel has param but boot config missing.")
-                else:
-                    lines.append("partial_reason: running/boot config mismatch; verify bootloader updates.")
-        elif kind == "udev_rule":
-            path = str(params.get("path", ""))
-            if path:
-                lines.extend(_read_file(path))
-                expected = str(params.get("content", "")).strip()
-                if expected:
-                    try:
-                        current = Path(path).read_text(encoding="utf-8")
-                        present = expected in current
-                    except Exception:
-                        present = False
-                    lines.append(f"expected_rule_present: {present}")
-        elif kind == "pipewire_conf":
-            path = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
-            lines.extend(_read_file(path))
-            try:
-                for label, cmd in (
-                    ("pipewire_active", ["systemctl", "--user", "is-active", "pipewire"]),
-                    ("wireplumber_active", ["systemctl", "--user", "is-active", "wireplumber"]),
-                    ("pipewire_pulse_active", ["systemctl", "--user", "is-active", "pipewire-pulse"]),
-                ):
-                    r = subprocess.run(cmd, capture_output=True, text=True)
-                    lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
-            except Exception:
-                pass
-            try:
-                if shutil.which("pw-metadata"):
-                    r = subprocess.run(
-                        ["pw-metadata", "-n", "settings", "0"],
-                        capture_output=True,
-                        text=True,
-                        timeout=2,
-                    )
-                    output = (r.stdout or r.stderr or "").strip()
-                    if output:
-                        clock_rate = None
-                        clock_quantum = None
-                        for line in output.splitlines():
-                            if "clock.rate" in line:
-                                match = re.search(r"clock\\.rate\\s*=\\s*(\\d+)", line)
-                                if match:
-                                    clock_rate = match.group(1)
-                            if "clock.quantum" in line:
-                                match = re.search(r"clock\\.quantum\\s*=\\s*(\\d+)", line)
-                                if match:
-                                    clock_quantum = match.group(1)
-                        if clock_rate or clock_quantum:
-                            lines.append(
-                                f"pipewire_runtime: rate={clock_rate or 'unknown'} "
-                                f"quantum={clock_quantum or 'unknown'}"
-                            )
-            except Exception:
-                pass
-        elif kind == "group_membership":
-            r = subprocess.run(["id"], capture_output=True, text=True)
-            lines.append(f"id: {r.stdout.strip()}")
-            try:
-                from audioknob_gui.platform.detect import get_missing_groups
-
-                missing = get_missing_groups()
-                if missing:
-                    lines.append(f"missing_groups: {', '.join(missing)}")
-                else:
-                    lines.append("missing_groups: none")
-            except Exception:
-                pass
-        elif kind == "pam_limits_audio_group":
-            path = str(params.get("path", ""))
-            if path:
-                lines.extend(_read_file(path))
-                if status == "partial":
-                    wanted_lines = [str(x) for x in params.get("lines", [])]
-                    try:
-                        content = Path(path).read_text(encoding="utf-8")
-                        missing = [line for line in wanted_lines if line not in content]
-                    except Exception:
-                        missing = []
-                    if missing:
-                        lines.append(f"partial_reason: missing lines: {', '.join(missing)}")
-            try:
-                import resource
-                rt_soft, rt_hard = resource.getrlimit(resource.RLIMIT_RTPRIO)
-                mem_soft, mem_hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
-                lines.append(f"rtprio: {rt_soft}/{rt_hard}")
-                lines.append(f"memlock: {mem_soft}/{mem_hard}")
-            except Exception as e:
-                lines.append(f"limits read error: {e}")
-        elif kind == "baloo_disable":
-            cmd = "balooctl6" if shutil.which("balooctl6") else "balooctl"
-            lines.append(f"command: {cmd}")
-            if shutil.which(cmd):
-                r = subprocess.run([cmd, "status"], capture_output=True, text=True)
-                lines.append(r.stdout.strip() or r.stderr.strip())
-            else:
-                lines.append("balooctl not found")
-        elif kind == "read_only":
-            what = str(params.get("what", "")).strip()
-            if what:
-                lines.append(f"read_only: {what}")
-            if knob.id == "scheduler_jitter_test":
-                last = self.state.get("jitter_test_last")
-                if isinstance(last, dict):
-                    max_us = last.get("max_us")
-                    threads = last.get("threads")
-                    lines.append("last_jitter_test:")
-                    if isinstance(max_us, int):
-                        lines.append(f"  max_us: {max_us}")
-                    if isinstance(threads, list):
-                        lines.append(f"  threads: {len(threads)}")
-
-        return lines
+        return status.collect_live_checks(self, knob, status_override=status_override)
 
     def _show_cli_status(self, knob_id: str) -> None:
-        k = next((k for k in self.registry if k.id == knob_id), None)
-        if not k:
-            return
-
-        def _cli_status() -> str:
-            try:
-                status_data = json.loads(
-                    subprocess.check_output(
-                        [
-                            sys.executable,
-                            "-m",
-                            "audioknob_gui.worker.cli",
-                            "--registry",
-                            _registry_path(),
-                            "status",
-                        ],
-                        text=True,
-                    )
-                )
-                item = next(
-                    (s for s in status_data.get("statuses", []) if s.get("knob_id") == k.id),
-                    None,
-                )
-                if item:
-                    return str(item.get("status", "unknown"))
-                return "not found"
-            except Exception as e:
-                return f"error: {e}"
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"{k.title} Status Check")
-        dialog.resize(640, 460)
-        layout = QVBoxLayout(dialog)
-
-        header = QLabel(f"<b>{k.title}</b>")
-        layout.addWidget(header)
-
-        gui_status_label = QLabel(f"GUI status: {self._knob_statuses.get(k.id, 'unknown')}")
-        layout.addWidget(gui_status_label)
-
-        cli_status_label = QLabel("CLI status: (not run yet)")
-        layout.addWidget(cli_status_label)
-
-        text = QTextEdit()
-        text.setReadOnly(True)
-        text.setPlainText("Click Refresh to run CLI status and preview checks.")
-        layout.addWidget(text)
-
-        btn_row = QHBoxLayout()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setFocusPolicy(Qt.NoFocus)
-        btn_row.addWidget(refresh_btn)
-        btn_row.addStretch(1)
-        close_btn = QPushButton("Close")
-        close_btn.setFocusPolicy(Qt.NoFocus)
-        close_btn.clicked.connect(dialog.reject)
-        btn_row.addWidget(close_btn)
-        layout.addLayout(btn_row)
-
-        def _render(payload: dict) -> None:
-            gui_status_label.setText(f"GUI status: {self._knob_statuses.get(k.id, 'unknown')}")
-            cli_status_label.setText(f"CLI status: {payload.get('cli_status', 'unknown')}")
-
-            checks = payload.get("live_checks") or []
-            baseline_checks = self.state.get("baseline_checks", {})
-            if isinstance(baseline_checks, dict) and baseline_checks.get(k.id):
-                checks = list(checks)
-                checks.append("")
-                checks.append("initial state:")
-                checks.extend(str(x) for x in baseline_checks[k.id])
-            text.setPlainText("\n".join(checks))
-
-        def _run_checks() -> None:
-            refresh_btn.setEnabled(False)
-            cli_status_label.setText("CLI status: running...")
-            text.setPlainText("Running CLI checks...")
-
-            def _task():
-                return True, {
-                    "cli_status": _cli_status(),
-                    "live_checks": self._collect_live_checks(k),
-                }, ""
-
-            worker = QueueTaskWorker(_task, parent=self)
-
-            def _on_done(success: bool, payload: object, message: str) -> None:
-                if not isValid(dialog) or not dialog.isVisible():
-                    return
-                refresh_btn.setEnabled(True)
-                if not success:
-                    cli_status_label.setText(f"CLI status: error: {message or 'unknown'}")
-                    text.setPlainText(message or "CLI check failed")
-                    return
-                if isinstance(payload, dict):
-                    _render(payload)
-                else:
-                    text.setPlainText("CLI check returned no data.")
-
-            worker.finished.connect(_on_done)
-            worker.finished.connect(worker.deleteLater)
-            self._task_threads.append(worker)
-            worker.start()
-
-        refresh_btn.clicked.connect(_run_checks)
-        _run_checks()
-
-        dialog.exec()
+        status.show_cli_status(self, knob_id)
 
     def on_check_blockers(self) -> None:
         """Run comprehensive realtime configuration scan."""
@@ -4323,40 +3022,10 @@ class MainWindow(TableMixin, QMainWindow):
             )
 
     def _on_apply_knob(self, knob_id: str) -> None:
-        """Apply a single knob optimization."""
-        k = next((k for k in self.registry if k.id == knob_id), None)
-        if not k:
-            return
-        if knob_id == "qjackctl_server_prefix_rt" and self._is_process_running(["qjackctl", "qjackctl6"]):
-            QMessageBox.information(
-                self,
-                "Close QjackCtl First",
-                "Quit QjackCtl before applying QjackCtl RT.\n\n"
-                "QjackCtl rewrites its config on exit, which can undo changes.",
-            )
-            return
-
-        def _task():
-            if knob_id == "qjackctl_server_prefix_rt":
-                self._prime_qjackctl_preset()
-            if k.requires_root:
-                result = _run_worker_apply_pkexec([knob_id])
-                return True, {"result": result, "requires_root": True}, ""
-            result = _run_worker_apply_user([knob_id])
-            return True, {"result": result, "requires_root": False}, ""
-
-        self._run_knob_task(knob_id, "apply", _task)
+        actions.on_apply_knob(self, knob_id)
 
     def _on_queue_knob(self, knob_id: str, action: str) -> None:
-        if knob_id in self._busy_knobs:
-            return
-        if self._queued_actions.get(knob_id) == action:
-            self._queued_actions.pop(knob_id, None)
-        else:
-            self._queued_actions[knob_id] = action
-        self._save_queue()
-        self._update_queue_ui()
-        self._populate()
+        actions.on_queue_knob(self, knob_id, action)
 
     def _on_advanced_mode_toggle(self, enabled: bool) -> None:
         self.state["advanced_mode_enabled"] = bool(enabled)
@@ -4567,17 +3236,7 @@ class MainWindow(TableMixin, QMainWindow):
         self._run_knob_task(knob_id, "reset", _task)
 
     def _run_knob_task(self, knob_id: str, action: str, fn) -> None:
-        if knob_id in self._busy_knobs:
-            return
-        self._busy_knobs.add(knob_id)
-        self._knob_statuses[knob_id] = "running"
-        self._populate()
-
-        worker = KnobTaskWorker(knob_id, action, fn, parent=self)
-        worker.finished.connect(self._on_knob_task_finished)
-        worker.finished.connect(worker.deleteLater)
-        self._task_threads.append(worker)
-        worker.start()
+        actions.run_knob_task(self, knob_id, action, fn)
 
     def _prune_task_threads(self) -> None:
         self._task_threads = [
@@ -4630,56 +3289,7 @@ class MainWindow(TableMixin, QMainWindow):
                     worker.start()
 
     def _on_knob_task_finished(self, knob_id: str, action: str, success: bool, payload: object, message: str) -> None:
-        self._busy_knobs.discard(knob_id)
-        self._prune_task_threads()
-
-        if success and action == "apply":
-            try:
-                if isinstance(payload, dict):
-                    result = payload.get("result", {})
-                    if payload.get("requires_root"):
-                        self.state["last_root_txid"] = result.get("txid")
-                    else:
-                        self.state["last_user_txid"] = result.get("txid")
-                    save_state(self.state)
-            except Exception:
-                pass
-            if isinstance(payload, dict):
-                self._handle_apply_followups(payload.get("result", {}))
-
-        if not success:
-            if message == _PKEXEC_CANCELLED:
-                self._queue_needs_reboot = False
-                self._refresh_statuses()
-                self._populate()
-                _get_gui_logger().info("apply queue cancelled")
-                return
-            if action == "reset" and (_is_no_transaction_error(message) or _is_force_reset_error(message)):
-                reason = "reset_no_effect" if _is_force_reset_error(message) else None
-                if self._confirm_force_reset(knob_id, reason=reason):
-                    self._run_force_reset(knob_id)
-                else:
-                    self._refresh_statuses()
-                    self._populate()
-                return
-            if action == "apply":
-                _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, message)
-                QMessageBox.critical(self, "Failed", message or "Unknown error")
-            else:
-                QMessageBox.warning(self, "Reset Failed", message or "Unknown error")
-
-        self._refresh_statuses()
-        if success and action == "apply" and knob_id == "rt_limits_audio_group":
-            if not self._rt_limits_active():
-                self._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
-                self._update_reboot_banner()
-                QMessageBox.information(
-                    self,
-                    "Reboot Required",
-                    "RT Limits were applied, but your session does not have them yet.\n\n"
-                    "Log out/in or reboot to activate.",
-                )
-        self._populate()
+        actions.on_knob_task_finished(self, knob_id, action, success, payload, message)
 
     def _on_apply_queue_finished(self, success: bool, payload: object, message: str) -> None:
         inflight = [kid for kid, _ in self._queue_inflight]
@@ -4840,18 +3450,7 @@ class MainWindow(TableMixin, QMainWindow):
         return QMessageBox.question(self, "Force reset", msg) == QMessageBox.Yes
 
     def _run_force_reset(self, knob_id: str) -> None:
-        k = next((k for k in self.registry if k.id == knob_id), None)
-        if not k:
-            return
-
-        def _task():
-            if k.requires_root:
-                result = _run_worker_force_reset_pkexec(knob_id)
-            else:
-                result = _run_worker_force_reset_user(knob_id)
-            return True, {"result": result}, result.get("message", "")
-
-        self._run_knob_task(knob_id, "force_reset", _task)
+        actions.run_force_reset(self, knob_id)
 
     def _force_reset_supported(self, knob_id: str) -> bool:
         k = next((k for k in self.registry if k.id == knob_id), None)
@@ -4927,352 +3526,17 @@ class MainWindow(TableMixin, QMainWindow):
         return QMessageBox.question(self, "Force reset", msg) == QMessageBox.Yes
 
     def _run_force_reset_many(self, knob_ids: list[str]) -> None:
-        by_id = {k.id: k for k in self.registry}
-        for kid in knob_ids:
-            self._busy_knobs.add(kid)
-            self._knob_statuses[kid] = "running"
-        self._populate()
-        _get_gui_logger().info("force reset start knobs=%s", ",".join(knob_ids))
-
-        def _task():
-            results = []
-            errors: list[str] = []
-            for kid in knob_ids:
-                k = by_id.get(kid)
-                if not k:
-                    errors.append(f"{kid}: unknown knob")
-                    continue
-                try:
-                    if k.requires_root:
-                        result = _run_worker_force_reset_pkexec(kid)
-                    else:
-                        result = _run_worker_force_reset_user(kid)
-                    results.append(result)
-                    if not result.get("success", True):
-                        msg = result.get("message") or result.get("error") or "force reset failed"
-                        errors.append(f"{kid}: {msg}")
-                except Exception as e:
-                    errors.append(f"{kid}: {e}")
-            return len(errors) == 0, {"results": results, "errors": errors}, "\n".join(errors)
-
-        worker = QueueTaskWorker(_task, parent=self)
-
-        def _on_done(success: bool, payload: object, message: str) -> None:
-            for kid in knob_ids:
-                self._busy_knobs.discard(kid)
-            self._refresh_statuses()
-            self._populate()
-            if success:
-                _get_gui_logger().info("force reset done knobs=%s", ",".join(knob_ids))
-            else:
-                _get_gui_logger().error("force reset failed error=%s", message)
-            if not success:
-                QMessageBox.warning(
-                    self,
-                    "Force reset incomplete",
-                    message or "Some knobs failed to reset.",
-                )
-
-        worker.finished.connect(_on_done)
-        worker.finished.connect(worker.deleteLater)
-        self._task_threads.append(worker)
-        worker.start()
+        actions.run_force_reset_many(self, knob_ids)
 
     def _restore_knob_internal(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
-        """Restore a single knob to its original state."""
-        if requires_root:
-            try:
-                worker = _pick_root_worker_path()
-                argv = ["pkexec", worker, "restore-knob", knob_id]
-                p = subprocess.run(argv, text=True, capture_output=True)
-                if not p.stdout.strip():
-                    err = p.stderr.strip() or "Unknown error"
-                    if _is_pkexec_cancel(err):
-                        return False, _PKEXEC_CANCELLED
-                    return False, err
-                try:
-                    result = json.loads(p.stdout)
-                except Exception:
-                    err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
-                    if _is_pkexec_cancel(err):
-                        return False, _PKEXEC_CANCELLED
-                    return False, err
-                if result.get("success"):
-                    return True, f"Reset {knob_id}"
-                errors = result.get("errors") or []
-                if errors:
-                    return False, "\n".join(str(e) for e in errors)
-                return False, result.get("error", "Unknown error")
-            except Exception as e:
-                return False, str(e)
-        else:
-            try:
-                argv = [
-                    sys.executable, "-m", "audioknob_gui.worker.cli",
-                    "restore-knob", knob_id
-                ]
-                p = subprocess.run(argv, text=True, capture_output=True)
-                if not p.stdout.strip():
-                    err = p.stderr.strip() or "Unknown error"
-                    if _is_pkexec_cancel(err):
-                        return False, _PKEXEC_CANCELLED
-                    return False, err
-                try:
-                    result = json.loads(p.stdout)
-                except Exception:
-                    err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
-                    if _is_pkexec_cancel(err):
-                        return False, _PKEXEC_CANCELLED
-                    return False, err
-                if result.get("success"):
-                    return True, f"Reset {knob_id}"
-                errors = result.get("errors") or []
-                if errors:
-                    return False, "\n".join(str(e) for e in errors)
-                return False, result.get("error", "Unknown error")
-            except Exception as e:
-                return False, str(e)
+        return actions.restore_knob_internal(self, knob_id, requires_root)
     
     def _restore_knob(self, knob_id: str, requires_root: bool) -> tuple[bool, str]:
         """Legacy wrapper for batch restore."""
-        return self._restore_knob_internal(knob_id, requires_root)
+        return actions.restore_knob(self, knob_id, requires_root)
 
     def on_reset_defaults(self) -> None:
-        """Reset ALL audioknob-gui changes to system defaults."""
-        # First, show what will be reset
-        _get_gui_logger().info("reset defaults requested")
-        try:
-            argv = [
-                sys.executable,
-                "-m",
-                "audioknob_gui.worker.cli",
-                "list-pending",
-            ]
-            p = subprocess.run(argv, text=True, capture_output=True)
-            if p.returncode != 0:
-                raise RuntimeError(p.stderr.strip() or "list-pending failed")
-            changes = json.loads(p.stdout)
-        except Exception as e:
-            QMessageBox.critical(self, "Failed", f"Could not list changes: {e}")
-            return
-
-        file_count = changes.get("count", 0)
-        effects_count = changes.get("effects_count", 0)
-        has_root_effects = changes.get("has_root_effects", False)
-        has_user_effects = changes.get("has_user_effects", False)
-        
-        # Check if there's anything to reset (files OR effects)
-        if file_count == 0 and effects_count == 0:
-            QMessageBox.information(
-                self,
-                "Nothing to reset",
-                "No audioknob-gui changes found.\n\n"
-                "Either no changes have been applied, or they've already been reset."
-            )
-            return
-
-        # Show summary and confirm
-        files = changes.get("files", [])
-        effects = changes.get("effects", [])
-        summary_lines = []
-        
-        # List files
-        for f in files[:10]:  # Show first 10
-            strategy = f.get("reset_strategy", "backup")
-            pkg = f.get("package", "")
-            line = f"• {f['path']}"
-            if strategy == "delete":
-                line += " [will delete]"
-            elif strategy == "package" and pkg:
-                line += f" [restore from {pkg}]"
-            else:
-                line += " [restore backup]"
-            summary_lines.append(line)
-        if len(files) > 10:
-            summary_lines.append(f"... and {len(files) - 10} more files")
-        
-        # List effects
-        if effects:
-            summary_lines.append("")
-            summary_lines.append("Effects to restore:")
-            effect_kinds = {}
-            for e in effects:
-                kind = e.get("kind", "unknown")
-                effect_kinds[kind] = effect_kinds.get(kind, 0) + 1
-            for kind, count in effect_kinds.items():
-                if kind == "sysfs_write":
-                    summary_lines.append(f"• {count} sysfs value(s)")
-                elif kind == "systemd_unit_toggle":
-                    summary_lines.append(f"• {count} systemd service(s)")
-                elif kind == "user_service_mask":
-                    summary_lines.append(f"• {count} user service mask(s)")
-                elif kind == "baloo_disable":
-                    summary_lines.append(f"• Baloo indexer")
-                elif kind == "kernel_cmdline":
-                    summary_lines.append(f"• {count} kernel cmdline change(s)")
-                else:
-                    summary_lines.append(f"• {count} {kind} effect(s)")
-
-        confirm_dialog = QDialog(self)
-        confirm_dialog.setWindowTitle("Reset to System Defaults")
-        confirm_dialog.resize(600, 350)
-        layout = QVBoxLayout(confirm_dialog)
-
-        total_changes = file_count + effects_count
-        layout.addWidget(QLabel(
-            f"<b>Reset {total_changes} change(s) to system defaults?</b><br/><br/>"
-            "<i>You'll be prompted for your password if root access is needed.</i>"
-        ))
-
-        text_widget = QTextEdit()
-        text_widget.setReadOnly(True)
-        text_widget.setPlainText("\n".join(summary_lines))
-        layout.addWidget(text_widget)
-
-        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
-        layout.addWidget(btns)
-
-        confirmed = [False]
-
-        def on_ok():
-            confirmed[0] = True
-            confirm_dialog.accept()
-
-        btns.accepted.connect(on_ok)
-        btns.rejected.connect(confirm_dialog.reject)
-
-        confirm_dialog.exec()
-        if not confirmed[0]:
-            return
-
-        # Execute reset in two phases: user-scope first, then root-scope
-        root_files = [f for f in files if f.get("scope") == "root"]
-        needs_root = bool(root_files) or has_root_effects
-
-        self.btn_reset.setEnabled(False)
-        self.btn_reset.setText("Working...")
-
-        def _task() -> tuple[bool, object, str]:
-            results_text: list[str] = []
-            errors: list[str] = []
-            needs_reboot = False
-
-            # Phase 1: User-scope reset (no pkexec needed)
-            try:
-                argv = [
-                    sys.executable,
-                    "-m",
-                    "audioknob_gui.worker.cli",
-                    "reset-defaults",
-                    "--scope", "user",
-                ]
-                p = subprocess.run(argv, text=True, capture_output=True, timeout=120)
-                parsed = None
-                stdout_text = (p.stdout or "").strip()
-                if stdout_text:
-                    try:
-                        parsed = json.loads(stdout_text)
-                    except json.JSONDecodeError:
-                        parsed = None
-                if parsed is not None:
-                    if parsed.get("reset_count", 0) > 0:
-                        results_text.append(f"Reset {parsed['reset_count']} user file(s)")
-                    errors.extend(parsed.get("errors", []))
-                    needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
-                elif p.returncode != 0:
-                    err_msg = p.stderr.strip() or stdout_text or f"Exit code {p.returncode}"
-                    errors.append(f"User reset failed: {err_msg}")
-                elif stdout_text:
-                    errors.append("User reset: invalid response")
-            except Exception as e:
-                errors.append(f"User reset failed: {e}")
-
-            # Phase 2: Root-scope reset (needs pkexec)
-            if needs_root:
-                try:
-                    worker = _pick_root_worker_path()
-                    argv = [
-                        "pkexec",
-                        worker,
-                        "reset-defaults",
-                        "--scope", "root",
-                    ]
-                    p = subprocess.run(argv, text=True, capture_output=True, timeout=300)
-                    parsed = None
-                    stdout_text = (p.stdout or "").strip()
-                    if stdout_text:
-                        try:
-                            parsed = json.loads(stdout_text)
-                        except json.JSONDecodeError:
-                            parsed = None
-                    if parsed is not None:
-                        if parsed.get("reset_count", 0) > 0:
-                            results_text.append(f"Reset {parsed['reset_count']} system file(s)")
-                        errors.extend(parsed.get("errors", []))
-                        needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
-                    elif p.returncode != 0:
-                        err_msg = p.stderr.strip() or stdout_text or f"Exit code {p.returncode}"
-                        errors.append(f"Root reset failed: {err_msg}")
-                    elif stdout_text:
-                        errors.append("Root reset: invalid response")
-                except Exception as e:
-                    errors.append(f"Root reset failed: {e}")
-
-            return True, {"results_text": results_text, "errors": errors, "needs_reboot": needs_reboot}, ""
-
-        worker = QueueTaskWorker(_task, parent=self)
-
-        def _on_done(success: bool, payload: object, message: str) -> None:
-            self.btn_reset.setEnabled(True)
-            self.btn_reset.setText("Reset All")
-
-            results_text: list[str] = []
-            errors: list[str] = []
-            needs_reboot = False
-            if isinstance(payload, dict):
-                results_text = payload.get("results_text") or []
-                errors = payload.get("errors") or []
-                needs_reboot = bool(payload.get("needs_reboot", False))
-            elif message:
-                errors = [message]
-
-            # Clear all stored txids
-            self.state["last_txid"] = None
-            self.state["last_user_txid"] = None
-            self.state["last_root_txid"] = None
-            self._queued_actions = {}
-            self.state["queued_actions"] = {}
-            save_state(self.state)
-            self._update_queue_ui()
-
-            # Refresh the UI to show updated status
-            self._refresh_statuses()
-            self._populate()
-
-            # Show results
-            if errors:
-                _get_gui_logger().error("reset defaults failed error=%s", "; ".join(errors))
-                reboot_note = "\n\nReboot required to finish kernel cmdline resets." if needs_reboot else ""
-                QMessageBox.warning(
-                    self,
-                    "Reset completed with errors",
-                    "\n".join(results_text) + "\n\nErrors:\n" + "\n".join(errors[:5]) + reboot_note
-                )
-            else:
-                _get_gui_logger().info("reset defaults done")
-                reboot_note = "\n\nReboot required to finish kernel cmdline resets." if needs_reboot else ""
-                QMessageBox.information(
-                    self,
-                    "Reset complete",
-                    "All audioknob-gui changes have been reset to system defaults.\n\n"
-                    + "\n".join(results_text)
-                    + reboot_note
-                )
-
-        worker.finished.connect(_on_done)
-        worker.finished.connect(worker.deleteLater)
-        self._task_threads.append(worker)
-        worker.start()
+        actions.on_reset_defaults(self)
 
 
 def run_app() -> int:
