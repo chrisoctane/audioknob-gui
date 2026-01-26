@@ -57,11 +57,32 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - These only affect PipeWire sessions; apps can still request overrides.
 - In JACK-only setups, these may not be relevant.
 
+### PipeWire Clock Constraints / Mlock / RT Module / Data Loops
+- Clock constraints and quantum/rate knobs can conflict if ranges disallow the chosen quantum/rate.
+- Mlock policies depend on memlock limits (RT Limits); low limits can cause failures.
+- RT module tuning depends on RT limits and/or RTKit/portal behavior.
+- Data loop affinity should align with CPU isolation/pinning choices to avoid jitter.
+
+### WirePlumber ALSA USB Tuning
+- Manual ALSA period settings can fight PipeWire's auto-tuning (0.3.43+).
+- Disabling batch mode can increase CPU usage; test with XRUN monitor.
+
+### Pro Audio Profile (wpctl)
+- Switching device profiles can change node topology and channel layouts.
+- May conflict with JACK/ALSA apps expecting a different profile.
+
+### XRUN Monitor (pw-top)
+- Requires pw-top and profiler data; missing modules show unknown output.
+
+### RTKit Daemon Tuning (On hold)
+- Distro-specific; blocked until verified against official docs.
+
 ### Desktop indexers (Tracker / Baloo)
 - GNOME vs KDE only; not applicable outside their desktop environment.
 
 ## Blockers and silent failure sources
 - Missing commands or packages (e.g., tuned-adm, powerprofilesctl).
+- Missing WirePlumber/wpctl or pw-top for PipeWire dev tools.
 - Services not present or masked (rtirq, irqbalance, cpupower).
 - Kernel cmdline updates not written to bootloader (changes do not take effect).
 - Read-only IRQs (kernel-managed) cannot be reaffined.

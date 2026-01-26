@@ -100,6 +100,8 @@
                     "kernel_cmdline",
                     "power_profile",
                     "pipewire_conf",
+                    "wireplumber_conf",
+                    "wpctl_profile",
                     "user_service_mask",
                     "baloo_disable",
                     "group_membership"

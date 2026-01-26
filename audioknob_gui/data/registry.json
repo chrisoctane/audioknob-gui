@@ -647,6 +647,241 @@
         "read": true,
         "restore": true
       },
+      "category": "stack",
+      "description": "[i] constrains PipeWire clock/quantum ranges (advanced).\n[r] configure before apply; empty fields are ignored.\n[+] can stabilize buffer ranges and allowed rates.\n[-] misconfiguration can cause xruns or refused rates.",
+      "id": "pipewire_clock_constraints",
+      "impl": {
+        "kind": "pipewire_conf",
+        "params": {
+          "path": "~/.config/pipewire/pipewire.conf.d/99-audioknob-clock-constraints.conf",
+          "properties": {}
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "medium",
+      "title": "PW Clock Constraints"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] enables PipeWire memory locking (mlock).\n[+] reduces xruns by keeping audio buffers resident.\n[-] requires sufficient memlock limits; may fail if limits are low.",
+      "id": "pipewire_mlock_policy",
+      "impl": {
+        "kind": "pipewire_conf",
+        "params": {
+          "path": "~/.config/pipewire/pipewire.conf.d/99-audioknob-mlock.conf",
+          "properties": {
+            "mem.allow-mlock": true,
+            "mem.mlock-all": true
+          }
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "medium",
+      "title": "PW Memory Lock"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "permissions",
+      "depends_on": [
+        "audio_group_membership"
+      ],
+      "description": "[i] sets PipeWire realtime limits for the selected group.\n[+] allows PipeWire to obtain realtime scheduling.\n[-] requires log out/in or reboot; incorrect limits can affect system responsiveness.",
+      "id": "pipewire_rt_limits_group",
+      "impl": {
+        "kind": "pam_limits_audio_group",
+        "params": {
+          "group": "pipewire",
+          "lines": [
+            "@pipewire   -  rtprio     95",
+            "@pipewire   -  nice      -19",
+            "@pipewire   -  memlock   4194304"
+          ],
+          "path": "/etc/security/limits.d/95-pipewire.conf"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [
+        "audio",
+        "realtime",
+        "pipewire"
+      ],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "PW RT Limits"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] tunes PipeWire RT module args (advanced).\n[r] configure before apply.\n[+] fine-grained realtime priority and budget tuning.\n[-] incorrect values can reduce stability.",
+      "id": "pipewire_rt_module_tuning",
+      "impl": {
+        "kind": "pipewire_conf",
+        "params": {
+          "path": "~/.config/pipewire/pipewire.conf.d/99-audioknob-rt-module.conf",
+          "module_rt_args": {}
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "medium",
+      "title": "PW RT Module"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] pins PipeWire data loops to CPU cores (advanced).\n[r] configure before apply.\n[+] can reduce jitter by isolating audio threads.\n[-] incorrect affinity can degrade performance.",
+      "id": "pipewire_data_loop_affinity",
+      "impl": {
+        "kind": "pipewire_conf",
+        "params": {
+          "path": "~/.config/pipewire/pipewire.conf.d/99-audioknob-data-loops.conf",
+          "context": {}
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "medium",
+      "title": "PW Data Loops"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "device",
+      "description": "[i] tunes WirePlumber ALSA USB period/buffer settings.\n[r] configure before apply.\n[+] can lower USB audio latency.\n[-] aggressive settings can increase xruns.",
+      "id": "wireplumber_alsa_usb_tuning",
+      "impl": {
+        "kind": "wireplumber_conf",
+        "params": {
+          "path": "~/.config/wireplumber/wireplumber.conf.d/90-audioknob-alsa.conf",
+          "matches": [
+            {
+              "device.bus": "usb"
+            }
+          ],
+          "props": {
+            "api.alsa.disable-batch": false,
+            "api.alsa.headroom": 0,
+            "api.alsa.period-num": 2,
+            "api.alsa.period-size": 128
+          }
+        }
+      },
+      "requires_commands": [
+        "wpctl"
+      ],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "medium",
+      "title": "WP USB ALSA"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] switches a device to the Pro Audio profile when available.\n[+] enables pro audio routing without JACK.\n[-] per-device; profile availability varies.",
+      "id": "pipewire_pro_audio_profile",
+      "impl": {
+        "kind": "wpctl_profile",
+        "params": {
+          "profile": "pro-audio"
+        }
+      },
+      "requires_commands": [
+        "wpctl"
+      ],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "PW Pro Audio"
+    },
+    {
+      "capabilities": {
+        "apply": false,
+        "read": true,
+        "restore": false
+      },
+      "category": "testing",
+      "description": "[i] shows live XRUN/ERR counts via pw-top.\n[+] helps evaluate tuning changes.\n[-] read-only; requires pw-top.",
+      "id": "pipewire_xrun_monitor",
+      "impl": {
+        "kind": "read_only",
+        "params": {
+          "what": "pw-top"
+        }
+      },
+      "requires_commands": [
+        "pw-top"
+      ],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "PW XRUN Monitor"
+    },
+    {
+      "capabilities": {
+        "apply": false,
+        "read": true,
+        "restore": false
+      },
+      "category": "services",
+      "description": "[i] RTKit daemon tuning (on hold; distro-specific).\n[+] can enable higher RT budgets when supported.\n[-] blocked until verified; no changes applied.",
+      "id": "rtkit_daemon_tuning",
+      "impl": {
+        "kind": "read_only",
+        "params": {
+          "what": "rtkit"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "RTKit Tuning"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "services",
       "description": "[i] disables GNOME Tracker indexer services.\n[+] avoids background IO/CPU spikes during audio work.\n[-] GNOME file indexing/search is reduced.",
       "id": "disable_tracker",

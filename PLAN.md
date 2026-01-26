@@ -140,6 +140,7 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - Use the **Advanced** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
+- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, XRUN monitor, RTKit placeholder). These are optional and may require manual configuration.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - The **Audio Core Plan** panel is collapsible to save space in the Advanced view.
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.
@@ -166,6 +167,10 @@ per-knob locations in `~/.local/state/audioknob-gui/state.json`. This confirms
 distro-specific paths (e.g., kernel cmdline handling on Tumbleweed vs
 Ubuntu/Fedora) and ensures each knob has a resolved location entry. If the file
 is removed, the schema changes, or the distro/boot system changes, the scan runs again.
+
+**Manual discovery:** Use **Tools → Discover System...** to re-run the system
+profile scan on demand, view the resolved paths/commands, and optionally save
+the JSON snapshot to a file. This does not change system settings.
 
 ### Baseline state capture (first run)
 
@@ -208,6 +213,9 @@ If any agent (including “overseer”) changes behavior, adds a knob, changes p
 When in doubt, stop and ask rather than inventing new UX/flows not described here.
 
 ## How to Add a New Knob
+
+Developer note: before implementing, review **New Knob Robustness Checklist** in `PROJECT_STATE.md`
+for path discovery and system profile updates.
 
 ### Step 1: Define in registry.json
 

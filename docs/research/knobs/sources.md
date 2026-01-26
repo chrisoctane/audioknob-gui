@@ -25,6 +25,14 @@
 - https://pipewire.pages.freedesktop.org/pipewire/page_man_pipewire_conf_5.html
   - PipeWire config properties: default clock rates/quantums, allowed rates,
     data loop RT priority and CPU affinity, mlock settings, node/device rules.
+- https://docs.pipewire.org/page_man_pipewire-props_7.html
+  - PipeWire properties: ALSA profile origins (UCM/ACP), Pro Audio profile notes.
+- https://pipewire.pages.freedesktop.org/pipewire/page_module_profiler.html
+  - Profiler module used by pw-top/pw-profiler; profiling interface details.
+- https://man.voidlinux.org/pw-top.1
+  - pw-top UI columns, ERR counter, batch mode options.
+- https://manpages.ubuntu.com/manpages/resolute/man1/wpctl.1.html
+  - WirePlumber CLI for profile switching (set-profile).
 - https://doc.opensuse.org/documentation/leap/tuning/html/book-tuning/cha-tuning-io.html
   - openSUSE I/O scheduler selection and tunables (mq-deadline, bfq, kyber, none).
 - https://doc.opensuse.org/documentation/leap/tuning/html/book-tuning/cha-tuning-power.html

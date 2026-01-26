@@ -48,26 +48,118 @@ def read_os_release() -> dict[str, str]:
     return os_release
 
 
+def _systemd_unit_paths(unit: str) -> list[Path]:
+    candidates = [
+        Path("/etc/systemd/system") / unit,
+        Path("/usr/lib/systemd/system") / unit,
+        Path("/lib/systemd/system") / unit,
+    ]
+    return [p for p in candidates if p.exists()]
+
+
+def _systemd_environment_files(unit: str) -> list[str]:
+    paths: list[str] = []
+    for unit_path in _systemd_unit_paths(unit):
+        try:
+            content = unit_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if not line.startswith("EnvironmentFile="):
+                continue
+            _, _, rhs = line.partition("=")
+            rhs = rhs.strip()
+            if not rhs:
+                continue
+            try:
+                parts = shlex.split(rhs)
+            except Exception:
+                parts = rhs.split()
+            for part in parts:
+                if part.startswith("-"):
+                    part = part[1:]
+                part = part.strip()
+                if part:
+                    paths.append(part)
+    return paths
+
+
+def _normalize_env_path(path: str) -> list[str]:
+    norm: list[str] = []
+    if path.startswith("/etc") and not path.startswith("/etc/"):
+        norm.append("/etc/" + path[4:])
+    if path.startswith("/usr") and not path.startswith("/usr/"):
+        norm.append("/usr/" + path[4:])
+    norm.append(path)
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in norm:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
 def resolve_cpupower_config_path(distro_id: str) -> str:
+    env_paths = _systemd_environment_files("cpupower.service")
+    normalized_env_paths: list[str] = []
+    for path in env_paths:
+        normalized_env_paths.extend(_normalize_env_path(path))
+    if normalized_env_paths:
+        for path in normalized_env_paths:
+            if Path(path).exists():
+                return path
+
     deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
-    primary = "/etc/default/cpufrequtils" if deb_like else "/etc/sysconfig/cpupower"
-    secondary = "/etc/sysconfig/cpupower" if deb_like else "/etc/default/cpufrequtils"
-    if Path(primary).exists():
-        return primary
-    if Path(secondary).exists():
-        return secondary
-    return primary
+    suse_like = distro_id in ("opensuse-tumbleweed", "opensuse-leap", "opensuse")
+
+    if deb_like:
+        fallback = [
+            "/etc/default/cpufrequtils",
+            "/etc/cpupower-service.conf",
+            "/etc/sysconfig/cpupower",
+        ]
+    elif suse_like:
+        fallback = [
+            "/etc/cpupower-service.conf",
+            "/etc/sysconfig/cpupower",
+            "/etc/default/cpufrequtils",
+        ]
+    else:
+        fallback = [
+            "/etc/cpupower-service.conf",
+            "/etc/sysconfig/cpupower",
+            "/etc/default/cpufrequtils",
+        ]
+
+    candidates: list[str] = []
+    for path in normalized_env_paths:
+        if path not in candidates:
+            candidates.append(path)
+    for path in fallback:
+        if path not in candidates:
+            candidates.append(path)
+
+    for path in candidates:
+        if Path(path).exists():
+            return path
+    return candidates[0]
 
 
 def resolve_rtirq_config_path(distro_id: str) -> str:
     deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
-    primary = "/etc/default/rtirq" if deb_like else "/etc/sysconfig/rtirq"
-    secondary = "/etc/sysconfig/rtirq" if deb_like else "/etc/default/rtirq"
-    if Path(primary).exists():
-        return primary
-    if Path(secondary).exists():
-        return secondary
-    return primary
+    if deb_like:
+        candidates = ["/etc/default/rtirq", "/etc/rtirq.conf", "/etc/sysconfig/rtirq"]
+    else:
+        candidates = ["/etc/rtirq.conf", "/etc/sysconfig/rtirq", "/etc/default/rtirq"]
+    for path in candidates:
+        if Path(path).exists():
+            return path
+    return candidates[0]
 
 
 def _systemd_is_active(unit: str) -> bool:
@@ -308,7 +400,7 @@ def build_knob_paths(
         kind = knob.impl.kind if knob.impl is not None else "none"
         params = knob.impl.params if knob.impl is not None else {}
 
-        if kind in ("pam_limits_audio_group", "sysctl_conf", "udev_rule", "pipewire_conf", "qjackctl_server_prefix"):
+        if kind in ("pam_limits_audio_group", "sysctl_conf", "udev_rule", "pipewire_conf", "wireplumber_conf", "qjackctl_server_prefix"):
             path = str(params.get("path", ""))
             targets.append({"type": "path", "value": _expand_path(path) if path else ""})
             if kind == "qjackctl_server_prefix":
@@ -370,6 +462,11 @@ def build_knob_paths(
             what = str(params.get("what", ""))
             if what:
                 targets.append({"type": "read_only", "value": what})
+        elif kind == "wpctl_profile":
+            targets.append({"type": "command", "value": "wpctl"})
+            device_id = params.get("device_id")
+            if device_id is not None:
+                targets.append({"type": "device_id", "value": str(device_id)})
 
         if knob.id == "cpu_governor_performance_persistent":
             cfg_path = paths.get("cpupower_config", "")
@@ -398,6 +495,8 @@ def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
         "rtirq_config": resolve_rtirq_config_path(distro.distro_id),
         "pipewire_user_conf_dir": str(Path("~/.config/pipewire/pipewire.conf.d").expanduser()),
         "pipewire_system_conf_dir": "/etc/pipewire/pipewire.conf.d",
+        "wireplumber_user_conf_dir": str(Path("~/.config/wireplumber/wireplumber.conf.d").expanduser()),
+        "wireplumber_system_conf_dir": "/etc/wireplumber/wireplumber.conf.d",
         "qjackctl_config": str(Path("~/.config/rncbc.org/QjackCtl.conf").expanduser()),
         "limits_dir": "/etc/security/limits.d",
         "sysctl_dir": "/etc/sysctl.d",
@@ -435,6 +534,8 @@ def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
         "rtirq_config": _check_path(paths["rtirq_config"], expect_dir=False),
         "pipewire_user_conf_dir": _check_path(paths["pipewire_user_conf_dir"], expect_dir=True),
         "pipewire_system_conf_dir": _check_path(paths["pipewire_system_conf_dir"], expect_dir=True),
+        "wireplumber_user_conf_dir": _check_path(paths["wireplumber_user_conf_dir"], expect_dir=True),
+        "wireplumber_system_conf_dir": _check_path(paths["wireplumber_system_conf_dir"], expect_dir=True),
         "qjackctl_config": _check_path(paths["qjackctl_config"], expect_dir=False),
         "limits_dir": _check_path(paths["limits_dir"], expect_dir=True),
         "sysctl_dir": _check_path(paths["sysctl_dir"], expect_dir=True),
@@ -452,6 +553,8 @@ def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
         notes.append(f"sysctl.d directory missing: {paths['sysctl_dir']}")
     if not checks["udev_rules_dir"]:
         notes.append(f"udev rules directory missing: {paths['udev_rules_dir']}")
+    if not checks["wireplumber_user_conf_dir"] and not checks["wireplumber_system_conf_dir"]:
+        notes.append("WirePlumber config directories not found; WirePlumber knobs may be unavailable.")
 
     knob_paths = build_knob_paths(paths=paths, distro=distro, knobs=knobs)
 
@@ -1052,31 +1155,173 @@ def _kernel_cmdline_preview(params: dict[str, Any]) -> tuple[list[FileChange], l
     return [FileChange(path=cmdline_file, action=action, diff=unified_diff(cmdline_file, before, after))], notes
 
 
-def _pipewire_conf_preview(params: dict[str, Any]) -> list[FileChange]:
-    """Preview for PipeWire configuration."""
-    path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
-    path = Path(path_str).expanduser()
-    
-    # Build config content based on params
-    lines = ["# audioknob-gui PipeWire configuration"]
-    
+def _pipewire_format_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f"\"{escaped}\""
+    if isinstance(value, list):
+        rendered = [_pipewire_format_value(v) for v in value if v is not None]
+        return "[ " + " ".join(rendered) + " ]"
+    if isinstance(value, dict):
+        parts = []
+        for key, val in value.items():
+            if val is None:
+                continue
+            parts.append(f"{key} = {_pipewire_format_value(val)}")
+        return "{ " + " ".join(parts) + " }"
+    return str(value)
+
+
+def _pipewire_clean_mapping(mapping: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(mapping, dict):
+        return {}
+    return {str(k): v for k, v in mapping.items() if v is not None}
+
+
+def _pipewire_has_settings(params: dict[str, Any]) -> bool:
+    if params.get("quantum") is not None or params.get("rate") is not None:
+        return True
+    if _pipewire_clean_mapping(params.get("properties")):
+        return True
+    if _pipewire_clean_mapping(params.get("context")):
+        return True
+    if _pipewire_clean_mapping(params.get("module_rt_args")):
+        return True
+    return False
+
+
+def _pipewire_append_mapping(lines: list[str], mapping: dict[str, Any], indent: int) -> None:
+    pad = " " * indent
+    for key, val in mapping.items():
+        if val is None:
+            continue
+        lines.append(f"{pad}{key} = {_pipewire_format_value(val)}")
+
+
+def build_pipewire_conf_content(params: dict[str, Any]) -> str:
+    lines: list[str] = ["# audioknob-gui PipeWire configuration"]
+
+    properties = _pipewire_clean_mapping(params.get("properties"))
+    context = _pipewire_clean_mapping(params.get("context"))
+    module_rt_args = _pipewire_clean_mapping(params.get("module_rt_args"))
+
     quantum = params.get("quantum")
     rate = params.get("rate")
-    
-    if quantum or rate:
+    if quantum is not None:
+        properties.setdefault("default.clock.quantum", quantum)
+        if bool(params.get("set_min_quantum", True)):
+            properties.setdefault("default.clock.min-quantum", quantum)
+    if rate is not None:
+        properties.setdefault("default.clock.rate", rate)
+
+    if properties:
         lines.append("context.properties = {")
-        if quantum:
-            lines.append(f"    default.clock.quantum = {quantum}")
-            lines.append(f"    default.clock.min-quantum = {quantum}")
-        if rate:
-            lines.append(f"    default.clock.rate = {rate}")
+        _pipewire_append_mapping(lines, properties, indent=4)
         lines.append("}")
-    
-    content = "\n".join(lines) + "\n"
+
+    if context:
+        for key, value in context.items():
+            if value is None:
+                continue
+            if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
+                lines.append(f"context.{key} = [")
+                for item in value:
+                    lines.append("  {")
+                    _pipewire_append_mapping(lines, item, indent=4)
+                    lines.append("  }")
+                lines.append("]")
+            else:
+                lines.append(f"context.{key} = {_pipewire_format_value(value)}")
+
+    if module_rt_args:
+        lines.append("module.rt.args = {")
+        _pipewire_append_mapping(lines, module_rt_args, indent=4)
+        lines.append("}")
+
+    return "\n".join(lines) + "\n"
+
+
+def _pipewire_conf_preview(params: dict[str, Any]) -> tuple[list[FileChange], list[str]]:
+    """Preview for PipeWire configuration."""
+    notes: list[str] = []
+    if not _pipewire_has_settings(params):
+        notes.append("No PipeWire settings configured; configure this knob before applying.")
+        return [], notes
+
+    path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
+    path = Path(path_str).expanduser()
+
+    content = build_pipewire_conf_content(params)
     before = _read_text(str(path))
-    
+
     action = "create" if not path.exists() else "modify"
-    return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, content))]
+    return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, content))], notes
+
+
+def _wireplumber_has_settings(params: dict[str, Any]) -> bool:
+    rules = params.get("rules")
+    if isinstance(rules, list):
+        for rule in rules:
+            if isinstance(rule, dict) and _pipewire_clean_mapping(rule.get("props")):
+                return True
+    if _pipewire_clean_mapping(params.get("props")):
+        return True
+    return False
+
+
+def build_wireplumber_conf_content(params: dict[str, Any]) -> str:
+    lines: list[str] = ["# audioknob-gui WirePlumber ALSA configuration"]
+    rules = params.get("rules")
+    if not isinstance(rules, list) or not rules:
+        matches = params.get("matches")
+        if not isinstance(matches, list) or not matches:
+            matches = [{"device.bus": "usb"}]
+        props = _pipewire_clean_mapping(params.get("props"))
+        rules = [{"matches": matches, "props": props}]
+
+    lines.append("monitor.alsa.rules = [")
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        matches = rule.get("matches")
+        props = _pipewire_clean_mapping(rule.get("props"))
+        if not isinstance(matches, list) or not matches:
+            matches = [{"device.bus": "usb"}]
+        lines.append("  {")
+        lines.append("    matches = [")
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            lines.append("      {")
+            _pipewire_append_mapping(lines, match, indent=8)
+            lines.append("      }")
+        lines.append("    ]")
+        lines.append("    actions = {")
+        lines.append("      update-props = {")
+        _pipewire_append_mapping(lines, props, indent=8)
+        lines.append("      }")
+        lines.append("    }")
+        lines.append("  }")
+    lines.append("]")
+    return "\n".join(lines) + "\n"
+
+
+def _wireplumber_conf_preview(params: dict[str, Any]) -> tuple[list[FileChange], list[str]]:
+    notes: list[str] = []
+    if not _wireplumber_has_settings(params):
+        notes.append("No WirePlumber ALSA properties configured; configure this knob before applying.")
+        return [], notes
+
+    path_str = str(params.get("path", "~/.config/wireplumber/wireplumber.conf.d/90-audioknob-alsa.conf"))
+    path = Path(path_str).expanduser()
+    content = build_wireplumber_conf_content(params)
+    before = _read_text(str(path))
+    action = "create" if not path.exists() else "modify"
+    return [FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, content))], notes
 
 
 def _user_service_mask_preview(params: dict[str, Any]) -> tuple[list[list[str]], list[str]]:
@@ -1267,8 +1512,26 @@ def preview(knob: Any, action: str) -> PreviewItem:
             would_run.extend(cmds)
             notes.extend(more_notes)
         elif kind == "pipewire_conf":
-            file_changes.extend(_pipewire_conf_preview(params))
-            notes.append("Restart PipeWire to apply: systemctl --user restart pipewire")
+            changes, more_notes = _pipewire_conf_preview(params)
+            file_changes.extend(changes)
+            notes.extend(more_notes)
+            if changes:
+                notes.append("Restart PipeWire to apply: systemctl --user restart pipewire")
+        elif kind == "wireplumber_conf":
+            changes, more_notes = _wireplumber_conf_preview(params)
+            file_changes.extend(changes)
+            notes.extend(more_notes)
+            if changes:
+                notes.append("Restart WirePlumber to apply: systemctl --user restart wireplumber")
+        elif kind == "wpctl_profile":
+            device_id = params.get("device_id")
+            profile = params.get("profile")
+            if device_id:
+                cmd = ["wpctl", "set-profile", str(device_id), str(profile or "pro-audio")]
+                would_run.append(cmd)
+                notes.append("Will query device profiles and switch to Pro Audio if available.")
+            else:
+                notes.append("No device selected; configure this knob before applying.")
         elif kind == "user_service_mask":
             cmds, more_notes = _user_service_mask_preview(params)
             would_run.extend(cmds)
@@ -1951,31 +2214,85 @@ def check_knob_status(knob: Any) -> str:
             return "unknown"
     
     if kind == "pipewire_conf":
+        if not _pipewire_has_settings(params):
+            return "unknown"
         path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
         path = Path(path_str).expanduser()
         if not path.exists():
             return "not_applied"
-        # File exists, check for our settings
         try:
             content = path.read_text(encoding="utf-8")
-            quantum = params.get("quantum")
-            rate = params.get("rate")
-            found = 0
-            expected = 0
-            if quantum:
-                expected += 1
-                if f"default.clock.quantum = {quantum}" in content:
-                    found += 1
-            if rate:
-                expected += 1
-                if f"default.clock.rate = {rate}" in content:
-                    found += 1
-            if expected == 0:
-                return "unknown"
-            if found == expected:
+            expected = build_pipewire_conf_content(params)
+            if content == expected:
                 return "applied"
-            elif found > 0:
-                return "partial"
+            return "partial"
+        except Exception:
+            return "unknown"
+
+    if kind == "wireplumber_conf":
+        if not _wireplumber_has_settings(params):
+            return "unknown"
+        path_str = str(
+            params.get(
+                "path",
+                "~/.config/wireplumber/wireplumber.conf.d/90-audioknob-alsa.conf",
+            )
+        )
+        path = Path(path_str).expanduser()
+        if not path.exists():
+            return "not_applied"
+        try:
+            content = path.read_text(encoding="utf-8")
+            expected = build_wireplumber_conf_content(params)
+            if content == expected:
+                return "applied"
+            return "partial"
+        except Exception:
+            return "unknown"
+
+    if kind == "wpctl_profile":
+        device_id = params.get("device_id")
+        if device_id is None or str(device_id).strip() == "":
+            return "unknown"
+        try:
+            from audioknob_gui.platform.packages import which_command
+            cmd = which_command("wpctl")
+        except Exception:
+            cmd = None
+        if not cmd:
+            return "not_applicable"
+        try:
+            import subprocess
+            import re
+            result = subprocess.run(
+                [cmd, "inspect", str(device_id)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return "unknown"
+            text = result.stdout or ""
+            current = None
+            in_profiles = False
+            for line in text.splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                low = s.lower()
+                if low.startswith("profiles:"):
+                    in_profiles = True
+                    continue
+                if in_profiles and ":" in s and not re.match(r"^\d+\.", s):
+                    in_profiles = False
+                if low.startswith("active profile:"):
+                    current = s.split(":", 1)[1].strip()
+                    continue
+            if not current:
+                return "unknown"
+            current_low = current.lower()
+            if "pro audio" in current_low or "pro-audio" in current_low:
+                return "applied"
             return "not_applied"
         except Exception:
             return "unknown"

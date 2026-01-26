@@ -183,6 +183,225 @@ def _pipewire_sample_rate_override(state: dict) -> int | None:
     return None
 
 
+def _state_int(state: dict, key: str) -> int | None:
+    raw = state.get(key)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _state_bool(state: dict, key: str) -> bool | None:
+    raw = state.get(key)
+    if isinstance(raw, bool):
+        return raw
+    return None
+
+
+def _state_int_list(state: dict, key: str) -> list[int] | None:
+    raw = state.get(key)
+    if not isinstance(raw, list):
+        return None
+    out: list[int] = []
+    for item in raw:
+        try:
+            out.append(int(item))
+        except Exception:
+            continue
+    return out or None
+
+
+def _pipewire_clock_constraints_override(state: dict) -> dict[str, Any]:
+    props: dict[str, Any] = {}
+    allowed_rates = _state_int_list(state, "pipewire_clock_allowed_rates")
+    if allowed_rates:
+        props["default.clock.allowed-rates"] = allowed_rates
+    min_q = _state_int(state, "pipewire_clock_min_quantum")
+    if min_q is not None:
+        props["default.clock.min-quantum"] = min_q
+    max_q = _state_int(state, "pipewire_clock_max_quantum")
+    if max_q is not None:
+        props["default.clock.max-quantum"] = max_q
+    q_limit = _state_int(state, "pipewire_clock_quantum_limit")
+    if q_limit is not None:
+        props["default.clock.quantum-limit"] = q_limit
+    q_floor = _state_int(state, "pipewire_clock_quantum_floor")
+    if q_floor is not None:
+        props["default.clock.quantum-floor"] = q_floor
+    pow2 = _state_bool(state, "pipewire_clock_power_of_two")
+    if pow2 is not None:
+        props["clock.power-of-two-quantum"] = pow2
+    return props
+
+
+def _pipewire_mlock_override(state: dict) -> dict[str, Any]:
+    props: dict[str, Any] = {}
+    allow = _state_bool(state, "pipewire_mlock_allow")
+    if allow is not None:
+        props["mem.allow-mlock"] = allow
+    mlock_all = _state_bool(state, "pipewire_mlock_all")
+    if mlock_all is not None:
+        props["mem.mlock-all"] = mlock_all
+    return props
+
+
+def _pipewire_rt_module_override(state: dict) -> dict[str, Any]:
+    args: dict[str, Any] = {}
+    rt_prio = _state_int(state, "pipewire_rt_prio")
+    if rt_prio is not None:
+        args["rt.prio"] = rt_prio
+    rt_soft = _state_int(state, "pipewire_rt_time_soft")
+    if rt_soft is not None:
+        args["rt.time.soft"] = rt_soft
+    rt_hard = _state_int(state, "pipewire_rt_time_hard")
+    if rt_hard is not None:
+        args["rt.time.hard"] = rt_hard
+    nice_level = _state_int(state, "pipewire_nice_level")
+    if nice_level is not None:
+        args["nice.level"] = nice_level
+    rlimits = _state_bool(state, "pipewire_rlimits_enabled")
+    if rlimits is not None:
+        args["rlimits.enabled"] = rlimits
+    rtkit = _state_bool(state, "pipewire_rtkit_enabled")
+    if rtkit is not None:
+        args["rtkit.enabled"] = rtkit
+    rtportal = _state_bool(state, "pipewire_rtportal_enabled")
+    if rtportal is not None:
+        args["rtportal.enabled"] = rtportal
+    return args
+
+
+def _pipewire_data_loops_override(state: dict) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    num_loops = _state_int(state, "pipewire_num_data_loops")
+    if num_loops is not None:
+        context["num-data-loops"] = num_loops
+    loops = state.get("pipewire_data_loops")
+    if isinstance(loops, list) and all(isinstance(x, dict) for x in loops):
+        context["data-loops"] = loops
+    return context
+
+
+def _wireplumber_alsa_override(state: dict) -> dict[str, Any]:
+    props: dict[str, Any] = {}
+    period_size = _state_int(state, "wireplumber_alsa_period_size")
+    if period_size is not None:
+        props["api.alsa.period-size"] = period_size
+    period_num = _state_int(state, "wireplumber_alsa_period_num")
+    if period_num is not None:
+        props["api.alsa.period-num"] = period_num
+    headroom = _state_int(state, "wireplumber_alsa_headroom")
+    if headroom is not None:
+        props["api.alsa.headroom"] = headroom
+    disable_batch = _state_bool(state, "wireplumber_alsa_disable_batch")
+    if disable_batch is not None:
+        props["api.alsa.disable-batch"] = disable_batch
+    return props
+
+
+def _pipewire_limits_group_override(state: dict) -> str | None:
+    raw = state.get("pipewire_limits_group")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
+
+
+def _resolve_existing_group(preferred: str | None, candidates: list[str]) -> str | None:
+    try:
+        import grp
+    except Exception:
+        return preferred or (candidates[0] if candidates else None)
+    seen: set[str] = set()
+    for name in [preferred, *candidates]:
+        if not isinstance(name, str):
+            continue
+        name = name.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        try:
+            grp.getgrnam(name)
+            return name
+        except KeyError:
+            continue
+        except Exception:
+            break
+    return preferred or (candidates[0] if candidates else None)
+
+
+def _rewrite_limits_lines(lines: list[str], group: str) -> list[str]:
+    out: list[str] = []
+    for line in lines:
+        raw = str(line).strip()
+        if not raw:
+            continue
+        parts = raw.split()
+        if parts and parts[0].startswith("@"):
+            parts[0] = f"@{group}"
+            out.append(" ".join(parts))
+        else:
+            out.append(raw)
+    return out
+
+
+def _pipewire_pro_audio_device_override(state: dict) -> str | None:
+    raw = state.get("pipewire_pro_audio_device_id")
+    if raw is None:
+        return None
+    try:
+        return str(int(raw))
+    except Exception:
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
+def _apply_pipewire_state_overrides(kid: str, params: dict[str, Any], state: dict) -> dict[str, Any]:
+    new_params = dict(params)
+    if kid == "pipewire_quantum":
+        quantum = _pipewire_quantum_override(state)
+        if quantum is not None:
+            new_params["quantum"] = quantum
+    elif kid == "pipewire_sample_rate":
+        rate = _pipewire_sample_rate_override(state)
+        if rate is not None:
+            new_params["rate"] = rate
+    elif kid == "pipewire_clock_constraints":
+        props = dict(new_params.get("properties") or {})
+        props.update(_pipewire_clock_constraints_override(state))
+        new_params["properties"] = props
+    elif kid == "pipewire_mlock_policy":
+        props = dict(new_params.get("properties") or {})
+        props.update(_pipewire_mlock_override(state))
+        new_params["properties"] = props
+    elif kid == "pipewire_rt_module_tuning":
+        args = dict(new_params.get("module_rt_args") or {})
+        args.update(_pipewire_rt_module_override(state))
+        new_params["module_rt_args"] = args
+    elif kid == "pipewire_data_loop_affinity":
+        context = dict(new_params.get("context") or {})
+        context.update(_pipewire_data_loops_override(state))
+        new_params["context"] = context
+    elif kid == "wireplumber_alsa_usb_tuning":
+        props = dict(new_params.get("props") or {})
+        props.update(_wireplumber_alsa_override(state))
+        new_params["props"] = props
+    elif kid == "pipewire_rt_limits_group":
+        group = _pipewire_limits_group_override(state) or str(new_params.get("group") or "").strip() or None
+        group = _resolve_existing_group(group, ["pipewire", "audio", "realtime"])
+        if group:
+            new_params["group"] = group
+            base_lines = [str(x) for x in new_params.get("lines", [])]
+            new_params["lines"] = _rewrite_limits_lines(base_lines, group)
+    elif kid == "pipewire_pro_audio_profile":
+        device_id = _pipewire_pro_audio_device_override(state)
+        if device_id:
+            new_params["device_id"] = device_id
+    return new_params
+
+
 def _power_profile_backend_override(state: dict) -> str | None:
     raw = str(state.get("power_profile_backend") or "").strip().lower()
     if raw in ("auto", "powerprofilesctl", "tuned"):
@@ -359,8 +578,6 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
     state = _load_gui_state()
     qjackctl_override = _qjackctl_cpu_cores_override(state)
-    pipewire_quantum = _pipewire_quantum_override(state)
-    pipewire_sample_rate = _pipewire_sample_rate_override(state)
     power_profile_backend = _power_profile_backend_override(state)
     irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
 
@@ -380,24 +597,14 @@ def cmd_preview(args: argparse.Namespace) -> int:
             new_params["cpu_cores"] = qjackctl_override
             k = replace(k, impl=replace(k.impl, params=new_params))
 
-        if (
-            pipewire_quantum is not None
-            and k.id == "pipewire_quantum"
-            and k.impl is not None
-            and k.impl.kind == "pipewire_conf"
-        ):
-            new_params = dict(k.impl.params)
-            new_params["quantum"] = pipewire_quantum
+        if k.impl is not None and k.id.startswith("pipewire_") and k.impl.kind in ("pipewire_conf", "wpctl_profile"):
+            new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
-
-        if (
-            pipewire_sample_rate is not None
-            and k.id == "pipewire_sample_rate"
-            and k.impl is not None
-            and k.impl.kind == "pipewire_conf"
-        ):
-            new_params = dict(k.impl.params)
-            new_params["rate"] = pipewire_sample_rate
+        if k.impl is not None and k.impl.kind == "wireplumber_conf":
+            new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if k.impl is not None and k.id == "pipewire_rt_limits_group" and k.impl.kind == "pam_limits_audio_group":
+            new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
         if (
             power_profile_backend is not None
@@ -464,8 +671,6 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
 
     state = _load_gui_state()
     qjackctl_override = _qjackctl_cpu_cores_override(state)
-    pipewire_quantum = _pipewire_quantum_override(state)
-    pipewire_sample_rate = _pipewire_sample_rate_override(state)
 
     backups: list[dict] = []
     effects: list[dict] = []
@@ -571,25 +776,15 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
         elif kind == "pipewire_conf":
             import subprocess
 
+            params = _apply_pipewire_state_overrides(kid, params, state)
+            if not worker_ops._pipewire_has_settings(params):
+                raise SystemExit("No PipeWire settings configured; configure this knob before applying.")
+
             path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
             path = Path(path_str).expanduser()
             _backup_once(tx, backups, str(path))
-            
-            # Build config content
-            lines = ["# audioknob-gui PipeWire configuration"]
-            quantum = pipewire_quantum if (kid == "pipewire_quantum" and pipewire_quantum is not None) else params.get("quantum")
-            rate = pipewire_sample_rate if (kid == "pipewire_sample_rate" and pipewire_sample_rate is not None) else params.get("rate")
-            
-            if quantum or rate:
-                lines.append("context.properties = {")
-                if quantum:
-                    lines.append(f"    default.clock.quantum = {quantum}")
-                    lines.append(f"    default.clock.min-quantum = {quantum}")
-                if rate:
-                    lines.append(f"    default.clock.rate = {rate}")
-                lines.append("}")
-            
-            content = "\n".join(lines) + "\n"
+
+            content = worker_ops.build_pipewire_conf_content(params)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
 
@@ -611,6 +806,112 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 )
             except Exception as e:
                 effects.append({"kind": "pipewire_restart", "error": str(e)})
+
+        elif kind == "wireplumber_conf":
+            import subprocess
+
+            params = _apply_pipewire_state_overrides(kid, params, state)
+            if not worker_ops._wireplumber_has_settings(params):
+                raise SystemExit("No WirePlumber ALSA properties configured; configure this knob before applying.")
+
+            path_str = str(
+                params.get(
+                    "path",
+                    "~/.config/wireplumber/wireplumber.conf.d/90-audioknob-alsa.conf",
+                )
+            )
+            path = Path(path_str).expanduser()
+            _backup_once(tx, backups, str(path))
+            content = worker_ops.build_wireplumber_conf_content(params)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+            try:
+                r = subprocess.run(
+                    ["systemctl", "--user", "restart", "wireplumber.service"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                effects.append(
+                    {
+                        "kind": "wireplumber_restart",
+                        "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
+                    }
+                )
+            except Exception as e:
+                effects.append({"kind": "wireplumber_restart", "error": str(e)})
+
+        elif kind == "wpctl_profile":
+            import subprocess
+            import re
+            from audioknob_gui.platform.packages import which_command
+
+            params = _apply_pipewire_state_overrides(kid, params, state)
+            device_id = params.get("device_id")
+            if device_id is None or str(device_id).strip() == "":
+                raise SystemExit("No device selected. Configure the Pro Audio knob first.")
+            cmd = which_command("wpctl") or "wpctl"
+            inspect = subprocess.run(
+                [cmd, "inspect", str(device_id)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if inspect.returncode != 0:
+                detail = inspect.stderr.strip() or inspect.stdout.strip() or "wpctl inspect failed"
+                raise SystemExit(detail)
+            text = inspect.stdout or ""
+            current = None
+            profiles: list[dict[str, str]] = []
+            in_profiles = False
+            for line in text.splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                low = s.lower()
+                if low.startswith("profiles:"):
+                    in_profiles = True
+                    continue
+                if in_profiles and ":" in s and not re.match(r"^\d+\.", s):
+                    in_profiles = False
+                if low.startswith("active profile:"):
+                    current = s.split(":", 1)[1].strip()
+                    continue
+                if in_profiles:
+                    m = re.match(r"^(\d+)\.\s*(.+)$", s)
+                    if m:
+                        idx = m.group(1).strip()
+                        name_raw = m.group(2).strip()
+                        name = name_raw.split("(", 1)[0].strip()
+                        profiles.append({"index": idx, "name": name})
+            target = None
+            for prof in profiles:
+                name = prof.get("name", "")
+                if "pro audio" in name.lower() or "pro-audio" in name.lower():
+                    target = prof.get("index") or name
+                    break
+            if not target:
+                raise SystemExit("Pro Audio profile not found for the selected device.")
+            set_result = subprocess.run(
+                [cmd, "set-profile", str(device_id), str(target)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if set_result.returncode != 0:
+                detail = set_result.stderr.strip() or set_result.stdout.strip() or "wpctl set-profile failed"
+                raise SystemExit(detail)
+            if current:
+                effects.append(
+                    {
+                        "kind": "wpctl_profile",
+                        "device_id": str(device_id),
+                        "before": current,
+                        "after": str(target),
+                    }
+                )
 
         elif kind == "user_service_mask":
             import subprocess
@@ -783,6 +1084,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
             new_params = dict(k.impl.params)
             new_params["backend"] = power_profile_backend
             params = new_params
+        if k.impl is not None and k.id == "pipewire_rt_limits_group" and k.impl.kind == "pam_limits_audio_group":
+            params = _apply_pipewire_state_overrides(k.id, params, state)
 
         if kind == "pam_limits_audio_group":
             path = str(params["path"])
@@ -1368,12 +1671,28 @@ def cmd_restore(args: argparse.Namespace) -> int:
     
     # User-scope effects
     from audioknob_gui.worker.ops import user_service_restore, baloo_enable
+    from audioknob_gui.platform.packages import which_command
     
     for e in effects:
         if e.get("kind") == "user_service_mask":
             user_service_restore(e)
         elif e.get("kind") == "baloo_disable":
             baloo_enable()
+        elif e.get("kind") == "wpctl_profile":
+            device_id = e.get("device_id")
+            before = e.get("before")
+            if device_id and before:
+                cmd = which_command("wpctl") or "wpctl"
+                try:
+                    subprocess.run(
+                        [cmd, "set-profile", str(device_id), str(before)],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
 
     _log_audit_event(
         "restore",
@@ -1592,6 +1911,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
         # User-scope effects (services, baloo)
         if scope == "user" and effects:
             from audioknob_gui.worker.ops import user_service_restore, baloo_enable
+            from audioknob_gui.platform.packages import which_command
             
             user_effects_restored = 0
             for e in effects:
@@ -1602,6 +1922,19 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                     elif e.get("kind") == "baloo_disable":
                         baloo_enable()
                         user_effects_restored += 1
+                    elif e.get("kind") == "wpctl_profile":
+                        device_id = e.get("device_id")
+                        before = e.get("before")
+                        if device_id and before:
+                            cmd = which_command("wpctl") or "wpctl"
+                            subprocess.run(
+                                [cmd, "set-profile", str(device_id), str(before)],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+                            user_effects_restored += 1
                 except Exception as ex:
                     errors.append(f"Failed to restore user effect: {ex}")
             
@@ -1960,8 +2293,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Apply per-user overrides so status reflects GUI-configured values.
     state = _load_gui_state()
     qjackctl_override = _qjackctl_cpu_cores_override(state)
-    pipewire_quantum = _pipewire_quantum_override(state)
-    pipewire_sample_rate = _pipewire_sample_rate_override(state)
     power_profile_backend = _power_profile_backend_override(state)
     irq_devices_override, irq_cpu_override = _irq_pinning_override(state)
     
@@ -1975,23 +2306,14 @@ def cmd_status(args: argparse.Namespace) -> int:
             new_params = dict(k.impl.params)
             new_params["cpu_cores"] = qjackctl_override
             k = replace(k, impl=replace(k.impl, params=new_params))
-        if (
-            pipewire_quantum is not None
-            and k.id == "pipewire_quantum"
-            and k.impl is not None
-            and k.impl.kind == "pipewire_conf"
-        ):
-            new_params = dict(k.impl.params)
-            new_params["quantum"] = pipewire_quantum
+        if k.impl is not None and k.id.startswith("pipewire_") and k.impl.kind in ("pipewire_conf", "wpctl_profile"):
+            new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
-        if (
-            pipewire_sample_rate is not None
-            and k.id == "pipewire_sample_rate"
-            and k.impl is not None
-            and k.impl.kind == "pipewire_conf"
-        ):
-            new_params = dict(k.impl.params)
-            new_params["rate"] = pipewire_sample_rate
+        if k.impl is not None and k.impl.kind == "wireplumber_conf":
+            new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
+            k = replace(k, impl=replace(k.impl, params=new_params))
+        if k.impl is not None and k.id == "pipewire_rt_limits_group" and k.impl.kind == "pam_limits_audio_group":
+            new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
         if (
             power_profile_backend is not None
@@ -2603,6 +2925,38 @@ def _force_reset_pipewire_conf(path_str: str) -> tuple[bool, str]:
     return True, f"Deleted {path}"
 
 
+def _force_reset_wireplumber_conf(path_str: str) -> tuple[bool, str]:
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return False, f"Failed to read {path}: {e}"
+
+    if "# audioknob-gui WirePlumber ALSA configuration" not in content.splitlines()[:3]:
+        return False, f"{path} does not appear to be an audioknob config"
+
+    try:
+        path.unlink()
+    except Exception as e:
+        return False, f"Failed to delete {path}: {e}"
+
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "restart", "wireplumber.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception:
+        pass
+
+    return True, f"Deleted {path}"
+
+
 def _force_reset_rtirq_config(params: dict) -> tuple[bool, str]:
     from audioknob_gui.core.rtirq import strip_rtirq_block
     from audioknob_gui.worker.ops import read_os_release, resolve_rtirq_config_path, systemd_disable_now
@@ -2904,6 +3258,9 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
 
     kind = k.impl.kind
     params = k.impl.params
+    state = _load_gui_state()
+    if knob_id == "pipewire_rt_limits_group" and kind == "pam_limits_audio_group":
+        params = _apply_pipewire_state_overrides(knob_id, params, state)
     success = False
     message = ""
 
@@ -2932,6 +3289,9 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     elif kind == "pipewire_conf":
         path = str(params.get("path", ""))
         success, message = _force_reset_pipewire_conf(path)
+    elif kind == "wireplumber_conf":
+        path = str(params.get("path", ""))
+        success, message = _force_reset_wireplumber_conf(path)
     elif kind == "rtirq_config":
         success, message = _force_reset_rtirq_config(params)
     elif kind == "user_service_mask":
