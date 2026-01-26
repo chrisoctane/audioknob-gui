@@ -104,6 +104,9 @@ Phase 6 (done):
 Phase 7 (done):
 - `audioknob_gui/gui/status.py` -> baseline/status/scan helpers
 
+Phase 8 (done):
+- `audioknob_gui/gui/requirements.py` -> group/package requirement checks and install flows
+
 Next phases (planned, incremental):
 - (plan complete)
 

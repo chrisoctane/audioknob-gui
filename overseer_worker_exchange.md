@@ -19,6 +19,40 @@ Keep entries concise and actionable.
 
 ## Overseer -> Worker Tasks
 
+### [2026-01-26 14:44] TASK-ID: refactor-ui-phase8
+- Branch: refactor/modularize-cleanup
+- Priority: P2
+- Goal: Extract group/package requirement checks and install flows from `audioknob_gui/gui/main_window.py` into `audioknob_gui/gui/requirements.py` with no behavior/UX changes.
+- Context: Read `AGENTS.md`, `PLAN.md`, `PROJECT_STATE.md`, `overseer.md`. Review recent Phase 6/7 modules.
+- Scope:
+  - Create `audioknob_gui/gui/requirements.py`.
+  - Move group gating helpers: `_knob_group_ok`, group-join/leave flows, group status updates.
+  - Move package requirement helpers: `_knob_commands_ok`, `_knob_missing_commands`, install handling + audit logging.
+  - Update `main_window.py` to call into the new module with thin wrappers.
+  - Update Module Map in `PROJECT_STATE.md` to mark Phase 8 complete.
+- Out of scope:
+  - No UI/UX changes.
+  - No worker/backend changes.
+  - No registry/schema edits.
+- Constraints:
+  - Preserve exact behavior, logging, and error handling.
+  - Keep method signatures stable where possible; wrappers are fine.
+- Acceptance Criteria:
+  - Group and package gating behave identically.
+  - Install button and join/leave groups flows unchanged.
+  - `main_window.py` no longer contains the moved logic.
+  - `PROJECT_STATE.md` module map updated.
+- Docs Required: `PROJECT_STATE.md`
+- Registry Sync Required: No
+- Verification Required:
+  - `python3 scripts/check_repo_consistency.py`
+  - `python3 -m compileall -q audioknob_gui`
+- Rollback Plan: Revert `requirements.py` and restore methods to `main_window.py`.
+- Stop Conditions:
+  - Missing/conflicting docs
+  - Unexpected local changes
+  - Behavior changes required to proceed
+
 ### [2026-01-25 14:05] TASK-ID: refactor-ui-phase7
 - Branch: refactor/modularize-cleanup
 - Priority: P2
@@ -245,6 +279,25 @@ Keep entries concise and actionable.
 
 ## Worker -> Overseer Updates
 
+### [2026-01-26 14:46] TASK-ID: refactor-ui-phase8
+- Status: ack
+- Branch: refactor/modularize-cleanup
+- Plan: Add `audioknob_gui/gui/requirements.py` for group/package requirement checks and install flows, move related helpers from `audioknob_gui/gui/main_window.py` with thin wrappers, update Module Map, run required checks.
+- Changes:
+- Tests Run:
+- Results:
+- Notes/Risks:
+- Questions:
+
+### [2026-01-26 14:51] TASK-ID: refactor-ui-phase8
+- Status: done
+- Branch: refactor/modularize-cleanup
+- Changes: Added `audioknob_gui/gui/requirements.py` for group/package checks and install flows; moved group/package helpers and join/leave/install flows out of `audioknob_gui/gui/main_window.py` with thin wrappers; updated Module Map in `PROJECT_STATE.md`.
+- Tests Run: `python3 scripts/check_repo_consistency.py`; `python3 -m compileall -q audioknob_gui`
+- Results: pass
+- Notes/Risks: None noted.
+- Questions: None.
+
 ### [2026-01-25 14:08] TASK-ID: refactor-ui-phase7
 - Status: ack
 - Branch: refactor/modularize-cleanup
@@ -372,6 +425,11 @@ Keep entries concise and actionable.
 ---
 
 ## Overseer Sign-off
+
+### [2026-01-26 15:21] TASK-ID: refactor-ui-phase8
+- Result: pass
+- Verification: `python3 scripts/check_repo_consistency.py`, `python3 -m compileall -q audioknob_gui`
+- Notes: Verified `audioknob_gui/gui/requirements.py` extraction and Module Map update.
 
 ### [2026-01-26 11:20] TASK-ID: refactor-ui-phase7
 - Result: pass
