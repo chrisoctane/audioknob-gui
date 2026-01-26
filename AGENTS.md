@@ -9,6 +9,17 @@ It is for agent control only and does not change public docs.
 - Architecture/constraints: `PROJECT_STATE.md` is the technical contract.
 - Registry: `config/registry*.json` is canonical; `audioknob_gui/data/registry*.json` must be synced.
 
+## Required reading (always)
+- `AGENTS.md` (this file) — authoritative workflow rules.
+- `PLAN.md` when touching UX/user workflows.
+- `PROJECT_STATE.md` when touching behavior/architecture or release processes.
+- `docs/KNOB_INTERACTIONS.md` before any IRQ/kernel/RT/power/CPU isolation changes.
+- `docs/knobs.md` before adding or implementing new knobs.
+- `CHANGELOG.md` for release work (must be updated per release).
+- `overseer.md` only when acting in an overseer/audit role.
+
+If any doc is stale or conflicts with code, update it before proceeding.
+
 ## Hard guardrails (no exceptions without explicit user approval)
 - No background daemon/service, no auto-apply workflows, no hidden state machines.
 - No silent system changes; every change must be user-initiated and visible in UI.
@@ -25,10 +36,11 @@ It is for agent control only and does not change public docs.
   purposeful and behavior-preserving unless explicitly requested.
 
 ## Start-of-session checklist (before edits)
-1) Read `PLAN.md` and `PROJECT_STATE.md` if making behavior/UX changes.
-2) Locate the relevant code path; do not invent new flows.
-3) Scan for existing helpers before adding new logic.
-4) If you see unexpected local changes, STOP and ask the user.
+1) Read `AGENTS.md` and the docs required for the task (see Required reading).
+2) Read `PLAN.md` and `PROJECT_STATE.md` if making behavior/UX changes.
+3) Locate the relevant code path; do not invent new flows.
+4) Scan for existing helpers before adding new logic.
+5) If you see unexpected local changes, STOP and ask the user.
 
 ## Change rules (drift prevention)
 - Any behavior or UX change MUST update `PROJECT_STATE.md`.

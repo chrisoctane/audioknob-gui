@@ -4,6 +4,14 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.1] - 2026-01-26
+
+### Fixed
+- Pro Audio device list now parses `wpctl status` tree output reliably.
+
+### Changed
+- Agent workflow docs now explicitly require reading the correct docs per task.
+
 ## [0.6.0] - 2026-01-26
 
 ### Added
