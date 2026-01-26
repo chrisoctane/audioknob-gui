@@ -40,6 +40,29 @@ def load_state() -> dict:
         "advanced_mode_enabled": False,  # bool
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
+        "pipewire_clock_allowed_rates": None,  # list[int] | None
+        "pipewire_clock_min_quantum": None,  # int | None
+        "pipewire_clock_max_quantum": None,  # int | None
+        "pipewire_clock_quantum_limit": None,  # int | None
+        "pipewire_clock_quantum_floor": None,  # int | None
+        "pipewire_clock_power_of_two": None,  # bool | None
+        "pipewire_mlock_allow": None,  # bool | None
+        "pipewire_mlock_all": None,  # bool | None
+        "pipewire_limits_group": None,  # str | None
+        "pipewire_rt_prio": None,  # int | None
+        "pipewire_rt_time_soft": None,  # int | None
+        "pipewire_rt_time_hard": None,  # int | None
+        "pipewire_nice_level": None,  # int | None
+        "pipewire_rlimits_enabled": None,  # bool | None
+        "pipewire_rtkit_enabled": None,  # bool | None
+        "pipewire_rtportal_enabled": None,  # bool | None
+        "pipewire_num_data_loops": None,  # int | None
+        "pipewire_data_loops": None,  # list[dict] | None
+        "wireplumber_alsa_period_size": None,  # int | None
+        "wireplumber_alsa_period_num": None,  # int | None
+        "wireplumber_alsa_headroom": None,  # int | None
+        "wireplumber_alsa_disable_batch": None,  # bool | None
+        "pipewire_pro_audio_device_id": None,  # str | int | None
         "power_profile_backend": "auto",  # auto | powerprofilesctl | tuned
         "jitter_test_last": None,  # dict payload from last run or None
         "system_profile": None,  # dict from startup scan or None
@@ -92,6 +115,52 @@ def load_state() -> dict:
             data["pipewire_quantum"] = None
         if "pipewire_sample_rate" not in data:
             data["pipewire_sample_rate"] = None
+        if "pipewire_clock_allowed_rates" not in data:
+            data["pipewire_clock_allowed_rates"] = None
+        if "pipewire_clock_min_quantum" not in data:
+            data["pipewire_clock_min_quantum"] = None
+        if "pipewire_clock_max_quantum" not in data:
+            data["pipewire_clock_max_quantum"] = None
+        if "pipewire_clock_quantum_limit" not in data:
+            data["pipewire_clock_quantum_limit"] = None
+        if "pipewire_clock_quantum_floor" not in data:
+            data["pipewire_clock_quantum_floor"] = None
+        if "pipewire_clock_power_of_two" not in data:
+            data["pipewire_clock_power_of_two"] = None
+        if "pipewire_mlock_allow" not in data:
+            data["pipewire_mlock_allow"] = None
+        if "pipewire_mlock_all" not in data:
+            data["pipewire_mlock_all"] = None
+        if "pipewire_limits_group" not in data:
+            data["pipewire_limits_group"] = None
+        if "pipewire_rt_prio" not in data:
+            data["pipewire_rt_prio"] = None
+        if "pipewire_rt_time_soft" not in data:
+            data["pipewire_rt_time_soft"] = None
+        if "pipewire_rt_time_hard" not in data:
+            data["pipewire_rt_time_hard"] = None
+        if "pipewire_nice_level" not in data:
+            data["pipewire_nice_level"] = None
+        if "pipewire_rlimits_enabled" not in data:
+            data["pipewire_rlimits_enabled"] = None
+        if "pipewire_rtkit_enabled" not in data:
+            data["pipewire_rtkit_enabled"] = None
+        if "pipewire_rtportal_enabled" not in data:
+            data["pipewire_rtportal_enabled"] = None
+        if "pipewire_num_data_loops" not in data:
+            data["pipewire_num_data_loops"] = None
+        if "pipewire_data_loops" not in data:
+            data["pipewire_data_loops"] = None
+        if "wireplumber_alsa_period_size" not in data:
+            data["wireplumber_alsa_period_size"] = None
+        if "wireplumber_alsa_period_num" not in data:
+            data["wireplumber_alsa_period_num"] = None
+        if "wireplumber_alsa_headroom" not in data:
+            data["wireplumber_alsa_headroom"] = None
+        if "wireplumber_alsa_disable_batch" not in data:
+            data["wireplumber_alsa_disable_batch"] = None
+        if "pipewire_pro_audio_device_id" not in data:
+            data["pipewire_pro_audio_device_id"] = None
         if "power_profile_backend" not in data:
             data["power_profile_backend"] = "auto"
         if "jitter_test_last" not in data:
@@ -151,7 +220,7 @@ def load_state() -> dict:
                 data["irq_pinning_cpu_cores"] = None
         if data.get("audio_core_plan_count") is not None and not isinstance(data.get("audio_core_plan_count"), int):
             data["audio_core_plan_count"] = 4
-        if data.get("view_tab") not in ("all", "cores"):
+        if data.get("view_tab") not in ("all", "cores", "dev"):
             data["view_tab"] = "all"
         for key in (
             "kernel_isolcpus_cores",
@@ -200,6 +269,61 @@ def load_state() -> dict:
                 data["pipewire_sample_rate"] = None
         except Exception:
             data["pipewire_sample_rate"] = None
+        # PipeWire advanced settings
+        rates_raw = data.get("pipewire_clock_allowed_rates")
+        if rates_raw is not None:
+            if not isinstance(rates_raw, list):
+                data["pipewire_clock_allowed_rates"] = None
+            else:
+                rates: list[int] = []
+                for item in rates_raw:
+                    try:
+                        rates.append(int(item))
+                    except Exception:
+                        continue
+                data["pipewire_clock_allowed_rates"] = rates or None
+        for key in (
+            "pipewire_clock_min_quantum",
+            "pipewire_clock_max_quantum",
+            "pipewire_clock_quantum_limit",
+            "pipewire_clock_quantum_floor",
+            "pipewire_rt_prio",
+            "pipewire_rt_time_soft",
+            "pipewire_rt_time_hard",
+            "pipewire_nice_level",
+            "pipewire_num_data_loops",
+            "wireplumber_alsa_period_size",
+            "wireplumber_alsa_period_num",
+            "wireplumber_alsa_headroom",
+        ):
+            raw = data.get(key)
+            if raw is None:
+                continue
+            try:
+                data[key] = int(raw)
+            except Exception:
+                data[key] = None
+        for key in (
+            "pipewire_clock_power_of_two",
+            "pipewire_mlock_allow",
+            "pipewire_mlock_all",
+            "pipewire_rlimits_enabled",
+            "pipewire_rtkit_enabled",
+            "pipewire_rtportal_enabled",
+            "wireplumber_alsa_disable_batch",
+        ):
+            raw = data.get(key)
+            if raw is not None and not isinstance(raw, bool):
+                data[key] = None
+        group = data.get("pipewire_limits_group")
+        if group is not None and not isinstance(group, str):
+            data["pipewire_limits_group"] = None
+        loops = data.get("pipewire_data_loops")
+        if loops is not None and not (isinstance(loops, list) and all(isinstance(x, dict) for x in loops)):
+            data["pipewire_data_loops"] = None
+        device_id = data.get("pipewire_pro_audio_device_id")
+        if device_id is not None and not isinstance(device_id, (str, int)):
+            data["pipewire_pro_audio_device_id"] = None
         backend = str(data.get("power_profile_backend") or "").strip().lower()
         if backend not in ("auto", "powerprofilesctl", "tuned"):
             data["power_profile_backend"] = "auto"

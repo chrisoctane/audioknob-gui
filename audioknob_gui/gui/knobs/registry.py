@@ -51,6 +51,10 @@ def get_action_override(knob_id: str):
         return ("post_lock", _action_stack_detect)
     if knob_id == "scheduler_jitter_test":
         return ("post_lock", testing.build_test_action)
+    if knob_id == "pipewire_xrun_monitor":
+        return ("post_lock", pipewire.build_xrun_monitor_action)
+    if knob_id == "rtkit_daemon_tuning":
+        return ("post_lock", pipewire.build_rtkit_info_action)
     if knob_id == "blocker_check":
         return ("post_lock", _action_blocker_check)
     return (None, None)
@@ -61,6 +65,20 @@ def get_config_widget_builder(knob_id: str):
         return pipewire.build_quantum_combo
     if knob_id == "pipewire_sample_rate":
         return pipewire.build_sample_rate_combo
+    if knob_id == "pipewire_clock_constraints":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
+    if knob_id == "pipewire_mlock_policy":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
+    if knob_id == "pipewire_rt_module_tuning":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
+    if knob_id == "pipewire_data_loop_affinity":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
+    if knob_id == "pipewire_rt_limits_group":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Select Group...")
+    if knob_id == "wireplumber_alsa_usb_tuning":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
+    if knob_id == "pipewire_pro_audio_profile":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Select Device...")
     if knob_id == "power_profile_performance":
         return power_profile.build_backend_combo
     if knob_id == "qjackctl_server_prefix_rt":
@@ -94,11 +112,42 @@ def handle_configure_knob(ui, knob_id: str) -> bool:
     if knob_id == "pipewire_sample_rate":
         pipewire.configure_sample_rate_dialog(ui)
         return True
+    if knob_id == "pipewire_clock_constraints":
+        pipewire.configure_clock_constraints_dialog(ui)
+        return True
+    if knob_id == "pipewire_mlock_policy":
+        pipewire.configure_mlock_dialog(ui)
+        return True
+    if knob_id == "pipewire_rt_limits_group":
+        pipewire.configure_rt_limits_group_dialog(ui)
+        return True
+    if knob_id == "pipewire_rt_module_tuning":
+        pipewire.configure_rt_module_dialog(ui)
+        return True
+    if knob_id == "pipewire_data_loop_affinity":
+        pipewire.configure_data_loops_dialog(ui)
+        return True
+    if knob_id == "wireplumber_alsa_usb_tuning":
+        pipewire.configure_wireplumber_alsa_dialog(ui)
+        return True
+    if knob_id == "pipewire_pro_audio_profile":
+        pipewire.configure_pro_audio_dialog(ui)
+        return True
     return False
 
 
 def apply_info_param_overrides(ui, knob, params: dict) -> None:
-    if knob.id in ("pipewire_quantum", "pipewire_sample_rate"):
+    if knob.id in (
+        "pipewire_quantum",
+        "pipewire_sample_rate",
+        "pipewire_clock_constraints",
+        "pipewire_mlock_policy",
+        "pipewire_rt_limits_group",
+        "pipewire_rt_module_tuning",
+        "pipewire_data_loop_affinity",
+        "wireplumber_alsa_usb_tuning",
+        "pipewire_pro_audio_profile",
+    ):
         pipewire.apply_param_overrides(ui, knob, params)
     if knob.id == "irq_pinning":
         irq.apply_param_overrides(ui, params)
@@ -145,7 +194,17 @@ def build_info_extra_html(ui, knob, helpers: InfoHelpers) -> str:
 def add_info_buttons(ui, knob, dialog, layout) -> None:
     if knob.id == "qjackctl_server_prefix_rt":
         qjackctl.add_info_buttons(ui, knob, dialog, layout)
-    if knob.id in ("pipewire_quantum", "pipewire_sample_rate"):
+    if knob.id in (
+        "pipewire_quantum",
+        "pipewire_sample_rate",
+        "pipewire_clock_constraints",
+        "pipewire_mlock_policy",
+        "pipewire_rt_limits_group",
+        "pipewire_rt_module_tuning",
+        "pipewire_data_loop_affinity",
+        "wireplumber_alsa_usb_tuning",
+        "pipewire_pro_audio_profile",
+    ):
         pipewire.add_info_buttons(ui, knob, dialog, layout)
     if knob.id == "irq_pinning":
         irq.add_info_buttons(ui, knob, dialog, layout)

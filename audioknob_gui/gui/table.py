@@ -154,6 +154,16 @@ class TableMixin:
         if kind == "pipewire_conf":
             return "pipewire.conf.d"
 
+        if kind == "wireplumber_conf":
+            return "wireplumber.conf.d"
+
+        if kind == "wpctl_profile":
+            return "wpctl"
+
+        if kind == "read_only":
+            what = str(params.get("what", "")).strip()
+            return what or "read-only"
+
         if kind == "systemd_unit_toggle":
             unit = str(params.get("unit", "")).strip()
             return unit or "systemd"

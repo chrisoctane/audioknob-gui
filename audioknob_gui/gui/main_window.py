@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import html as html_lib
+import json
 import os
+import shutil
 import subprocess
 import sys
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -41,6 +42,7 @@ from audioknob_gui.gui.worker_api import (
 )
 from audioknob_gui.gui.dialogs.confirm import ConfirmDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
+from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
 from audioknob_gui.gui.knobs.registry import (
     InfoHelpers,
     add_info_buttons,
@@ -58,6 +60,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -207,6 +210,14 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_baseline_menu.setMenu(baseline_menu)
         top.addWidget(self.btn_baseline_menu)
 
+        self.btn_tools_menu = QPushButton("Tools")
+        self.btn_tools_menu.setToolTip("Diagnostics and system discovery")
+        tools_menu = QMenu(self.btn_tools_menu)
+        self.act_discover_system = tools_menu.addAction("Discover System...")
+        self.act_discover_system.triggered.connect(self._on_discover_system)
+        self.btn_tools_menu.setMenu(tools_menu)
+        top.addWidget(self.btn_tools_menu)
+
         self.btn_tx_history = QPushButton("Tx History")
         self.btn_tx_history.setToolTip("View transactions (txid) and restore")
         self.btn_tx_history.clicked.connect(self._on_show_tx_history)
@@ -230,8 +241,11 @@ class MainWindow(TableMixin, QMainWindow):
         self.view_tabs = QTabBar()
         self.view_tabs.addTab("Main")
         self.view_tabs.addTab("Advanced")
+        self.view_tabs.addTab("Dev")
         if self._view_mode == "cores":
             self.view_tabs.setCurrentIndex(1)
+        elif self._view_mode == "dev":
+            self.view_tabs.setCurrentIndex(2)
         else:
             self.view_tabs.setCurrentIndex(0)
         self.view_tabs.currentChanged.connect(self._on_view_tab_changed)
@@ -316,8 +330,30 @@ class MainWindow(TableMixin, QMainWindow):
                 "kernel_nohz_full",
                 "kernel_rcu_nocbs",
                 "kernel_irqaffinity",
+                "pipewire_clock_constraints",
+                "pipewire_mlock_policy",
+                "pipewire_rt_limits_group",
+                "pipewire_rt_module_tuning",
+                "pipewire_data_loop_affinity",
+                "wireplumber_alsa_usb_tuning",
+                "pipewire_pro_audio_profile",
+                "pipewire_xrun_monitor",
+                "rtkit_daemon_tuning",
             ]
         )
+
+    def _dev_knob_ids(self) -> set[str]:
+        return {
+            "pipewire_clock_constraints",
+            "pipewire_mlock_policy",
+            "pipewire_rt_limits_group",
+            "pipewire_rt_module_tuning",
+            "pipewire_data_loop_affinity",
+            "wireplumber_alsa_usb_tuning",
+            "pipewire_pro_audio_profile",
+            "pipewire_xrun_monitor",
+            "rtkit_daemon_tuning",
+        }
 
     def _core_knob_ids(self) -> set[str]:
         return {
@@ -333,7 +369,12 @@ class MainWindow(TableMixin, QMainWindow):
         }
 
     def _on_view_tab_changed(self, index: int) -> None:
-        mode = "cores" if index == 1 else "all"
+        if index == 1:
+            mode = "cores"
+        elif index == 2:
+            mode = "dev"
+        else:
+            mode = "all"
         if mode == self._view_mode:
             return
         self._view_mode = mode
@@ -698,11 +739,14 @@ class MainWindow(TableMixin, QMainWindow):
         )
 
     def _visible_knobs(self) -> list:
-        if getattr(self, "_view_mode", "all") == "cores":
-            core_ids = self._core_knob_ids()
-            return [k for k in self.registry if k.id in core_ids]
+        mode = getattr(self, "_view_mode", "all")
         core_ids = self._core_knob_ids()
-        return [k for k in self.registry if k.id not in core_ids]
+        dev_ids = self._dev_knob_ids()
+        if mode == "cores":
+            return [k for k in self.registry if k.id in core_ids]
+        if mode == "dev":
+            return [k for k in self.registry if k.id in dev_ids]
+        return [k for k in self.registry if k.id not in core_ids and k.id not in dev_ids]
 
     def _refresh_user_groups(self) -> None:
         requirements.refresh_user_groups(self)
@@ -862,6 +906,134 @@ class MainWindow(TableMixin, QMainWindow):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
+        dialog.exec()
+
+    def _on_discover_system(self) -> None:
+        dialog = QDialog(self)
+        dialog.setStyleSheet(self.styleSheet())
+        dialog.setWindowTitle("System Discovery")
+        dialog.resize(760, 560)
+
+        layout = QVBoxLayout(dialog)
+        summary = QLabel("Running system discovery...")
+        summary.setWordWrap(True)
+        layout.addWidget(summary)
+
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setLineWrapMode(QTextEdit.NoWrap)
+        layout.addWidget(text)
+
+        btn_row = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh")
+        copy_btn = QPushButton("Copy to Clipboard")
+        save_btn = QPushButton("Save...")
+        close_btn = QPushButton("Close")
+        btn_row.addWidget(refresh_btn)
+        btn_row.addWidget(copy_btn)
+        btn_row.addWidget(save_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        current_profile: dict[str, Any] | None = None
+        busy = {"scan": False}
+
+        def _format_summary(profile: dict[str, Any] | None) -> str:
+            if not profile:
+                return "No system profile available."
+            distro = profile.get("pretty_name") or profile.get("distro_id") or "unknown"
+            boot = profile.get("boot_system") or "unknown"
+            scanned = profile.get("scanned_at") or "unknown"
+            cmdline = profile.get("paths", {}).get("kernel_cmdline_file", "unknown")
+            return f"Distro: {distro} | Boot: {boot} | Cmdline: {cmdline} | Scanned: {scanned}"
+
+        def _update_view(profile: dict[str, Any] | None) -> None:
+            nonlocal current_profile
+            current_profile = profile
+            summary.setText(_format_summary(profile))
+            if not profile:
+                text.setPlainText("No system profile data.")
+                return
+            payload = json.dumps(profile, indent=2, sort_keys=True) + "\n"
+            text.setPlainText(payload)
+
+        def _run_scan() -> None:
+            if busy["scan"]:
+                return
+            busy["scan"] = True
+            refresh_btn.setEnabled(False)
+            summary.setText("Running system discovery...")
+
+            def _task() -> tuple[bool, object, str]:
+                try:
+                    from audioknob_gui.worker.ops import scan_system_profile
+                    profile = scan_system_profile(self.registry)
+                    return True, profile, ""
+                except Exception as exc:
+                    return False, {}, str(exc)
+
+            worker = QueueTaskWorker(_task, parent=self)
+
+            def _on_done(success: bool, payload: object, message: str) -> None:
+                busy["scan"] = False
+                refresh_btn.setEnabled(True)
+                if not success or not isinstance(payload, dict):
+                    summary.setText("System discovery failed.")
+                    QMessageBox.warning(
+                        dialog,
+                        "System Discovery",
+                        message or "System discovery failed.",
+                    )
+                    return
+                self.state["system_profile"] = payload
+                save_state(self.state)
+                _get_gui_logger().info(
+                    "system profile scanned distro=%s boot=%s",
+                    payload.get("distro_id"),
+                    payload.get("boot_system"),
+                )
+                _update_view(payload)
+
+            worker.finished.connect(_on_done)
+            worker.finished.connect(worker.deleteLater)
+            self._task_threads.append(worker)
+            worker.start()
+
+        def _on_copy() -> None:
+            QApplication.clipboard().setText(text.toPlainText())
+
+        def _on_save() -> None:
+            if not current_profile:
+                QMessageBox.information(dialog, "Save System Profile", "No profile to save yet.")
+                return
+            base_dir = _state_path().parent
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            default_path = str(base_dir / f"system-profile-{stamp}.json")
+            path, _ = QFileDialog.getSaveFileName(
+                dialog,
+                "Save System Profile",
+                default_path,
+                "JSON Files (*.json)",
+            )
+            if not path:
+                return
+            try:
+                payload = json.dumps(current_profile, indent=2, sort_keys=True) + "\n"
+                Path(path).write_text(payload, encoding="utf-8")
+            except Exception as exc:
+                QMessageBox.warning(dialog, "Save System Profile", f"Failed to save:\n{exc}")
+                return
+            QMessageBox.information(dialog, "Save System Profile", f"Saved to:\n{path}")
+
+        refresh_btn.clicked.connect(_run_scan)
+        copy_btn.clicked.connect(_on_copy)
+        save_btn.clicked.connect(_on_save)
+        close_btn.clicked.connect(dialog.reject)
+
+        existing = self.state.get("system_profile")
+        _update_view(existing if isinstance(existing, dict) else None)
+        _run_scan()
         dialog.exec()
 
     def _on_clear_logs(
@@ -1236,6 +1408,9 @@ class MainWindow(TableMixin, QMainWindow):
     def _ensure_system_profile(self) -> None:
         if not self._system_profile_needs_scan():
             return
+        self._scan_system_profile()
+
+    def _scan_system_profile(self) -> dict[str, Any] | None:
         try:
             from audioknob_gui.worker.ops import scan_system_profile
             profile = scan_system_profile(self.registry)
@@ -1246,8 +1421,10 @@ class MainWindow(TableMixin, QMainWindow):
                 profile.get("distro_id"),
                 profile.get("boot_system"),
             )
+            return profile
         except Exception as exc:
             _get_gui_logger().warning("System profile scan failed: %s", exc)
+            return None
 
     def _system_profile_needs_scan(self) -> bool:
         profile = self.state.get("system_profile")
@@ -2010,6 +2187,10 @@ class MainWindow(TableMixin, QMainWindow):
             worker.finished.connect(worker.deleteLater)
             self._task_threads.append(worker)
             worker.start()
+
+    def on_open_xrun_monitor(self) -> None:
+        dialog = XrunMonitorDialog(parent=self)
+        dialog.exec()
 
     def _update_knob_status(self, knob_id: str, status: str, display: str) -> None:
         """Update the status cell for a specific knob."""

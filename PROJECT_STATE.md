@@ -9,8 +9,8 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.5.7.8
-- **31 knobs defined** (ALL 31 IMPLEMENTED)
+- **Release version**: 0.6.0
+- **40 knobs defined** (ALL 40 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
@@ -32,7 +32,10 @@
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
-- **PipeWire configuration** - quantum and sample rate knobs
+- **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT module tuning, data loop affinity)
+- **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in
+- **Pro Audio profile (dev)** - per-device toggle via wpctl
+- **XRUN monitor (dev)** - live pw-top view for ERR counters
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
@@ -53,7 +56,7 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
-- Header tabs switch between **Main** and **Advanced**; Main hides advanced core/IRQ knobs to avoid duplicates, and the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview. Baseline capture/import/export live in the header Baseline menu.
+- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, XRUN monitor, RTKit placeholder). Baseline capture/import/export live in the header Baseline menu.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
@@ -191,6 +194,8 @@ Next phases (planned, incremental):
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
 2. Add more PipeWire configuration options (via info popup config dialog)
 3. Package for distribution
+4. Validate Dev tab PipeWire/WirePlumber knobs on Tumbleweed + Ubuntu (wpctl, pw-top, drop-ins)
+5. Confirm RTKit tuning paths/args from official distro docs before enabling apply
 
 ### Logs
 - GUI: `~/.local/state/audioknob-gui/logs/gui.log`
@@ -257,6 +262,20 @@ This is the enforcement layer. Any agent making changes MUST satisfy this contra
   - status (`worker/ops.py`)
 - **Safety bar**: if status can’t be proven, report `"unknown"` / conservative state.
 
+### New Knob Robustness Checklist (future-proofing)
+
+Use this checklist for every new knob or when extending an existing knob to a new file/command:
+
+- **Registry**: add the knob to `config/registry.json` and sync packaged copy.
+- **Worker coverage**: implement preview/apply/status (and reset/force-reset paths if needed).
+- **System profile targets**:
+  - If the knob touches a **distro-variant path**, add a target entry in `build_knob_paths()`.
+  - If the knob uses **dynamic paths/commands**, extend `scan_system_profile()` so the UI can display resolved locations.
+- **Path discovery**: prefer capability discovery (systemd unit files, scripts, file existence) over distro ID.
+  - Always keep conservative fallbacks if discovery fails.
+- **Shared files**: apply/reset must be additive and surgical (never overwrite other knobs).
+- **Docs**: update `PROJECT_STATE.md` and `docs/KNOB_INTERACTIONS.md` for conflicts/dependencies.
+
 ### Scope / Non-goals (hard boundaries)
 
 - No background daemons or scheduled auto-tuning
@@ -321,8 +340,9 @@ systemctl is-active rtirq.service
 # Before
 cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 systemctl is-enabled cpupower.service || systemctl is-enabled cpufrequtils.service || true
-grep -E '^\s*GOVERNOR\s*=' /etc/sysconfig/cpupower 2>/dev/null || true
+grep -E '^\s*GOVERNOR\s*=' /etc/cpupower-service.conf 2>/dev/null || true
 grep -E '^\s*GOVERNOR\s*=' /etc/default/cpufrequtils 2>/dev/null || true
+grep -E '^\s*GOVERNOR\s*=' /etc/sysconfig/cpupower 2>/dev/null || true
 
 # Apply → expect "performance" + service enabled (cpupower/cpufrequtils) + GOV set to performance
 # Reset → expect pre-values restored (sysfs + config + service) via transaction
@@ -705,7 +725,7 @@ else:
     "boot_system": "grub2-bls",
     "paths": {
       "kernel_cmdline_file": "/etc/kernel/cmdline",
-      "cpupower_config": "/etc/sysconfig/cpupower",
+      "cpupower_config": "/etc/cpupower-service.conf",
       "cpu_governor_service": "cpupower.service"
     },
     "commands": {
@@ -1249,16 +1269,16 @@ For production packaging, the desktop entry should use an installed entrypoint (
 
 ```bash
 # If rtirq is installed
-/etc/sysconfig/rtirq  # openSUSE location (NOT /etc/rtirq.conf)
+/etc/rtirq.conf  # upstream default
+# Debian/Ubuntu: /etc/default/rtirq
+# RPM distros may still use /etc/sysconfig/rtirq
 ```
-
-**TODO:** Verify rtirq package name and config location on Tumbleweed.
 
 #### cpupower Configuration
 
 ```bash
 # openSUSE/Fedora
-/etc/sysconfig/cpupower
+/etc/cpupower-service.conf
 systemctl is-enabled cpupower.service
 
 # Debian/Ubuntu
@@ -1266,7 +1286,9 @@ systemctl is-enabled cpupower.service
 systemctl is-enabled cpufrequtils.service
 ```
 
-**TODO:** Verify cpupower/cpufrequtils availability per distro.
+**Note:** The worker prefers the EnvironmentFile declared by `cpupower.service` when present,
+then falls back to `/etc/cpupower-service.conf`, `/etc/sysconfig/cpupower`, or
+`/etc/default/cpufrequtils` based on distro.
 
 ---
 
@@ -1310,7 +1332,7 @@ sudo grub2-mkconfig -o /boot/grub2/grub.cfg
 | Update command | `grub2-mkconfig -o /boot/grub2/grub.cfg` |
 | Audio stack | PipeWire (user service) |
 | Audio group | audio |
-| rtirq config | `/etc/sysconfig/rtirq` (if installed) |
+| rtirq config | `/etc/rtirq.conf`, `/etc/sysconfig/rtirq`, or `/etc/default/rtirq` (if installed) |
 
 #### Files to Verify
 
@@ -1346,7 +1368,7 @@ sudo grub2-mkconfig -o /boot/grub2/grub.cfg
 | Audio stack | PipeWire (Ubuntu 22.04+) or PulseAudio |
 | Audio group | audio |
 | rtirq config | `/etc/default/rtirq` (if installed) |
-| CPU governor config | `/etc/default/cpufrequtils` (if installed) |
+| CPU governor config | `/etc/default/cpufrequtils` or `/etc/cpupower-service.conf` (if installed) |
 | Polkit packages | `polkitd` + `pkexec` (Ubuntu) or `policykit-1` (Debian) |
 | PySide6 | Bundled into the .deb via pip wheels (build-time download) |
 
@@ -1428,6 +1450,8 @@ We currently detect:
 - System profile on first GUI startup (distro + key paths) for Ubuntu/Fedora/Tumbleweed,
   stored in `state.json` and used to confirm distro-specific paths (kernel cmdline,
   cpupower, rtirq). Rescans on schema/distro/boot system changes.
+  - Manual discovery is available via **Tools → Discover System...** in the GUI,
+    which re-runs the scan, shows the resolved paths/commands, and can save a JSON snapshot.
 
 #### Phase 2: Needed Detection
 
@@ -1454,8 +1478,8 @@ def detect_distro() -> dict:
         info["boot_system"] = "grub2-bls"
         info["kernel_cmdline_file"] = "/etc/kernel/cmdline"
         info["kernel_cmdline_update_cmd"] = ["sdbootutil", "update-all-entries"]
-        info["rtirq_config"] = "/etc/sysconfig/rtirq"
-        info["cpupower_config"] = "/etc/sysconfig/cpupower"
+        info["rtirq_config"] = "/etc/rtirq.conf"
+        info["cpupower_config"] = "/etc/cpupower-service.conf"
         info["cpu_governor_service"] = "cpupower.service"
     
     elif "opensuse-leap" in os_release.get("ID", ""):
