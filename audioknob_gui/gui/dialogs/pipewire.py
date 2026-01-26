@@ -506,21 +506,29 @@ class ProAudioProfileDialog(QDialog):
         in_audio = False
         in_devices = False
         for line in text.splitlines():
-            raw = line.strip()
-            if not raw:
+            raw = line.rstrip()
+            if not raw.strip():
                 continue
-            if raw.startswith("Audio"):
+            clean = re.sub(r"^[\s│├└─]+", "", raw).strip()
+            if not clean:
+                continue
+            if clean.startswith("Audio"):
                 in_audio = True
+                in_devices = False
                 continue
-            if in_audio and raw.startswith("Devices:"):
+            if clean.startswith(("Video", "Settings", "Clients")):
+                in_audio = False
+                in_devices = False
+                continue
+            if in_audio and clean.startswith("Devices:"):
                 in_devices = True
                 continue
-            if in_devices and raw.startswith(("Sinks:", "Sources:", "Filters:", "Streams:")):
+            if in_audio and clean.startswith(("Sinks:", "Sources:", "Filters:", "Streams:")):
                 in_devices = False
                 continue
             if not in_devices:
                 continue
-            m = re.match(r"^(\d+)\.\s*(.+)$", raw)
+            m = re.match(r"^(\d+)\.\s*(.+)$", clean)
             if m:
                 dev_id = m.group(1).strip()
                 label = m.group(2).strip()
