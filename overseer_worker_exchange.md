@@ -19,6 +19,38 @@ Keep entries concise and actionable.
 
 ## Overseer -> Worker Tasks
 
+### [2026-01-26 15:23] TASK-ID: refactor-ui-phase9
+- Branch: refactor/modularize-cleanup
+- Priority: P3
+- Goal: Clean up residual duplication and unused imports after Phases 2–8, with no behavior/UX changes.
+- Context: Read `AGENTS.md`, `PLAN.md`, `PROJECT_STATE.md`, `overseer.md`. Review the new modules in `audioknob_gui/gui/`.
+- Scope:
+  - Remove unused imports and dead helper code in `audioknob_gui/gui/main_window.py`, `table.py`, and new helper modules.
+  - Deduplicate small utility functions if identical copies remain across modules.
+  - Ensure no behavior changes or UI changes.
+  - Update Module Map in `PROJECT_STATE.md` to mark Phase 9 complete.
+- Out of scope:
+  - No UI/UX changes.
+  - No worker/backend changes.
+  - No registry/schema edits.
+- Constraints:
+  - Keep logic identical; refactor only when behavior is provably unchanged.
+  - Prefer deletion of dead code over new abstractions.
+- Acceptance Criteria:
+  - No unused imports remaining in GUI modules.
+  - No behavior or UI changes.
+  - `PROJECT_STATE.md` module map updated.
+- Docs Required: `PROJECT_STATE.md`
+- Registry Sync Required: No
+- Verification Required:
+  - `python3 scripts/check_repo_consistency.py`
+  - `python3 -m compileall -q audioknob_gui`
+- Rollback Plan: Revert cleanup commit.
+- Stop Conditions:
+  - Missing/conflicting docs
+  - Unexpected local changes
+  - Behavior changes required to proceed
+
 ### [2026-01-26 14:44] TASK-ID: refactor-ui-phase8
 - Branch: refactor/modularize-cleanup
 - Priority: P2
@@ -279,6 +311,25 @@ Keep entries concise and actionable.
 
 ## Worker -> Overseer Updates
 
+### [2026-01-26 15:27] TASK-ID: refactor-ui-phase9
+- Status: ack
+- Branch: refactor/modularize-cleanup
+- Plan: Remove unused imports and dead helper code in GUI modules after phases 2–8, update Module Map, run required checks.
+- Changes:
+- Tests Run:
+- Results:
+- Notes/Risks:
+- Questions:
+
+### [2026-01-26 15:27] TASK-ID: refactor-ui-phase9
+- Status: done
+- Branch: refactor/modularize-cleanup
+- Changes: Removed unused imports from `audioknob_gui/gui/main_window.py` and `audioknob_gui/gui/status.py`; updated Module Map in `PROJECT_STATE.md`.
+- Tests Run: `python3 scripts/check_repo_consistency.py`; `python3 -m compileall -q audioknob_gui`
+- Results: pass
+- Notes/Risks: None noted.
+- Questions: None.
+
 ### [2026-01-26 14:46] TASK-ID: refactor-ui-phase8
 - Status: ack
 - Branch: refactor/modularize-cleanup
@@ -425,6 +476,11 @@ Keep entries concise and actionable.
 ---
 
 ## Overseer Sign-off
+
+### [2026-01-26 15:47] TASK-ID: refactor-ui-phase9
+- Result: pass
+- Verification: `python3 scripts/check_repo_consistency.py`, `python3 -m compileall -q audioknob_gui`
+- Notes: Verified unused imports cleanup and Module Map update.
 
 ### [2026-01-26 15:21] TASK-ID: refactor-ui-phase8
 - Result: pass

@@ -107,6 +107,9 @@ Phase 7 (done):
 Phase 8 (done):
 - `audioknob_gui/gui/requirements.py` -> group/package requirement checks and install flows
 
+Phase 9 (done):
+- Cleanup: removed unused imports in GUI modules after refactor phases
+
 Next phases (planned, incremental):
 - (plan complete)
 

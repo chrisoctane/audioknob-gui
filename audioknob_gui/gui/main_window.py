@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 import html as html_lib
-import json
 import os
-import re
 import subprocess
 import sys
 import shutil
-import glob
-import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -18,7 +13,7 @@ from audioknob_gui.gui.app_info import _app_title
 from audioknob_gui.gui import actions as actions
 from audioknob_gui.gui import requirements as requirements
 from audioknob_gui.gui import status as status
-from audioknob_gui.gui.actions import KnobTaskWorker, QueueTaskWorker
+from audioknob_gui.gui.actions import QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger, _log_gui_audit
 from audioknob_gui.gui.state import _state_path, load_state, save_state
 from audioknob_gui.gui.system_info import (
@@ -55,16 +50,14 @@ from audioknob_gui.gui.knobs.registry import (
 )
 from audioknob_gui.registry import load_registry
 
-from PySide6.QtCore import Qt, QThread, QEvent
-from PySide6.QtGui import QColor, QCursor, QPainter, QPalette
+from PySide6.QtCore import Qt, QThread
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFileDialog,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -74,9 +67,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
-    QSlider,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
