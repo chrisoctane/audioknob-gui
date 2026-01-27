@@ -4,6 +4,18 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.2] - 2026-01-27
+
+### Added
+- Live Jitter Monitor dialog (modeless) with rolling per-thread stats and a snapshot refresh in the info dialog.
+- XRUN monitor reset button (local baseline) and ERR summary table.
+
+### Changed
+- XRUN monitor now pulls the latest pw-top batch output and fills QUANT/RATE from pw-dump when batch metrics are zero.
+- XRUN monitor moved to Main tab.
+- Requirements column now uses A/R/D markers; dependency tooltips include group details.
+- Tools menu layout updated (Baseline + Tx History grouped under Tools; “Scan System Profile…” label shown in full).
+
 ## [0.6.1] - 2026-01-26
 
 ### Fixed

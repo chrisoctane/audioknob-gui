@@ -6,12 +6,12 @@ from PySide6.QtWidgets import QPushButton
 
 
 def build_test_action(ui, knob, ctx):
-    btn = ui._make_action_button("Test")
+    btn = ui._make_action_button("Monitor")
     if ctx.busy:
         btn.setText("Working...")
         btn.setEnabled(False)
     else:
-        btn.clicked.connect(lambda _, kid=knob.id: ui.on_run_test(kid))
+        btn.clicked.connect(ui.on_open_jitter_monitor)
     return btn
 
 
@@ -72,6 +72,10 @@ def info_extra_html(ui, helpers) -> str:
 
 
 def add_info_buttons(ui, knob, dialog, layout) -> None:
+    if knob.id == "scheduler_jitter_test":
+        snapshot_btn = QPushButton("Refresh Snapshot...")
+        snapshot_btn.clicked.connect(lambda: ui.on_run_test(knob.id, refresh_dialog=dialog))
+        layout.addWidget(snapshot_btn)
     last = ui.state.get("jitter_test_last")
     samples = last.get("thread_samples") if isinstance(last, dict) else None
     if isinstance(samples, list) and samples:

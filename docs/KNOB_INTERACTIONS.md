@@ -59,7 +59,7 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 
 ### PipeWire Clock Constraints / Mlock / RT Module / Data Loops
 - Clock constraints and quantum/rate knobs can conflict if ranges disallow the chosen quantum/rate.
-- Mlock policies depend on memlock limits (RT Limits); low limits can cause failures.
+- PW Memory Lock depends on PW RT Limits; low memlock limits can cause failures.
 - RT module tuning depends on RT limits and/or RTKit/portal behavior.
 - Data loop affinity should align with CPU isolation/pinning choices to avoid jitter.
 

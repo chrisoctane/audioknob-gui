@@ -671,6 +671,9 @@
         "restore": true
       },
       "category": "stack",
+      "depends_on": [
+        "pipewire_rt_limits_group"
+      ],
       "description": "[i] enables PipeWire memory locking (mlock).\n[+] reduces xruns by keeping audio buffers resident.\n[-] requires sufficient memlock limits; may fail if limits are low.",
       "id": "pipewire_mlock_policy",
       "impl": {

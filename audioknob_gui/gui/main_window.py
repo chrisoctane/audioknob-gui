@@ -41,6 +41,7 @@ from audioknob_gui.gui.worker_api import (
     _worker_log_path,
 )
 from audioknob_gui.gui.dialogs.confirm import ConfirmDialog
+from audioknob_gui.gui.dialogs.jitter_monitor import JitterMonitorDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
 from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
 from audioknob_gui.gui.knobs.registry import (
@@ -159,6 +160,26 @@ class MainWindow(TableMixin, QMainWindow):
 
         top.addStretch(1)
 
+        self.btn_tools_menu = QPushButton("Tools")
+        self.btn_tools_menu.setToolTip("Diagnostics, baselines, and history")
+        tools_menu = QMenu(self.btn_tools_menu)
+        self.act_discover_system = tools_menu.addAction("Scan System Profile...")
+        self.act_discover_system.triggered.connect(self._on_discover_system)
+        tools_menu.addSeparator()
+        baseline_menu = tools_menu.addMenu("Baseline")
+        self.act_baseline_capture = baseline_menu.addAction("Capture Baseline...")
+        self.act_baseline_import = baseline_menu.addAction("Import Baseline...")
+        self.act_baseline_export = baseline_menu.addAction("Export Baseline...")
+        self.act_baseline_capture.triggered.connect(self._on_capture_baseline)
+        self.act_baseline_import.triggered.connect(self._on_import_baseline)
+        self.act_baseline_export.triggered.connect(self._on_export_baseline)
+        self.act_tx_history = tools_menu.addAction("Tx History...")
+        self.act_tx_history.triggered.connect(self._on_show_tx_history)
+        self._ensure_menu_width(tools_menu)
+        self._ensure_menu_width(baseline_menu)
+        self.btn_tools_menu.setMenu(tools_menu)
+        top.addWidget(self.btn_tools_menu)
+
         self.queue_label = QLabel("")
         self.queue_label.setToolTip("Queued changes waiting to apply")
         self.queue_label.setVisible(False)
@@ -196,32 +217,6 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_logs.setToolTip("Open logs for copy/paste")
         self.btn_logs.clicked.connect(self._on_show_logs)
         top.addWidget(self.btn_logs)
-
-        self.btn_baseline_menu = QPushButton("Baseline")
-        self.btn_baseline_menu.setText("Baseline")
-        self.btn_baseline_menu.setToolTip("Capture, import, or export baseline snapshots")
-        baseline_menu = QMenu(self.btn_baseline_menu)
-        self.act_baseline_capture = baseline_menu.addAction("Capture Baseline...")
-        self.act_baseline_import = baseline_menu.addAction("Import Baseline...")
-        self.act_baseline_export = baseline_menu.addAction("Export Baseline...")
-        self.act_baseline_capture.triggered.connect(self._on_capture_baseline)
-        self.act_baseline_import.triggered.connect(self._on_import_baseline)
-        self.act_baseline_export.triggered.connect(self._on_export_baseline)
-        self.btn_baseline_menu.setMenu(baseline_menu)
-        top.addWidget(self.btn_baseline_menu)
-
-        self.btn_tools_menu = QPushButton("Tools")
-        self.btn_tools_menu.setToolTip("Diagnostics and system discovery")
-        tools_menu = QMenu(self.btn_tools_menu)
-        self.act_discover_system = tools_menu.addAction("Discover System...")
-        self.act_discover_system.triggered.connect(self._on_discover_system)
-        self.btn_tools_menu.setMenu(tools_menu)
-        top.addWidget(self.btn_tools_menu)
-
-        self.btn_tx_history = QPushButton("Tx History")
-        self.btn_tx_history.setToolTip("View transactions (txid) and restore")
-        self.btn_tx_history.clicked.connect(self._on_show_tx_history)
-        top.addWidget(self.btn_tx_history)
 
         self.btn_reset = QPushButton("Reset All")
         self.btn_reset.setToolTip("Reset all changes to system defaults")
@@ -337,7 +332,6 @@ class MainWindow(TableMixin, QMainWindow):
                 "pipewire_data_loop_affinity",
                 "wireplumber_alsa_usb_tuning",
                 "pipewire_pro_audio_profile",
-                "pipewire_xrun_monitor",
                 "rtkit_daemon_tuning",
             ]
         )
@@ -351,7 +345,6 @@ class MainWindow(TableMixin, QMainWindow):
             "pipewire_data_loop_affinity",
             "wireplumber_alsa_usb_tuning",
             "pipewire_pro_audio_profile",
-            "pipewire_xrun_monitor",
             "rtkit_daemon_tuning",
         }
 
@@ -2142,11 +2135,13 @@ class MainWindow(TableMixin, QMainWindow):
         save_state(self.state)
         QMessageBox.information(self, headline, detail)
 
-    def on_run_test(self, knob_id: str) -> None:
+    def on_run_test(self, knob_id: str, *, refresh_dialog=None) -> None:
         """Run a test and update the status column with results."""
         if knob_id == "scheduler_jitter_test":
             if knob_id in self._busy_knobs:
                 return
+            if refresh_dialog is not None and isValid(refresh_dialog):
+                refresh_dialog.accept()
             self._busy_knobs.add(knob_id)
             # Show a brief "running" indicator
             self._update_knob_status(knob_id, "running", "⏳ Running...")
@@ -2182,6 +2177,8 @@ class MainWindow(TableMixin, QMainWindow):
                     QMessageBox.warning(self, "Jitter Test Failed", detail or "No results")
 
                 self._populate()
+                if refresh_dialog is not None:
+                    self._show_knob_info(knob_id)
 
             worker.finished.connect(_on_done)
             worker.finished.connect(worker.deleteLater)
@@ -2189,8 +2186,34 @@ class MainWindow(TableMixin, QMainWindow):
             worker.start()
 
     def on_open_xrun_monitor(self) -> None:
+        dialog = getattr(self, "_xrun_dialog", None)
+        if dialog is not None and isValid(dialog):
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
         dialog = XrunMonitorDialog(parent=self)
-        dialog.exec()
+        dialog.setModal(False)
+        dialog.finished.connect(lambda _=None: setattr(self, "_xrun_dialog", None))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        self._xrun_dialog = dialog
+
+    def on_open_jitter_monitor(self) -> None:
+        dialog = getattr(self, "_jitter_dialog", None)
+        if dialog is not None and isValid(dialog):
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = JitterMonitorDialog(parent=self)
+        dialog.setModal(False)
+        dialog.finished.connect(lambda _=None: setattr(self, "_jitter_dialog", None))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        self._jitter_dialog = dialog
 
     def _update_knob_status(self, knob_id: str, status: str, display: str) -> None:
         """Update the status cell for a specific knob."""
@@ -2364,6 +2387,10 @@ class MainWindow(TableMixin, QMainWindow):
                 parts.append(f"group membership: {', '.join(k.requires_groups)}")
             if k.requires_commands:
                 parts.append(f"commands: {', '.join(k.requires_commands)}")
+            if k.depends_on:
+                by_id = {knob.id: knob.title for knob in self.registry}
+                dep_titles = [by_id.get(dep, dep) for dep in k.depends_on]
+                parts.append(f"depends on: {', '.join(dep_titles)}")
             if k.id in self._advanced_knob_ids():
                 parts.append("advanced mode")
             if not parts:
@@ -2591,6 +2618,19 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _on_queue_knob(self, knob_id: str, action: str) -> None:
         actions.on_queue_knob(self, knob_id, action)
+
+    def _ensure_menu_width(self, menu: QMenu) -> None:
+        try:
+            from PySide6.QtGui import QFontMetrics
+        except Exception:
+            return
+        fm = QFontMetrics(menu.font())
+        width = 0
+        for action in menu.actions():
+            text = action.text().replace("&", "")
+            width = max(width, fm.horizontalAdvance(text))
+        if width:
+            menu.setMinimumWidth(width + 48)
 
     def _on_advanced_mode_toggle(self, enabled: bool) -> None:
         self.state["advanced_mode_enabled"] = bool(enabled)

@@ -140,14 +140,14 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - Use the **Advanced** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
-- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, XRUN monitor, RTKit placeholder). These are optional and may require manual configuration.
+- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, RTKit placeholder). These are optional and may require manual configuration.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - The **Audio Core Plan** panel is collapsible to save space in the Advanced view.
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.
 - **Auto housekeeping** inverts the selected audio cores to derive IRQ housekeeping cores; manual mode uses the IRQ housekeeping core selection.
 - Auto-set updates core selections and queues Apply for affected knobs, so the global Apply button can be used.
 - **IRQ Overview** shows a core map (housekeeping vs audio cores) and a live list of IRQ affinity assignments.
-- Use the **Baseline** menu in the header to **Capture**, **Import**, or **Export** baseline snapshots for Sys Default/Deviated labeling.
+- Use **Tools → Baseline** to **Capture**, **Import**, or **Export** baseline snapshots for Sys Default/Deviated labeling.
 
 ### Logs (what the app did and where it failed)
 
@@ -159,6 +159,8 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
   package installs) also emit audit entries into the user-scope worker log.
 - The header includes **Logs** (view + copy) and **Clear Logs** (clears GUI +
   user worker logs) to keep test runs clean.
+- The XRUN monitor streams live `pw-top` data into the app (with a pw-dump fallback for QUANT/RATE when batch output is blank).
+- The jitter monitor is modeless, supports Always‑on‑top, and shows a live per‑thread table with rolling Act samples (min/median/avg/p95/max). A snapshot refresh button in the info dialog runs the classic cyclictest run.
 
 ### Startup system profile scan (first run)
 
@@ -168,9 +170,10 @@ distro-specific paths (e.g., kernel cmdline handling on Tumbleweed vs
 Ubuntu/Fedora) and ensures each knob has a resolved location entry. If the file
 is removed, the schema changes, or the distro/boot system changes, the scan runs again.
 
-**Manual discovery:** Use **Tools → Discover System...** to re-run the system
+**Manual discovery:** Use **Tools → Scan System Profile...** to re-run the system
 profile scan on demand, view the resolved paths/commands, and optionally save
 the JSON snapshot to a file. This does not change system settings.
+**Tools menu:** Also includes **Baseline** actions and **Tx History**.
 
 ### Baseline state capture (first run)
 
@@ -182,7 +185,7 @@ actions are disabled until baseline capture completes.
 Package install actions remain available so missing dependencies can be installed
 before the baseline is captured.
 
-Use the **Baseline** menu in the header to manage baselines:
+Use **Tools → Baseline** to manage baselines:
 - **Capture Baseline...** snapshots the current system and saves a JSON file.
 - **Import Baseline...** loads a baseline JSON and overwrites the current baseline (no system changes).
 - **Export Baseline...** saves the currently stored baseline snapshot to a JSON file.
@@ -312,7 +315,8 @@ In `gui/app.py` → `_populate()`:
 
 **Sorting**: Click any column header to sort. Category/Req./Status/Risk sorts show grouped headers; other columns sort as a flat list.
 
-**Req. column**: Shows A/R/G markers for Advanced/Reboot/Groups (tooltip includes the key).
+**Req. column**: Shows A/R/D markers for Advanced/Reboot/Depends-on; tooltip includes the key and any group/dependency details when present.
+**Dependency gating**: If a knob depends on another, it stays locked until the dependency is applied; tooltip shows the required knob name(s).
 
 **CLI column**: Shows the target command/file/parameter shorthand for each knob.
 
@@ -445,7 +449,7 @@ Note: RT limits require a reboot or logout/login to affect the current session; 
 | Knob | Kind | Status |
 |------|------|--------|
 | Audio stack info | read_only | ✓ |
-| Scheduler jitter test | read_only | ✓ |
+| Scheduler jitter test (live monitor + snapshot) | read_only | ✓ |
 | RT config scan | read_only | ✓ |
 
 ### Future Phases

@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.6.1
+- **Release version**: 0.6.2
 - **40 knobs defined** (ALL 40 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -28,18 +28,19 @@
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Reset All** - reverts all changes to system defaults
 - **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
-- **Baseline capture/import/export** - Header Baseline menu to snapshot baseline to JSON, import a baseline file, or export the current baseline (no system changes)
+- **Baseline capture/import/export** - Tools → Baseline to snapshot baseline to JSON, import a baseline file, or export the current baseline (no system changes)
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT module tuning, data loop affinity)
 - **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in
 - **Pro Audio profile (dev)** - per-device toggle via wpctl
-- **XRUN monitor (dev)** - live pw-top view for ERR counters
+- **XRUN monitor** - streams live `pw-top` data into the app (uses the latest batch iteration to avoid zeroed metrics; pw-dump fallback for QUANT/RATE when batch output is blank; ERR summary lists ERR/ID/NAME; Reset Count sets a local baseline)
+- Jitter monitor is modeless, shows a live per-thread table with rolling Act samples (min/median/avg/p95/max), and includes an Always-on-top toggle.
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
-- **Baseline management** - header Baseline menu supports capture/import/export of baseline snapshots (no system changes on import/export)
+- **Baseline management** - Tools → Baseline supports capture/import/export of baseline snapshots (no system changes on import/export)
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
@@ -56,11 +57,12 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
-- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, XRUN monitor, RTKit placeholder). Baseline capture/import/export live in the header Baseline menu.
+- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, RTKit placeholder). Baseline capture/import/export live in Tools → Baseline.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
-- "Req." shows A/R/G markers for Advanced/Reboot/Groups (tooltip shows the key).
+- "Req." shows A/R/D markers for Advanced/Reboot/Depends-on (tooltip shows the key and any group/dependency details).
+- Dependent knobs are locked until dependencies are applied; tooltip shows required knob names.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Req./Status/Risk keeps grouped headers; other columns sort flat.
@@ -1455,7 +1457,8 @@ We currently detect:
 - System profile on first GUI startup (distro + key paths) for Ubuntu/Fedora/Tumbleweed,
   stored in `state.json` and used to confirm distro-specific paths (kernel cmdline,
   cpupower, rtirq). Rescans on schema/distro/boot system changes.
-  - Manual discovery is available via **Tools → Discover System...** in the GUI,
+  - Manual discovery is available via **Tools → Scan System Profile...** in the GUI,
+  - Tools menu includes Baseline actions and Tx History.
     which re-runs the scan, shows the resolved paths/commands, and can save a JSON snapshot.
 
 #### Phase 2: Needed Detection

@@ -24,35 +24,60 @@ from audioknob_gui.gui.widgets.cell_container import CellContainer
 
 
 class TableMixin:
+    def _dependency_titles(self, k) -> list[str]:
+        depends = getattr(k, "depends_on", ()) or ()
+        if not depends:
+            return []
+        titles = {knob.id: knob.title for knob in self.registry}
+        return [titles.get(dep, dep) for dep in depends]
+
+    def _missing_dependencies(self, k) -> list[str]:
+        depends = getattr(k, "depends_on", ()) or ()
+        if not depends:
+            return []
+        missing: list[str] = []
+        for dep in depends:
+            status = self._knob_statuses.get(dep, "unknown")
+            if status in ("applied", "pending_reboot"):
+                continue
+            missing.append(dep)
+        return missing
+
     def _requirements_label(self, k, advanced_knobs: set[str]) -> str:
         parts: list[str] = []
         if k.id in advanced_knobs:
             parts.append("A")
         if k.requires_reboot:
             parts.append("R")
-        if k.requires_groups:
-            parts.append("G")
+        if k.requires_groups or getattr(k, "depends_on", ()):
+            parts.append("D")
         if not parts:
             return ""
         return " ".join(parts)
 
 
     def _requirements_key_tooltip(self) -> str:
-        return "A=Advanced, R=Reboot required, G=Groups required"
+        return "A=Advanced, R=Reboot required, D=Depends on prerequisites"
 
 
     def _requirements_tooltip(self, k, advanced_knobs: set[str]) -> str:
         legend = self._requirements_key_tooltip()
-        parts: list[str] = []
+        req_parts: list[str] = []
         if k.id in advanced_knobs:
-            parts.append("Advanced")
+            req_parts.append("Advanced")
         if k.requires_reboot:
-            parts.append("Reboot required")
+            req_parts.append("Reboot required")
         if k.requires_groups:
-            parts.append("Groups required")
-        if not parts:
+            req_parts.append(f"Groups: {', '.join(k.requires_groups)}")
+        dep_titles = self._dependency_titles(k)
+        if not req_parts and not dep_titles:
             return f"{legend}\nNo requirements"
-        return f"{legend}\nRequires: {', '.join(parts)}"
+        lines = [legend]
+        if req_parts:
+            lines.append(f"Requires: {', '.join(req_parts)}")
+        if dep_titles:
+            lines.append(f"Depends on: {', '.join(dep_titles)}")
+        return "\n".join(lines)
 
 
     def _requirements_group_tooltip(self, label: str) -> str:
@@ -65,8 +90,8 @@ class TableMixin:
                 parts.append("Advanced")
             elif letter == "R":
                 parts.append("Reboot required")
-            elif letter == "G":
-                parts.append("Groups required")
+            elif letter == "D":
+                parts.append("Depends on prerequisites")
         if not parts:
             return legend
         return f"{legend}\nRequires: {', '.join(parts)}"
@@ -663,7 +688,9 @@ class TableMixin:
             reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
             advanced_gate_lock = k.id in advanced_knobs and not advanced_enabled and status not in ("applied", "pending_reboot")
             reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
-            locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock or advanced_gate_lock
+            missing_deps = self._missing_dependencies(k)
+            dependency_lock = bool(missing_deps) and status not in ("applied", "pending_reboot")
+            locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock or advanced_gate_lock or dependency_lock
             row_dim = locked or not_applicable
             self._row_dim[r] = row_dim
             row_dim = locked or not_applicable
@@ -682,6 +709,10 @@ class TableMixin:
                 lock_reason = "Turn on Advanced knobs"
             elif not commands_ok:
                 lock_reason = f"Install: {', '.join(missing_cmds)}"
+            elif dependency_lock:
+                titles = {knob.id: knob.title for knob in self.registry}
+                dep_titles = [titles.get(dep, dep) for dep in missing_deps]
+                lock_reason = f"Depends on: {', '.join(dep_titles)}"
             
             # Column 0: Info button
             info_btn = QPushButton("i")
@@ -878,6 +909,12 @@ class TableMixin:
                 btn = self._make_action_button("N/A")
                 btn.setEnabled(False)
                 btn.setToolTip(not_applicable_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
+            elif dependency_lock:
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
                 btn.setStyleSheet(locked_style)
                 self._set_action_cell(r, btn)
             else:
