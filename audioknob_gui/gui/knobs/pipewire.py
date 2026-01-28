@@ -432,6 +432,10 @@ def add_info_buttons(ui, knob, dialog: QWidget, layout) -> None:
         config_btn = QPushButton("Configure Buffer Size...")
         config_btn.clicked.connect(lambda: (dialog.accept(), ui.on_configure_knob(knob.id)))
         layout.addWidget(config_btn)
+    if knob.id == "pipewire_rt_setup":
+        status_btn = QPushButton("Status Check...")
+        status_btn.clicked.connect(lambda: ui._show_cli_status(knob.id))
+        layout.addWidget(status_btn)
 
 
 def _status_label(status: str) -> str:

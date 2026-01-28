@@ -140,7 +140,7 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - Use the **Advanced** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
-- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, PW RT Setup, RTKit placeholder). These are optional and may require manual configuration.
+- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, RTKit placeholder). These are optional and may require manual configuration.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - The **Audio Core Plan** panel is collapsible to save space in the Advanced view.
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.

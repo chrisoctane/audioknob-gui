@@ -616,7 +616,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "low",
-      "title": "PW Buffer"
+      "title": "PipeWire Buffer"
     },
     {
       "capabilities": {
@@ -639,7 +639,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "low",
-      "title": "PW Sample Rate"
+      "title": "PipeWire Sample Rate"
     },
     {
       "capabilities": {
@@ -662,7 +662,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "medium",
-      "title": "PW Clock Constraints"
+      "title": "PipeWire Clock Constraints"
     },
     {
       "capabilities": {
@@ -691,7 +691,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "medium",
-      "title": "PW Memory Lock"
+      "title": "PipeWire Memory Lock"
     },
     {
       "capabilities": {
@@ -716,7 +716,7 @@
       "requires_reboot": false,
       "requires_root": true,
       "risk_level": "medium",
-      "title": "PW RT Setup"
+      "title": "PipeWire RT Setup"
     },
     {
       "capabilities": {
@@ -751,7 +751,7 @@
       "requires_reboot": true,
       "requires_root": true,
       "risk_level": "medium",
-      "title": "PW RT Limits"
+      "title": "PipeWire RT Limits"
     },
     {
       "capabilities": {
@@ -774,7 +774,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "medium",
-      "title": "PW RT Module"
+      "title": "PipeWire RT Module"
     },
     {
       "capabilities": {
@@ -797,7 +797,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "medium",
-      "title": "PW Data Loops"
+      "title": "PipeWire Data Loops"
     },
     {
       "capabilities": {
@@ -856,7 +856,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "low",
-      "title": "PW Pro Audio"
+      "title": "PipeWire Pro Audio"
     },
     {
       "capabilities": {
@@ -880,7 +880,7 @@
       "requires_reboot": false,
       "requires_root": false,
       "risk_level": "low",
-      "title": "PW XRUN Monitor"
+      "title": "PipeWire XRUN Monitor"
     },
     {
       "capabilities": {

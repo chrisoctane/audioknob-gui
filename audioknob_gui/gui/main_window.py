@@ -339,7 +339,6 @@ class MainWindow(TableMixin, QMainWindow):
         return {
             "pipewire_clock_constraints",
             "pipewire_mlock_policy",
-            "pipewire_rt_setup",
             "pipewire_data_loop_affinity",
             "wireplumber_alsa_usb_tuning",
             "pipewire_pro_audio_profile",

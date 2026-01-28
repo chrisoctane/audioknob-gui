@@ -176,7 +176,7 @@ Notes
   - /usr/share/pipewire/client-rt.conf
   - /usr/share/pipewire/jack.conf
   Use drop-ins rather than editing these vendor files.
-- UI note: the app now exposes a combined **PW RT Setup** knob that configures
+- UI note: the app now exposes a combined **PipeWire RT Setup** knob that configures
   RT limits and module-rt together for simpler setup; the standalone knobs are
   hidden in the UI but retained for worker operations.
 
