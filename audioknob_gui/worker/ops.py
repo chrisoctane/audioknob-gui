@@ -2274,26 +2274,79 @@ def check_knob_status(knob: Any) -> str:
                 return "unknown"
             text = result.stdout or ""
             current = None
+            card_name = None
+            pro_available = False
             in_profiles = False
             for line in text.splitlines():
-                s = line.strip()
-                if not s:
+                raw = line.strip()
+                clean = raw.lstrip("* ").strip()
+                if not clean:
                     continue
-                low = s.lower()
+                low = clean.lower()
+                if low.startswith("device.name"):
+                    _, _, value = clean.partition("=")
+                    name = value.strip().strip('"')
+                    if name:
+                        card_name = name
                 if low.startswith("profiles:"):
                     in_profiles = True
                     continue
-                if in_profiles and ":" in s and not re.match(r"^\d+\.", s):
+                if in_profiles and ":" in clean and not re.match(r"^\d+\.", clean):
                     in_profiles = False
                 if low.startswith("active profile:"):
-                    current = s.split(":", 1)[1].strip()
+                    current = clean.split(":", 1)[1].strip()
                     continue
+                if in_profiles:
+                    m = re.match(r"^(\d+)\.\s*(.+)$", clean)
+                    if m:
+                        name_raw = m.group(2).strip()
+                        name = name_raw.split("(", 1)[0].strip()
+                        if "pro audio" in name.lower() or "pro-audio" in name.lower():
+                            pro_available = True
+            pactl_current = None
+            if (current is None or not pro_available) and card_name:
+                pactl = which_command("pactl")
+                if pactl:
+                    pactl_list = subprocess.run(
+                        [pactl, "list", "cards"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    text_cards = pactl_list.stdout or ""
+                    in_card = False
+                    in_profiles = False
+                    for line in text_cards.splitlines():
+                        raw = line.rstrip()
+                        if raw.strip().startswith("Name:"):
+                            name = raw.split(":", 1)[1].strip()
+                            in_card = name == card_name
+                            in_profiles = False
+                            continue
+                        if not in_card:
+                            continue
+                        if raw.strip().startswith("Profiles:"):
+                            in_profiles = True
+                            continue
+                        if raw.strip().startswith("Active Profile:"):
+                            pactl_current = raw.split(":", 1)[1].strip()
+                            continue
+                        if in_profiles:
+                            stripped = raw.strip()
+                            if stripped and ":" in stripped:
+                                profile_key = stripped.split(":", 1)[0].strip().lower()
+                                if profile_key == "pro-audio":
+                                    pro_available = True
+                    if current is None and pactl_current:
+                        current = pactl_current
             if not current:
                 return "unknown"
             current_low = current.lower()
-            if "pro audio" in current_low or "pro-audio" in current_low:
+            if pro_available and ("pro audio" in current_low or "pro-audio" in current_low):
                 return "applied"
-            return "not_applied"
+            if pro_available:
+                return "not_applied"
+            return "not_applicable"
         except Exception:
             return "unknown"
     

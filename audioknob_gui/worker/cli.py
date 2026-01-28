@@ -903,6 +903,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             if not target and card_name:
                 pactl = which_command("pactl")
                 if pactl:
+                    pactl_current = None
                     pactl_list = subprocess.run(
                         [pactl, "list", "cards"],
                         capture_output=True,
@@ -924,6 +925,9 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                         if raw.strip().startswith("Profiles:"):
                             in_profiles = True
                             continue
+                        if raw.strip().startswith("Active Profile:"):
+                            pactl_current = raw.split(":", 1)[1].strip()
+                            continue
                         if in_profiles:
                             stripped = raw.strip()
                             if stripped and ":" in stripped:
@@ -933,6 +937,8 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                                     break
                         if target:
                             break
+                    if current is None and pactl_current:
+                        current = pactl_current
                 if target and pactl:
                     set_result = subprocess.run(
                         [pactl, "set-card-profile", str(card_name), str(target)],
@@ -1742,6 +1748,21 @@ def cmd_restore(args: argparse.Namespace) -> int:
             user_service_restore(e)
         elif e.get("kind") == "baloo_disable":
             baloo_enable()
+        elif e.get("kind") == "pactl_profile":
+            card = e.get("card")
+            before = e.get("before")
+            if card and before:
+                pactl = which_command("pactl") or "pactl"
+                try:
+                    subprocess.run(
+                        [pactl, "set-card-profile", str(card), str(before)],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
         elif e.get("kind") == "wpctl_profile":
             device_id = e.get("device_id")
             before = e.get("before")
@@ -2410,6 +2431,44 @@ def cmd_status(args: argparse.Namespace) -> int:
             "status": status,
             "requires_root": k.requires_root,
         })
+
+    # Derive combined status for PW RT setup (limits + module).
+    by_id = {s["knob_id"]: s for s in statuses}
+    if "pipewire_rt_setup" in by_id:
+        limits = by_id.get("pipewire_rt_limits_group", {}).get("status", "unknown")
+        module = by_id.get("pipewire_rt_module_tuning", {}).get("status", "unknown")
+        module_keys = (
+            "pipewire_rt_prio",
+            "pipewire_rt_time_soft",
+            "pipewire_rt_time_hard",
+            "pipewire_nice_level",
+            "pipewire_rlimits_enabled",
+            "pipewire_rtkit_enabled",
+            "pipewire_rtportal_enabled",
+        )
+        module_configured = any(state.get(key) is not None for key in module_keys)
+        combined = "unknown"
+        if limits in ("running", "pending_reboot"):
+            combined = limits
+        elif module_configured and module in ("running", "pending_reboot"):
+            combined = module
+        elif module_configured:
+            if limits == "applied" and module == "applied":
+                combined = "applied"
+            elif limits in ("not_applied", "sys_default") and module in ("not_applied", "sys_default"):
+                combined = "not_applied"
+            elif limits == "unknown" or module == "unknown":
+                combined = "unknown"
+            else:
+                combined = "partial"
+        elif limits in ("applied", "pending_reboot"):
+            combined = limits
+        elif limits in ("not_applied", "sys_default"):
+            combined = "not_applied"
+        else:
+            combined = limits
+        by_id["pipewire_rt_setup"]["status"] = combined
+        statuses = list(by_id.values())
     
     print(json.dumps({
         "schema": 1,

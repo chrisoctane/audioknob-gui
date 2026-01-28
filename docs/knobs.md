@@ -242,21 +242,26 @@ Background (official)
   device.
 
 Implementation approach
-- Detect available profiles for each device and only show the toggle if a
-  "Pro Audio" profile exists.
+- Detect available profiles for each device; prefer `wpctl` and fall back to
+  `pactl` when profiles are not exposed via `wpctl inspect`.
 - Apply by switching the profile via WirePlumber's control tool:
   - wpctl set-profile <device-id> <profile-index>
-- Reset by restoring the previous profile index.
+- If `wpctl` does not expose profiles, apply via:
+  - pactl set-card-profile <card-name> pro-audio
+- Reset by restoring the previous profile (recorded during apply).
 
 Discovery / device-agnostic rules
-- Use `wpctl` to list devices and profiles (exact command format to confirm).
+- Use `wpctl` to list devices and profiles when possible.
+- Use `pactl list cards` to confirm availability and current profile when
+  `wpctl inspect` omits profiles.
 - Do not hardcode profile indices; read them at runtime.
 - If the session manager is not WirePlumber (wpctl missing), mark as
   not_applicable and do not offer the toggle.
 
 Status
 - Applied if the current profile equals "Pro Audio".
-- Partial/unknown if profiles cannot be enumerated.
+- Not applied if Pro Audio exists but another profile is active.
+- Not applicable if no Pro Audio profile exists for the device.
 
 Sources
 - PipeWire properties & ALSA profile origins (UCM/ACP, Pro Audio exception):

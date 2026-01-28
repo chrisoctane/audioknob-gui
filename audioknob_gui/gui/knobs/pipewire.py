@@ -434,15 +434,39 @@ def add_info_buttons(ui, knob, dialog: QWidget, layout) -> None:
         layout.addWidget(config_btn)
 
 
+def _status_label(status: str) -> str:
+    mapping = {
+        "applied": "Applied",
+        "not_applied": "Not applied",
+        "partial": "Partial",
+        "pending_reboot": "Reboot required",
+        "read_only": "Read-only",
+        "unknown": "Unknown",
+        "not_applicable": "N/A",
+        "sys_default": "System default",
+        "running": "Updating",
+    }
+    return mapping.get(status, status)
+
+
 def info_extra_html(ui, knob) -> str:
     kid = knob.id
     if kid == "pipewire_rt_setup":
+        limits = _status_label(ui._knob_statuses.get("pipewire_rt_limits_group", "unknown"))
+        module = _status_label(ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown"))
+        overall = _status_label(ui._knob_statuses.get("pipewire_rt_setup", "unknown"))
         return (
             "<h4>What this does</h4>"
             "<ul>"
             "<li>Sets RT limits (permissions) and module-rt behavior together.</li>"
             "<li>Limits are always applied using the values below.</li>"
             "<li>Module-rt settings apply only for fields you fill in.</li>"
+            "</ul>"
+            "<p><b>Status:</b></p>"
+            "<ul>"
+            f"<li>RT limits: {limits}</li>"
+            f"<li>RT module: {module}</li>"
+            f"<li>Overall: {overall}</li>"
             "</ul>"
             "<p><b>Tip:</b> Configure first, then Apply.</p>"
         )
@@ -492,11 +516,19 @@ def info_extra_html(ui, knob) -> str:
             "<p><b>Tip:</b> Configure first, then Apply.</p>"
         )
     if kid == "pipewire_pro_audio_profile":
+        status = _status_label(ui._knob_statuses.get("pipewire_pro_audio_profile", "unknown"))
+        device_id = ui.state.get("pipewire_pro_audio_device_id")
+        device_text = str(device_id) if device_id else "none"
         return (
             "<h4>How it works</h4>"
             "<ul>"
-            "<li>Uses wpctl to switch a device to the Pro Audio profile.</li>"
-            "<li>Only devices that expose the profile are listed.</li>"
+            "<li>Uses wpctl/pactl to switch a device to the Pro Audio profile.</li>"
+            "<li>Reset returns to the previous profile from the last apply.</li>"
+            "</ul>"
+            "<p><b>Status:</b></p>"
+            "<ul>"
+            f"<li>Selected device: {device_text}</li>"
+            f"<li>Current state: {status}</li>"
             "</ul>"
         )
     return ""

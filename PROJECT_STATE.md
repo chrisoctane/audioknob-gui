@@ -34,7 +34,7 @@
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity). Separate RT limits/module knobs are hidden in the UI.
 - **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in
-- **Pro Audio profile (dev)** - per-device toggle via wpctl
+- **Pro Audio profile (dev)** - per-device toggle via wpctl with pactl fallback; reset restores prior profile
 - **XRUN monitor** - streams live `pw-top` data into the app (uses the latest batch iteration to avoid zeroed metrics; pw-dump fallback for QUANT/RATE when batch output is blank; ERR summary lists ERR/ID/NAME; Reset Count sets a local baseline)
 - Jitter monitor is modeless, shows a live per-thread table with rolling Act samples (min/median/avg/p95/max), and includes an Always-on-top toggle.
 - **User service masking** - disable GNOME Tracker, KDE Baloo
