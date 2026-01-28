@@ -3443,7 +3443,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = p.parse_args(argv)
     try:
-        rc = int(args.func(args))
+        result = args.func(args)
+        rc = int(result) if result is not None else 0
         logger.info("exit rc=%s", rc)
         return rc
     except SystemExit as e:
