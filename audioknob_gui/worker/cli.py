@@ -852,6 +852,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             device_id = params.get("device_id")
             if device_id is None or str(device_id).strip() == "":
                 raise SystemExit("No device selected. Configure the Pro Audio knob first.")
+            applied_via_pactl = False
             cmd = which_command("wpctl") or "wpctl"
             inspect = subprocess.run(
                 [cmd, "inspect", str(device_id)],
@@ -951,7 +952,10 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                                 "after": str(target),
                             }
                         )
-                    return
+                    applied_via_pactl = True
+            if applied_via_pactl:
+                applied.append(kid)
+                continue
             if not target:
                 raise SystemExit("Pro Audio profile not found for the selected device.")
             set_result = subprocess.run(
