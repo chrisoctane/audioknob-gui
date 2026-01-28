@@ -703,8 +703,9 @@ class ProAudioProfileDialog(QDialog):
     def _parse_device_name(text: str) -> str | None:
         for line in text.splitlines():
             raw = line.strip()
-            if raw.startswith("device.name"):
-                _, _, value = raw.partition("=")
+            clean = raw.lstrip("* ").strip()
+            if clean.startswith("device.name"):
+                _, _, value = clean.partition("=")
                 name = value.strip().strip('"')
                 if name:
                     return name
@@ -756,19 +757,20 @@ class ProAudioProfileDialog(QDialog):
         in_profiles = False
         for line in text.splitlines():
             raw = line.strip()
+            clean = raw.lstrip("* ").strip()
             if not raw:
                 continue
-            low = raw.lower()
+            low = clean.lower()
             if low.startswith("profiles:"):
                 in_profiles = True
                 continue
-            if in_profiles and ":" in raw and not re.match(r"^\d+\.", raw):
+            if in_profiles and ":" in clean and not re.match(r"^\d+\.", clean):
                 in_profiles = False
             if low.startswith("active profile:"):
-                current = raw.split(":", 1)[1].strip()
+                current = clean.split(":", 1)[1].strip()
                 continue
             if in_profiles:
-                m = re.match(r"^(\d+)\.\s*(.+)$", raw)
+                m = re.match(r"^(\d+)\.\s*(.+)$", clean)
                 if m:
                     name_raw = m.group(2).strip()
                     name = name_raw.split("(", 1)[0].strip()

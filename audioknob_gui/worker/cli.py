@@ -869,24 +869,25 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             card_name = None
             for line in text.splitlines():
                 s = line.strip()
-                if not s:
+                clean = s.lstrip("* ").strip()
+                if not clean:
                     continue
-                low = s.lower()
+                low = clean.lower()
                 if low.startswith("device.name"):
-                    _, _, value = s.partition("=")
+                    _, _, value = clean.partition("=")
                     name = value.strip().strip('"')
                     if name:
                         card_name = name
                 if low.startswith("profiles:"):
                     in_profiles = True
                     continue
-                if in_profiles and ":" in s and not re.match(r"^\d+\.", s):
+                if in_profiles and ":" in clean and not re.match(r"^\d+\.", clean):
                     in_profiles = False
                 if low.startswith("active profile:"):
-                    current = s.split(":", 1)[1].strip()
+                    current = clean.split(":", 1)[1].strip()
                     continue
                 if in_profiles:
-                    m = re.match(r"^(\d+)\.\s*(.+)$", s)
+                    m = re.match(r"^(\d+)\.\s*(.+)$", clean)
                     if m:
                         idx = m.group(1).strip()
                         name_raw = m.group(2).strip()
