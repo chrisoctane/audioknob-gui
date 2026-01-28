@@ -327,8 +327,7 @@ class MainWindow(TableMixin, QMainWindow):
                 "kernel_irqaffinity",
                 "pipewire_clock_constraints",
                 "pipewire_mlock_policy",
-                "pipewire_rt_limits_group",
-                "pipewire_rt_module_tuning",
+                "pipewire_rt_setup",
                 "pipewire_data_loop_affinity",
                 "wireplumber_alsa_usb_tuning",
                 "pipewire_pro_audio_profile",
@@ -340,12 +339,17 @@ class MainWindow(TableMixin, QMainWindow):
         return {
             "pipewire_clock_constraints",
             "pipewire_mlock_policy",
-            "pipewire_rt_limits_group",
-            "pipewire_rt_module_tuning",
+            "pipewire_rt_setup",
             "pipewire_data_loop_affinity",
             "wireplumber_alsa_usb_tuning",
             "pipewire_pro_audio_profile",
             "rtkit_daemon_tuning",
+        }
+
+    def _hidden_knob_ids(self) -> set[str]:
+        return {
+            "pipewire_rt_limits_group",
+            "pipewire_rt_module_tuning",
         }
 
     def _core_knob_ids(self) -> set[str]:
@@ -735,11 +739,12 @@ class MainWindow(TableMixin, QMainWindow):
         mode = getattr(self, "_view_mode", "all")
         core_ids = self._core_knob_ids()
         dev_ids = self._dev_knob_ids()
+        hidden_ids = self._hidden_knob_ids()
         if mode == "cores":
-            return [k for k in self.registry if k.id in core_ids]
+            return [k for k in self.registry if k.id in core_ids and k.id not in hidden_ids]
         if mode == "dev":
-            return [k for k in self.registry if k.id in dev_ids]
-        return [k for k in self.registry if k.id not in core_ids and k.id not in dev_ids]
+            return [k for k in self.registry if k.id in dev_ids and k.id not in hidden_ids]
+        return [k for k in self.registry if k.id not in core_ids and k.id not in dev_ids and k.id not in hidden_ids]
 
     def _refresh_user_groups(self) -> None:
         requirements.refresh_user_groups(self)
@@ -2126,7 +2131,9 @@ class MainWindow(TableMixin, QMainWindow):
         return f"{prefix}={cpu_list}"
 
     def on_configure_knob(self, knob_id: str) -> None:
-        handle_configure_knob(self, knob_id)
+        if handle_configure_knob(self, knob_id):
+            self._update_queue_ui()
+            self._populate()
         return
 
     def on_tests(self) -> None:

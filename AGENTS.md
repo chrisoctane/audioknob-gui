@@ -82,3 +82,4 @@ management, or CPU isolation:
 - Missing or unreadable referenced files.
 - Conflicting instructions between docs or system constraints.
 - A change would violate guardrails or require new UX not in docs.
+- If your last change introduced an error (exception, failed test, or broken UI), revert that change before attempting a new fix unless the user explicitly approves a different approach.

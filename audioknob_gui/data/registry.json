@@ -699,6 +699,31 @@
         "read": true,
         "restore": true
       },
+      "category": "stack",
+      "depends_on": [
+        "audio_group_membership"
+      ],
+      "description": "[i] configures PipeWire RT limits + module-rt behavior together.\n[r] configure before apply; module-rt fields are optional.\n[+] simplifies realtime setup for PipeWire.\n[-] requires log out/in or reboot for limits to take effect.",
+      "id": "pipewire_rt_setup",
+      "impl": {
+        "kind": "read_only",
+        "params": {
+          "what": "pipewire-rt-setup"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "PW RT Setup"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "permissions",
       "depends_on": [
         "audio_group_membership"

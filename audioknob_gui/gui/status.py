@@ -439,7 +439,58 @@ def apply_session_dependent_statuses(ui) -> None:
     status = ui._knob_statuses.get("audio_group_membership")
     if status == "applied" and not audio_groups_active(ui):
         ui._knob_statuses["audio_group_membership"] = "pending_reboot"
+    _apply_pipewire_rt_setup_status(ui)
     apply_baseline_statuses(ui)
+
+
+def _pipewire_rt_module_configured(ui) -> bool:
+    state_keys = (
+        "pipewire_rt_prio",
+        "pipewire_rt_time_soft",
+        "pipewire_rt_time_hard",
+        "pipewire_nice_level",
+        "pipewire_rlimits_enabled",
+        "pipewire_rtkit_enabled",
+        "pipewire_rtportal_enabled",
+    )
+    return any(ui.state.get(key) is not None for key in state_keys)
+
+
+def _apply_pipewire_rt_setup_status(ui) -> None:
+    if "pipewire_rt_setup" not in ui._knob_statuses and not any(
+        k.id == "pipewire_rt_setup" for k in ui.registry
+    ):
+        return
+    limits = ui._knob_statuses.get("pipewire_rt_limits_group", "unknown")
+    module = ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown")
+    module_configured = _pipewire_rt_module_configured(ui)
+
+    if limits in ("running", "pending_reboot"):
+        ui._knob_statuses["pipewire_rt_setup"] = limits
+        return
+    if module_configured and module in ("running", "pending_reboot"):
+        ui._knob_statuses["pipewire_rt_setup"] = module
+        return
+    if module_configured:
+        if limits in ("applied",) and module in ("applied",):
+            ui._knob_statuses["pipewire_rt_setup"] = "applied"
+            return
+        if limits in ("not_applied", "sys_default") and module in ("not_applied", "sys_default"):
+            ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+            return
+        if limits == "unknown" or module == "unknown":
+            ui._knob_statuses["pipewire_rt_setup"] = "unknown"
+            return
+        ui._knob_statuses["pipewire_rt_setup"] = "partial"
+        return
+
+    if limits in ("applied", "pending_reboot"):
+        ui._knob_statuses["pipewire_rt_setup"] = limits
+        return
+    if limits in ("not_applied", "sys_default"):
+        ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+        return
+    ui._knob_statuses["pipewire_rt_setup"] = limits
 
 
 def apply_baseline_statuses(ui) -> None:

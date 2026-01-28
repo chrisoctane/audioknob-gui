@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -40,6 +41,7 @@ class PipeWireQuantumDialog(QDialog):
         root.addWidget(self.combo)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        self.ok_btn = btns.button(QDialogButtonBox.Ok)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -299,6 +301,124 @@ class PipeWireRtModuleDialog(QDialog):
         }
 
 
+class PipeWireRtSetupDialog(QDialog):
+    def __init__(
+        self,
+        limits_current: dict[str, object] | None,
+        module_current: dict[str, object] | None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("PipeWire RT setup")
+        self.resize(560, 460)
+        limits_current = limits_current or {}
+        module_current = module_current or {}
+
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Configure PipeWire realtime limits and module-rt behavior."))
+
+        limits_box = QGroupBox("RT Limits (permissions)")
+        limits_layout = QFormLayout(limits_box)
+        self.group = QComboBox()
+        self.group.addItem("Auto (pipewire -> audio -> realtime)", "")
+        for group in ["pipewire", "audio", "realtime"]:
+            self.group.addItem(group, group)
+        current_group = limits_current.get("group")
+        if current_group:
+            idx = self.group.findData(current_group)
+            if idx >= 0:
+                self.group.setCurrentIndex(idx)
+        limits_layout.addRow("Group", self.group)
+        self.rtprio = QLineEdit(str(limits_current.get("rtprio") or ""))
+        limits_layout.addRow("rtprio", self.rtprio)
+        self.nice = QLineEdit(str(limits_current.get("nice") or ""))
+        limits_layout.addRow("nice", self.nice)
+        self.memlock = QLineEdit(str(limits_current.get("memlock") or ""))
+        limits_layout.addRow("memlock (KB)", self.memlock)
+        root.addWidget(limits_box)
+
+        module_box = QGroupBox("module-rt behavior")
+        module_layout = QFormLayout(module_box)
+        self.rt_prio = QLineEdit(str(module_current.get("rt_prio") or ""))
+        module_layout.addRow("rt.prio", self.rt_prio)
+        self.rt_soft = QLineEdit(str(module_current.get("rt_time_soft") or ""))
+        module_layout.addRow("rt.time.soft", self.rt_soft)
+        self.rt_hard = QLineEdit(str(module_current.get("rt_time_hard") or ""))
+        module_layout.addRow("rt.time.hard", self.rt_hard)
+        self.nice_level = QLineEdit(str(module_current.get("nice_level") or ""))
+        module_layout.addRow("nice.level", self.nice_level)
+
+        self.rlimits_enabled = QCheckBox("rlimits.enabled")
+        self.rlimits_enabled.setTristate(True)
+        _set_tristate_default(self.rlimits_enabled, module_current.get("rlimits_enabled"))
+        self.rlimits_enabled.setToolTip(
+            "Use OS limits (PAM limits) when requesting realtime priority."
+        )
+        module_layout.addRow(self.rlimits_enabled)
+
+        module_layout.addRow(QLabel("Fallback paths (permissions / brokered access):"))
+        self.rtkit_enabled = QCheckBox("rtkit.enabled")
+        self.rtkit_enabled.setTristate(True)
+        _set_tristate_default(self.rtkit_enabled, module_current.get("rtkit_enabled"))
+        self.rtkit_enabled.setToolTip(
+            "Allow PipeWire to request realtime via RTKit if direct RT is not allowed."
+        )
+        module_layout.addRow(self.rtkit_enabled)
+
+        self.rtportal_enabled = QCheckBox("rtportal.enabled")
+        self.rtportal_enabled.setTristate(True)
+        _set_tristate_default(self.rtportal_enabled, module_current.get("rtportal_enabled"))
+        self.rtportal_enabled.setToolTip(
+            "Allow PipeWire to request realtime via the Realtime portal (best for sandboxed apps)."
+        )
+        module_layout.addRow(self.rtportal_enabled)
+        root.addWidget(module_box)
+
+        root.addWidget(QLabel("Tip: Leave fields blank to keep defaults."))
+
+        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    @staticmethod
+    def _read_int(field: QLineEdit, label: str) -> int | None:
+        raw = field.text().strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except Exception as exc:
+            raise ValueError(f"Invalid {label}: {raw}") from exc
+
+    def limits_values(self) -> dict[str, object]:
+        group = self.group.currentData()
+        return {
+            "group": str(group).strip() if group else None,
+            "rtprio": self._read_int(self.rtprio, "rtprio"),
+            "nice": self._read_int(self.nice, "nice"),
+            "memlock": self._read_int(self.memlock, "memlock"),
+        }
+
+    def module_values(self) -> dict[str, object]:
+        return {
+            "rt_prio": PipeWireRtModuleDialog._read_int(self.rt_prio, "rt.prio"),
+            "rt_time_soft": PipeWireRtModuleDialog._read_int(self.rt_soft, "rt.time.soft"),
+            "rt_time_hard": PipeWireRtModuleDialog._read_int(self.rt_hard, "rt.time.hard"),
+            "nice_level": PipeWireRtModuleDialog._read_int(self.nice_level, "nice.level"),
+            "rlimits_enabled": PipeWireRtModuleDialog._tri_value(self.rlimits_enabled),
+            "rtkit_enabled": PipeWireRtModuleDialog._tri_value(self.rtkit_enabled),
+            "rtportal_enabled": PipeWireRtModuleDialog._tri_value(self.rtportal_enabled),
+        }
+
+
+def _set_tristate_default(cb: QCheckBox, value: object) -> None:
+    if value is None:
+        cb.setCheckState(Qt.Checked)
+        return
+    PipeWireRtModuleDialog._set_tristate(cb, value)
+
+
 class PipeWireDataLoopsDialog(QDialog):
     def __init__(self, current: dict[str, object] | None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -463,6 +583,7 @@ class ProAudioProfileDialog(QDialog):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
 
+        self.ok_btn: QPushButton | None = None
         self._devices: list[tuple[str, str]] = []
         self._refresh_devices()
         if current_device:
@@ -473,6 +594,7 @@ class ProAudioProfileDialog(QDialog):
         self.combo.currentIndexChanged.connect(self._update_status)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        self.ok_btn = btns.button(QDialogButtonBox.Ok)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -539,6 +661,8 @@ class ProAudioProfileDialog(QDialog):
         device_id = self.selected_device_id()
         if not device_id:
             self.status.setText("Select a device to see Pro Audio availability.")
+            if self.ok_btn is not None:
+                self.ok_btn.setEnabled(False)
             return
         try:
             result = subprocess.run(
@@ -557,13 +681,73 @@ class ProAudioProfileDialog(QDialog):
         profiles = self._parse_profiles(text)
         current = profiles.get("current")
         pro = profiles.get("pro_audio")
+        card_name = self._parse_device_name(text)
+        if not pro and card_name:
+            pactl_current, pactl_pro = self._pactl_profile_status(card_name)
+            if pactl_current:
+                current = pactl_current
+            pro = pro or pactl_pro
         if pro:
             msg = "Pro Audio profile available."
+            if self.ok_btn is not None:
+                self.ok_btn.setEnabled(True)
         else:
             msg = "Pro Audio profile not found for this device."
+            if self.ok_btn is not None:
+                self.ok_btn.setEnabled(False)
         if current:
             msg += f" Current: {current}"
         self.status.setText(msg)
+
+    @staticmethod
+    def _parse_device_name(text: str) -> str | None:
+        for line in text.splitlines():
+            raw = line.strip()
+            if raw.startswith("device.name"):
+                _, _, value = raw.partition("=")
+                name = value.strip().strip('"')
+                if name:
+                    return name
+        return None
+
+    @staticmethod
+    def _pactl_profile_status(card_name: str) -> tuple[str | None, bool]:
+        try:
+            result = subprocess.run(
+                ["pactl", "list", "cards"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except Exception:
+            return None, False
+        text = result.stdout or ""
+        current = None
+        pro = False
+        in_card = False
+        in_profiles = False
+        for line in text.splitlines():
+            raw = line.rstrip()
+            if raw.strip().startswith("Name:"):
+                name = raw.split(":", 1)[1].strip()
+                in_card = name == card_name
+                in_profiles = False
+                continue
+            if not in_card:
+                continue
+            if raw.strip().startswith("Profiles:"):
+                in_profiles = True
+                continue
+            if raw.strip().startswith("Active Profile:"):
+                current = raw.split(":", 1)[1].strip()
+                continue
+            if in_profiles:
+                stripped = raw.strip()
+                if stripped and ":" in stripped:
+                    profile_key = stripped.split(":", 1)[0].strip().lower()
+                    if profile_key == "pro-audio":
+                        pro = True
+        return current, pro
 
     @staticmethod
     def _parse_profiles(text: str) -> dict[str, str | None]:

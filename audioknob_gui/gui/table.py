@@ -691,9 +691,46 @@ class TableMixin:
             missing_deps = self._missing_dependencies(k)
             dependency_lock = bool(missing_deps) and status not in ("applied", "pending_reboot")
             locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock or advanced_gate_lock or dependency_lock
-            row_dim = locked or not_applicable
+            requires_config = False
+            if (
+                k.impl is not None
+                and k.impl.kind == "pipewire_conf"
+                and status not in ("applied", "pending_reboot")
+            ):
+                if k.id == "pipewire_clock_constraints":
+                    state_keys = (
+                        "pipewire_clock_allowed_rates",
+                        "pipewire_clock_min_quantum",
+                        "pipewire_clock_max_quantum",
+                        "pipewire_clock_quantum_limit",
+                        "pipewire_clock_quantum_floor",
+                        "pipewire_clock_power_of_two",
+                    )
+                    requires_config = not any(self.state.get(key) is not None for key in state_keys)
+                elif k.id == "pipewire_mlock_policy":
+                    requires_config = not (
+                        isinstance(self.state.get("pipewire_mlock_allow"), bool)
+                        or isinstance(self.state.get("pipewire_mlock_all"), bool)
+                    )
+                elif k.id == "pipewire_rt_module_tuning":
+                    state_keys = (
+                        "pipewire_rt_prio",
+                        "pipewire_rt_time_soft",
+                        "pipewire_rt_time_hard",
+                        "pipewire_nice_level",
+                        "pipewire_rlimits_enabled",
+                        "pipewire_rtkit_enabled",
+                        "pipewire_rtportal_enabled",
+                    )
+                    requires_config = not any(self.state.get(key) is not None for key in state_keys)
+                elif k.id == "pipewire_data_loop_affinity":
+                    requires_config = not (
+                        isinstance(self.state.get("pipewire_num_data_loops"), int)
+                        or isinstance(self.state.get("pipewire_data_loops"), list)
+                    )
+
+            row_dim = locked or not_applicable or requires_config
             self._row_dim[r] = row_dim
-            row_dim = locked or not_applicable
             
             # Determine lock reason
             lock_reason = ""
@@ -713,6 +750,8 @@ class TableMixin:
                 titles = {knob.id: knob.title for knob in self.registry}
                 dep_titles = [titles.get(dep, dep) for dep in missing_deps]
                 lock_reason = f"Depends on: {', '.join(dep_titles)}"
+            elif requires_config:
+                lock_reason = "Configure this knob before applying"
             
             # Column 0: Info button
             info_btn = QPushButton("i")
@@ -917,6 +956,12 @@ class TableMixin:
                 btn.setToolTip(lock_reason)
                 btn.setStyleSheet(locked_style)
                 self._set_action_cell(r, btn)
+            elif requires_config:
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
             else:
                 if action_override and action_priority == "post_lock":
                     btn = action_override(self, k, ctx)
@@ -947,7 +992,7 @@ class TableMixin:
             if config_builder:
                 config_widget = config_builder(self, k, ctx)
             if config_widget is not None:
-                if locked and isinstance(config_widget, QPushButton):
+                if locked and isinstance(config_widget, QPushButton) and not allow_config_when_row_dim(k.id, ctx):
                     config_widget.setEnabled(False)
                     config_widget.setStyleSheet(locked_style)
                 self._set_config_cell(r, config_widget)
@@ -970,7 +1015,9 @@ class TableMixin:
                     if widget.property("status_button"):
                         widget.setStyleSheet(locked_style)
                         continue
-                    if col == 3 and isinstance(widget, QComboBox) and allow_config:
+                    if col == 3 and allow_config:
+                        if isinstance(widget, (QComboBox, QPushButton)):
+                            continue
                         continue
                     if isinstance(widget, QPushButton):
                         widget.setStyleSheet(locked_style)

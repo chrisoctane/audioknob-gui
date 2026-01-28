@@ -53,6 +53,8 @@ def get_action_override(knob_id: str):
         return ("post_lock", testing.build_test_action)
     if knob_id == "pipewire_xrun_monitor":
         return ("post_lock", pipewire.build_xrun_monitor_action)
+    if knob_id == "pipewire_rt_setup":
+        return ("post_lock", pipewire.build_rt_setup_action)
     if knob_id == "rtkit_daemon_tuning":
         return ("post_lock", pipewire.build_rtkit_info_action)
     if knob_id == "blocker_check":
@@ -75,6 +77,8 @@ def get_config_widget_builder(knob_id: str):
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == "pipewire_rt_limits_group":
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Select Group...")
+    if knob_id == "pipewire_rt_setup":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == "wireplumber_alsa_usb_tuning":
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == "pipewire_pro_audio_profile":
@@ -93,6 +97,14 @@ def get_config_widget_builder(knob_id: str):
 def allow_config_when_row_dim(knob_id: str, ctx: RowContext) -> bool:
     if knob_id == "power_profile_performance":
         return power_profile.allow_config_when_row_dim(ctx)
+    if knob_id in (
+        "pipewire_clock_constraints",
+        "pipewire_mlock_policy",
+        "pipewire_rt_module_tuning",
+        "pipewire_data_loop_affinity",
+        "pipewire_rt_setup",
+    ):
+        return True
     return False
 
 
@@ -126,6 +138,9 @@ def handle_configure_knob(ui, knob_id: str) -> bool:
         return True
     if knob_id == "pipewire_data_loop_affinity":
         pipewire.configure_data_loops_dialog(ui)
+        return True
+    if knob_id == "pipewire_rt_setup":
+        pipewire.configure_rt_setup_dialog(ui)
         return True
     if knob_id == "wireplumber_alsa_usb_tuning":
         pipewire.configure_wireplumber_alsa_dialog(ui)
@@ -161,6 +176,16 @@ def build_info_extra_html(ui, knob, helpers: InfoHelpers) -> str:
     parts: list[str] = []
     if knob.id == "scheduler_jitter_test":
         parts.append(testing.info_extra_html(ui, helpers))
+    if knob.id in (
+        "pipewire_clock_constraints",
+        "pipewire_mlock_policy",
+        "pipewire_rt_limits_group",
+        "pipewire_rt_module_tuning",
+        "pipewire_data_loop_affinity",
+        "pipewire_pro_audio_profile",
+        "pipewire_rt_setup",
+    ):
+        parts.append(pipewire.info_extra_html(ui, knob))
     if knob.id == "qjackctl_server_prefix_rt":
         parts.append(qjackctl.info_extra_html(ui))
     if knob.id in (
@@ -204,6 +229,7 @@ def add_info_buttons(ui, knob, dialog, layout) -> None:
         "pipewire_data_loop_affinity",
         "wireplumber_alsa_usb_tuning",
         "pipewire_pro_audio_profile",
+        "pipewire_rt_setup",
     ):
         pipewire.add_info_buttons(ui, knob, dialog, layout)
     if knob.id == "irq_pinning":

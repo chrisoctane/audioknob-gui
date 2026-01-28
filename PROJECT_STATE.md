@@ -32,7 +32,7 @@
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
-- **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT module tuning, data loop affinity)
+- **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity). Separate RT limits/module knobs are hidden in the UI.
 - **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in
 - **Pro Audio profile (dev)** - per-device toggle via wpctl
 - **XRUN monitor** - streams live `pw-top` data into the app (uses the latest batch iteration to avoid zeroed metrics; pw-dump fallback for QUANT/RATE when batch output is blank; ERR summary lists ERR/ID/NAME; Reset Count sets a local baseline)
@@ -42,6 +42,8 @@
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
 - **Baseline management** - Tools → Baseline supports capture/import/export of baseline snapshots (no system changes on import/export)
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
+- **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
+- **PW RT Setup dirty state** - changing RT setup config marks the knob as needing apply so the action shows Apply even if the last status was applied.
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
@@ -57,12 +59,13 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
-- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, RTKit placeholder). Baseline capture/import/export live in Tools → Baseline.
+- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, PW RT Setup, RTKit placeholder). Baseline capture/import/export live in Tools → Baseline.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Req." shows A/R/D markers for Advanced/Reboot/Depends-on (tooltip shows the key and any group/dependency details).
 - Dependent knobs are locked until dependencies are applied; tooltip shows required knob names.
+- PipeWire config knobs (clock constraints, memory lock, RT module, data loops) show a locked Apply action until configured; Configure stays available.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Req./Status/Risk keeps grouped headers; other columns sort flat.

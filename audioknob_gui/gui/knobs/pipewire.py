@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QMessageBox, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QComboBox, QDialog, QMessageBox, QPushButton, QSizePolicy, QWidget
 
 from audioknob_gui.gui.dialogs.pipewire import (
     PipeWireClockConstraintsDialog,
@@ -8,6 +8,7 @@ from audioknob_gui.gui.dialogs.pipewire import (
     PipeWireMlockDialog,
     PipeWireQuantumDialog,
     PipeWireRtLimitsGroupDialog,
+    PipeWireRtSetupDialog,
     PipeWireRtModuleDialog,
     PipeWireSampleRateDialog,
     ProAudioProfileDialog,
@@ -92,7 +93,7 @@ def build_sample_rate_combo(ui, knob, ctx) -> QComboBox | None:
 def configure_quantum_dialog(ui) -> None:
     current = ui._pipewire_quantum_from_state() or 256
     dialog = PipeWireQuantumDialog(current=current, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     chosen = dialog.selected_value()
     ui.state["pipewire_quantum"] = chosen
@@ -107,7 +108,7 @@ def configure_quantum_dialog(ui) -> None:
 def configure_sample_rate_dialog(ui) -> None:
     current = ui._pipewire_sample_rate_from_state() or 48000
     dialog = PipeWireSampleRateDialog(current=current, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     chosen = dialog.selected_value()
     ui.state["pipewire_sample_rate"] = chosen
@@ -129,7 +130,7 @@ def configure_clock_constraints_dialog(ui) -> None:
         "power_of_two": ui.state.get("pipewire_clock_power_of_two"),
     }
     dialog = PipeWireClockConstraintsDialog(current=current, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     try:
         values = dialog.values()
@@ -152,7 +153,7 @@ def configure_mlock_dialog(ui) -> None:
         "mlock_all": ui.state.get("pipewire_mlock_all"),
     }
     dialog = PipeWireMlockDialog(current=current, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     values = dialog.values()
     ui.state["pipewire_mlock_allow"] = values.get("allow_mlock")
@@ -165,7 +166,7 @@ def configure_rt_limits_group_dialog(ui) -> None:
     candidates = ["pipewire", "audio", "realtime"]
     current = ui.state.get("pipewire_limits_group")
     dialog = PipeWireRtLimitsGroupDialog(current_group=current, candidates=candidates, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     group = dialog.selected_group()
     ui.state["pipewire_limits_group"] = group
@@ -184,7 +185,7 @@ def configure_rt_module_dialog(ui) -> None:
         "rtportal_enabled": ui.state.get("pipewire_rtportal_enabled"),
     }
     dialog = PipeWireRtModuleDialog(current=current, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     try:
         values = dialog.values()
@@ -202,13 +203,76 @@ def configure_rt_module_dialog(ui) -> None:
     QMessageBox.information(ui, "Saved", "Saved RT module tuning. Apply to take effect.")
 
 
+def configure_rt_setup_dialog(ui) -> None:
+    limits_current = {
+        "group": ui.state.get("pipewire_limits_group") or "pipewire",
+        "rtprio": ui.state.get("pipewire_limits_rtprio") or 95,
+        "nice": ui.state.get("pipewire_limits_nice") or -19,
+        "memlock": ui.state.get("pipewire_limits_memlock") or 4194304,
+    }
+    module_current = {
+        "rt_prio": ui.state.get("pipewire_rt_prio") or 88,
+        "rt_time_soft": ui.state.get("pipewire_rt_time_soft"),
+        "rt_time_hard": ui.state.get("pipewire_rt_time_hard"),
+        "nice_level": ui.state.get("pipewire_nice_level") or -11,
+        "rlimits_enabled": (
+            ui.state.get("pipewire_rlimits_enabled")
+            if ui.state.get("pipewire_rlimits_enabled") is not None
+            else True
+        ),
+        "rtkit_enabled": (
+            ui.state.get("pipewire_rtkit_enabled")
+            if ui.state.get("pipewire_rtkit_enabled") is not None
+            else True
+        ),
+        "rtportal_enabled": (
+            ui.state.get("pipewire_rtportal_enabled")
+            if ui.state.get("pipewire_rtportal_enabled") is not None
+            else True
+        ),
+    }
+    dialog = PipeWireRtSetupDialog(
+        limits_current=limits_current,
+        module_current=module_current,
+        parent=ui,
+    )
+    if dialog.exec() != QDialog.Accepted:
+        return
+    try:
+        limits = dialog.limits_values()
+        module = dialog.module_values()
+    except ValueError as exc:
+        QMessageBox.warning(ui, "Invalid values", str(exc))
+        return
+
+    ui.state["pipewire_limits_group"] = limits.get("group")
+    ui.state["pipewire_limits_rtprio"] = limits.get("rtprio")
+    ui.state["pipewire_limits_nice"] = limits.get("nice")
+    ui.state["pipewire_limits_memlock"] = limits.get("memlock")
+
+    ui.state["pipewire_rt_prio"] = module.get("rt_prio")
+    ui.state["pipewire_rt_time_soft"] = module.get("rt_time_soft")
+    ui.state["pipewire_rt_time_hard"] = module.get("rt_time_hard")
+    ui.state["pipewire_nice_level"] = module.get("nice_level")
+    ui.state["pipewire_rlimits_enabled"] = module.get("rlimits_enabled")
+    ui.state["pipewire_rtkit_enabled"] = module.get("rtkit_enabled")
+    ui.state["pipewire_rtportal_enabled"] = module.get("rtportal_enabled")
+
+    ui.state["pipewire_rt_setup_dirty"] = True
+    ui._knob_statuses["pipewire_rt_limits_group"] = "not_applied"
+    ui._knob_statuses["pipewire_rt_module_tuning"] = "not_applied"
+    ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+    save_state(ui.state)
+    QMessageBox.information(ui, "Saved", "Saved PipeWire RT setup. Apply to take effect.")
+
+
 def configure_data_loops_dialog(ui) -> None:
     current = {
         "num_data_loops": ui.state.get("pipewire_num_data_loops"),
         "data_loops": ui.state.get("pipewire_data_loops"),
     }
     dialog = PipeWireDataLoopsDialog(current=current, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     try:
         values = dialog.values()
@@ -229,7 +293,7 @@ def configure_wireplumber_alsa_dialog(ui) -> None:
         "disable_batch": ui.state.get("wireplumber_alsa_disable_batch"),
     }
     dialog = WirePlumberAlsaDialog(current=current, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     try:
         values = dialog.values()
@@ -247,7 +311,7 @@ def configure_wireplumber_alsa_dialog(ui) -> None:
 def configure_pro_audio_dialog(ui) -> None:
     current_device = ui.state.get("pipewire_pro_audio_device_id")
     dialog = ProAudioProfileDialog(current_device=str(current_device) if current_device else None, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.Accepted:
         return
     device_id = dialog.selected_device_id()
     if not device_id:
@@ -301,20 +365,18 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
         group = ui.state.get("pipewire_limits_group")
         if isinstance(group, str) and group.strip():
             params["group"] = group.strip()
-            lines = [str(x) for x in params.get("lines", [])]
-            rewritten: list[str] = []
-            for line in lines:
-                raw = str(line).strip()
-                if not raw:
-                    continue
-                parts = raw.split()
-                if parts and parts[0].startswith("@"):
-                    parts[0] = f"@{group.strip()}"
-                    rewritten.append(" ".join(parts))
-                else:
-                    rewritten.append(raw)
-            if rewritten:
-                params["lines"] = rewritten
+        rtprio = ui.state.get("pipewire_limits_rtprio")
+        nice = ui.state.get("pipewire_limits_nice")
+        memlock = ui.state.get("pipewire_limits_memlock")
+        rtprio_val = int(rtprio) if isinstance(rtprio, int) else 95
+        nice_val = int(nice) if isinstance(nice, int) else -19
+        memlock_val = int(memlock) if isinstance(memlock, int) else 4194304
+        group_label = group.strip() if isinstance(group, str) and group.strip() else "pipewire"
+        params["lines"] = [
+            f"@{group_label}   -  rtprio     {rtprio_val}",
+            f"@{group_label}   -  nice      {nice_val}",
+            f"@{group_label}   -  memlock   {memlock_val}",
+        ]
     if knob.id == "pipewire_rt_module_tuning":
         args = dict(params.get("module_rt_args") or {})
         for key, state_key in (
@@ -372,6 +434,115 @@ def add_info_buttons(ui, knob, dialog: QWidget, layout) -> None:
         layout.addWidget(config_btn)
 
 
+def info_extra_html(ui, knob) -> str:
+    kid = knob.id
+    if kid == "pipewire_rt_setup":
+        return (
+            "<h4>What this does</h4>"
+            "<ul>"
+            "<li>Sets RT limits (permissions) and module-rt behavior together.</li>"
+            "<li>Limits are always applied using the values below.</li>"
+            "<li>Module-rt settings apply only for fields you fill in.</li>"
+            "</ul>"
+            "<p><b>Tip:</b> Configure first, then Apply.</p>"
+        )
+    if kid == "pipewire_clock_constraints":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Writes clock/quantum limits into a PipeWire drop-in.</li>"
+            "<li>Only the fields you set are applied.</li>"
+            "</ul>"
+            "<p><b>Tip:</b> Configure first, then Apply. Empty fields mean no change.</p>"
+        )
+    if kid == "pipewire_mlock_policy":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Enables PipeWire memory locking in a user drop-in.</li>"
+            "<li>Requires RT limits (group memlock) to succeed.</li>"
+            "</ul>"
+            "<p><b>Tip:</b> Configure first, then Apply.</p>"
+        )
+    if kid == "pipewire_rt_limits_group":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Sets PAM limits for a selected group (rtprio/nice/memlock).</li>"
+            "<li>Gives PipeWire permission to request realtime scheduling.</li>"
+            "</ul>"
+            "<p><b>Note:</b> Log out/in or reboot for limits to take effect.</p>"
+        )
+    if kid == "pipewire_rt_module_tuning":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Sets PipeWire module-rt arguments (rt.prio, nice.level, RTKit/portal).</li>"
+            "<li>Only the fields you set are applied.</li>"
+            "</ul>"
+            "<p><b>Tip:</b> Configure first, then Apply. Empty fields mean no change.</p>"
+        )
+    if kid == "pipewire_data_loop_affinity":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Controls PipeWire data-loop configuration in a user drop-in.</li>"
+            "<li>Useful for advanced CPU tuning; leave empty to keep defaults.</li>"
+            "</ul>"
+            "<p><b>Tip:</b> Configure first, then Apply.</p>"
+        )
+    if kid == "pipewire_pro_audio_profile":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Uses wpctl to switch a device to the Pro Audio profile.</li>"
+            "<li>Only devices that expose the profile are listed.</li>"
+            "</ul>"
+        )
+    return ""
+
+
+def _rt_module_configured(ui) -> bool:
+    state_keys = (
+        "pipewire_rt_prio",
+        "pipewire_rt_time_soft",
+        "pipewire_rt_time_hard",
+        "pipewire_nice_level",
+        "pipewire_rlimits_enabled",
+        "pipewire_rtkit_enabled",
+        "pipewire_rtportal_enabled",
+    )
+    return any(ui.state.get(key) is not None for key in state_keys)
+
+
+def build_rt_setup_action(ui, knob, ctx):
+    status = ctx.status
+    dirty = bool(ui.state.get("pipewire_rt_setup_dirty"))
+    applied = status in ("applied", "pending_reboot") and not dirty
+    btn = ui._make_reset_button() if applied else ui._make_apply_button()
+
+    def _queue_apply() -> None:
+        ui.state["pipewire_rt_setup_dirty"] = False
+        save_state(ui.state)
+        ui._on_queue_knob("pipewire_rt_limits_group", "apply")
+        if _rt_module_configured(ui):
+            ui._on_queue_knob("pipewire_rt_module_tuning", "apply")
+
+    def _queue_reset() -> None:
+        ui.state["pipewire_rt_setup_dirty"] = False
+        save_state(ui.state)
+        ui._on_queue_knob("pipewire_rt_limits_group", "reset")
+        ui._on_queue_knob("pipewire_rt_module_tuning", "reset")
+
+    if applied:
+        btn.clicked.connect(_queue_reset)
+    else:
+        btn.clicked.connect(_queue_apply)
+
+    ui._apply_busy_state(btn, busy=ctx.busy)
+    return btn
+
+
 def build_xrun_monitor_action(ui, knob, ctx):
     btn = ui._make_action_button("Monitor")
     if ctx.busy:
@@ -393,19 +564,3 @@ def build_rtkit_info_action(ui, knob, ctx):
         )
     )
     return btn
-    if knob.id == "pipewire_sample_rate":
-        config_btn = QPushButton("Configure Sample Rate...")
-        config_btn.clicked.connect(lambda: (dialog.accept(), ui.on_configure_knob(knob.id)))
-        layout.addWidget(config_btn)
-    if knob.id in (
-        "pipewire_clock_constraints",
-        "pipewire_mlock_policy",
-        "pipewire_rt_module_tuning",
-        "pipewire_data_loop_affinity",
-        "wireplumber_alsa_usb_tuning",
-        "pipewire_pro_audio_profile",
-        "pipewire_rt_limits_group",
-    ):
-        config_btn = QPushButton("Configure...")
-        config_btn.clicked.connect(lambda: (dialog.accept(), ui.on_configure_knob(knob.id)))
-        layout.addWidget(config_btn)

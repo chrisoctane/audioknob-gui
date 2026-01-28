@@ -358,13 +358,37 @@ def list_audio_devices() -> list[dict[str, object]]:
 def resolve_selected_devices(selected_keys: Iterable[str]) -> tuple[list[dict[str, object]], list[str]]:
     devices = list_audio_devices()
     by_key = {str(d.get("key")): d for d in devices if d.get("key")}
+    by_pci = {}
+    by_usb = {}
+    for d in devices:
+        key = str(d.get("key") or "")
+        if key.startswith("pci:"):
+            parts = key.split(":")
+            if len(parts) >= 3:
+                by_pci[":".join(parts[:3])] = d
+        if key.startswith("usb:"):
+            parts = key.split(":")
+            if len(parts) >= 3:
+                by_usb[":".join(parts[:3])] = d
     selected: list[dict[str, object]] = []
     missing: list[str] = []
     for key in _dedupe([str(k) for k in selected_keys if k]):
         if key in by_key:
             selected.append(by_key[key])
         else:
-            missing.append(key)
+            fallback = None
+            if key.startswith("pci:"):
+                parts = key.split(":")
+                if len(parts) >= 3:
+                    fallback = by_pci.get(":".join(parts[:3]))
+            elif key.startswith("usb:"):
+                parts = key.split(":")
+                if len(parts) >= 3:
+                    fallback = by_usb.get(":".join(parts[:3]))
+            if fallback is not None:
+                selected.append(fallback)
+            else:
+                missing.append(key)
     return selected, missing
 
 

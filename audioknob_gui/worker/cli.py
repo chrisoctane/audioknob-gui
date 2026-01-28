@@ -866,11 +866,17 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             current = None
             profiles: list[dict[str, str]] = []
             in_profiles = False
+            card_name = None
             for line in text.splitlines():
                 s = line.strip()
                 if not s:
                     continue
                 low = s.lower()
+                if low.startswith("device.name"):
+                    _, _, value = s.partition("=")
+                    name = value.strip().strip('"')
+                    if name:
+                        card_name = name
                 if low.startswith("profiles:"):
                     in_profiles = True
                     continue
@@ -892,6 +898,59 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 if "pro audio" in name.lower() or "pro-audio" in name.lower():
                     target = prof.get("index") or name
                     break
+            if not target and card_name:
+                pactl = which_command("pactl")
+                if pactl:
+                    pactl_list = subprocess.run(
+                        [pactl, "list", "cards"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    text_cards = pactl_list.stdout or ""
+                    in_card = False
+                    in_profiles = False
+                    for line in text_cards.splitlines():
+                        raw = line.rstrip()
+                        if raw.strip().startswith("Name:"):
+                            name = raw.split(":", 1)[1].strip()
+                            in_card = name == card_name
+                            in_profiles = False
+                            continue
+                        if not in_card:
+                            continue
+                        if raw.strip().startswith("Profiles:"):
+                            in_profiles = True
+                            continue
+                        if in_profiles:
+                            stripped = raw.strip()
+                            if stripped and ":" in stripped:
+                                profile_key = stripped.split(":", 1)[0].strip().lower()
+                                if profile_key == "pro-audio":
+                                    target = "pro-audio"
+                                    break
+                        if target:
+                            break
+                if target and pactl:
+                    set_result = subprocess.run(
+                        [pactl, "set-card-profile", str(card_name), str(target)],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if set_result.returncode != 0:
+                        detail = set_result.stderr.strip() or set_result.stdout.strip() or "pactl set-card-profile failed"
+                        raise SystemExit(detail)
+                    if current:
+                        effects.append(
+                            {
+                                "kind": "pactl_profile",
+                                "card": str(card_name),
+                                "before": current,
+                                "after": str(target),
+                            }
+                        )
+                    return
             if not target:
                 raise SystemExit("Pro Audio profile not found for the selected device.")
             set_result = subprocess.run(

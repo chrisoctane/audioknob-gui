@@ -170,7 +170,15 @@ Sources
 - PipeWire Performance Tuning (user-provided excerpt, 20 Apr 2023)
 
 Notes
-- module-rt is enabled in server and client configs; relevant files listed by\n+  PipeWire:\n+  - /usr/share/pipewire/pipewire.conf\n+  - /usr/share/pipewire/pipewire-pulse.conf\n+  - /usr/share/pipewire/client-rt.conf\n+  - /usr/share/pipewire/jack.conf\n+  Use drop-ins rather than editing these vendor files.
+- module-rt is enabled in server and client configs; relevant files listed by PipeWire:
+  - /usr/share/pipewire/pipewire.conf
+  - /usr/share/pipewire/pipewire-pulse.conf
+  - /usr/share/pipewire/client-rt.conf
+  - /usr/share/pipewire/jack.conf
+  Use drop-ins rather than editing these vendor files.
+- UI note: the app now exposes a combined **PW RT Setup** knob that configures
+  RT limits and module-rt together for simpler setup; the standalone knobs are
+  hidden in the UI but retained for worker operations.
 
 -------------------------------------------------------------------------------
 ## WirePlumber ALSA USB Period/Buffer Tuning
