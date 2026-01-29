@@ -556,6 +556,10 @@ def build_rt_setup_action(ui, knob, ctx):
     dirty = bool(ui.state.get("pipewire_rt_setup_dirty"))
     applied = status in ("applied", "pending_reboot") and not dirty
     btn = ui._make_reset_button() if applied else ui._make_apply_button()
+    action = "reset" if applied else "apply"
+    target_ids = ["pipewire_rt_limits_group"]
+    if _rt_module_configured(ui):
+        target_ids.append("pipewire_rt_module_tuning")
 
     def _queue_apply() -> None:
         ui.state["pipewire_rt_setup_dirty"] = False
@@ -576,6 +580,11 @@ def build_rt_setup_action(ui, knob, ctx):
         btn.clicked.connect(_queue_apply)
 
     ui._apply_busy_state(btn, busy=ctx.busy)
+    queued_id = next((kid for kid in target_ids if ui._queued_actions.get(kid) == action), None)
+    if queued_id:
+        ui._apply_queue_button_state(btn, queued_id, action, row_dim=ctx.row_dim)
+    else:
+        ui._style_table_button(btn, row_dim=ctx.row_dim)
     return btn
 
 

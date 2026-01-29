@@ -735,6 +735,8 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
         apply_info_param_overrides(ui, knob, params)
     except Exception:
         pass
+    if knob.id == "pipewire_rt_setup":
+        kind = "composite"
     lines.append(f"kind: {kind}")
     if knob.id == "power_profile_performance":
         params["backend"] = ui._power_profile_backend_from_state()
