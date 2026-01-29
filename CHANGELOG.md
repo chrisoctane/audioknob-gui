@@ -4,6 +4,22 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.3] - 2026-01-29
+
+### Added
+- PipeWire RT Setup status check (Status column + info dialog) with component breakdown.
+
+### Changed
+- PipeWire RT Setup promoted out of Dev and shown in main/advanced views.
+- PipeWire knobs renamed from “PW …” to “PipeWire …”.
+- Global Apply/Apply & Reboot controls moved left of Tools in the header.
+- Pro Audio profile switching now prefers pactl when wpctl doesn’t expose profiles; reset restores the previous profile.
+
+### Fixed
+- Pro Audio device parsing and apply flow (wpctl/pactl fallback) now records JSON output reliably.
+- PipeWire RT Setup queue button styling now reflects queued actions.
+- Status/Check dialog now includes partial reasons for PipeWire config knobs and RT Setup components.
+
 ## [0.6.2] - 2026-01-27
 
 ### Added
