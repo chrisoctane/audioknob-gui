@@ -26,6 +26,7 @@ from shiboken6 import isValid
 
 from audioknob_gui.gui.actions import QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger
+from audioknob_gui.gui.knobs.registry import apply_info_param_overrides
 from audioknob_gui.gui.state import save_state
 from audioknob_gui.gui.system_info import _param_present
 from audioknob_gui.gui.worker_api import (
@@ -730,9 +731,41 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
 
     kind = knob.impl.kind if knob.impl else ""
     params = dict(knob.impl.params) if knob.impl else {}
+    try:
+        apply_info_param_overrides(ui, knob, params)
+    except Exception:
+        pass
     lines.append(f"kind: {kind}")
     if knob.id == "power_profile_performance":
         params["backend"] = ui._power_profile_backend_from_state()
+
+    if knob.id == "pipewire_rt_setup":
+        limits_status = ui._knob_statuses.get("pipewire_rt_limits_group", "unknown")
+        module_status = ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown")
+        module_configured = _pipewire_rt_module_configured(ui)
+        lines.append("components:")
+        lines.append(f"  pipewire_rt_limits_group: {limits_status}")
+        lines.append(f"  pipewire_rt_module_tuning: {module_status}")
+        if not module_configured:
+            lines.append("  note: module-rt not configured; status reflects RT limits only.")
+        if status == "partial":
+            if limits_status not in ("applied", "pending_reboot"):
+                lines.append("partial_reason: RT limits are not fully applied.")
+            if module_configured and module_status not in ("applied", "pending_reboot"):
+                lines.append("partial_reason: module-rt config does not match configured values.")
+        lines.append("")
+        lines.append("component checks:")
+        for sub_id in ("pipewire_rt_limits_group", "pipewire_rt_module_tuning"):
+            sub = next((k for k in ui.registry if k.id == sub_id), None)
+            if not sub:
+                lines.append(f"  {sub_id}: missing from registry")
+                continue
+            sub_status = ui._knob_statuses.get(sub_id, "unknown")
+            sub_lines = collect_live_checks(ui, sub, status_override=sub_status)
+            for entry in sub_lines:
+                lines.append(f"  {entry}")
+            lines.append("")
+        return lines
 
     if kind == "qjackctl_server_prefix":
         path = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
@@ -1278,6 +1311,23 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
     elif kind == "pipewire_conf":
         path = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
         lines.extend(_read_file(path))
+        if status == "partial":
+            try:
+                from audioknob_gui.worker.ops import build_pipewire_conf_content
+
+                expected = build_pipewire_conf_content(params).splitlines()
+                current = Path(path).read_text(encoding="utf-8").splitlines()
+                expected_norm = {line.strip() for line in expected if line.strip()}
+                current_norm = {line.strip() for line in current if line.strip()}
+                missing = [line for line in expected if line.strip() and line.strip() not in current_norm]
+                if missing:
+                    snippet = ", ".join(missing[:6])
+                    suffix = "..." if len(missing) > 6 else ""
+                    lines.append(f"partial_reason: missing lines: {snippet}{suffix}")
+                else:
+                    lines.append("partial_reason: config differs from expected (re-apply to rewrite).")
+            except Exception as exc:
+                lines.append(f"partial_reason: unable to compare expected config ({exc})")
         try:
             for label, cmd in (
                 ("pipewire_active", ["systemctl", "--user", "is-active", "pipewire"]),
@@ -1374,6 +1424,8 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                 if isinstance(threads, list):
                     lines.append(f"  threads: {len(threads)}")
 
+    if status == "partial" and not any(str(line).startswith("partial_reason:") for line in lines):
+        lines.append("partial_reason: current state differs from expected configuration.")
     return lines
 
 

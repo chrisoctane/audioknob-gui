@@ -850,7 +850,7 @@ class TableMixin:
             if status_tip:
                 status_btn.setToolTip(status_tip)
             status_btn.setMinimumWidth(0)
-            if k.impl and k.impl.kind == "read_only":
+            if k.impl and k.impl.kind == "read_only" and k.id != "pipewire_rt_setup":
                 status_btn.setEnabled(False)
                 status_btn.setToolTip("Not applicable for read-only tests")
             else:
