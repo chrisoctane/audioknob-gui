@@ -69,6 +69,8 @@ class PipeWireSampleRateDialog(QDialog):
         root.addWidget(self.combo)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        status_btn = btns.addButton("Status Check...", QDialogButtonBox.ActionRole)
+        status_btn.clicked.connect(self._show_status_check)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -410,6 +412,19 @@ class PipeWireRtSetupDialog(QDialog):
             "rtkit_enabled": PipeWireRtModuleDialog._tri_value(self.rtkit_enabled),
             "rtportal_enabled": PipeWireRtModuleDialog._tri_value(self.rtportal_enabled),
         }
+
+    def _show_status_check(self) -> None:
+        try:
+            from audioknob_gui.gui import status as gui_status
+        except Exception:
+            return
+        parent = self.parent()
+        if parent is None:
+            return
+        try:
+            gui_status.show_cli_status(parent, "pipewire_rt_setup")
+        except Exception:
+            pass
 
 
 def _set_tristate_default(cb: QCheckBox, value: object) -> None:
