@@ -10,6 +10,9 @@ _RAW_CONFLICTS: dict[str, list[str]] = {
         "kernel_cstate_limit",
         "kernel_intel_idle_cstate_limit",
     ],
+    "irq_pinning": [
+        "irqbalance_disable",
+    ],
     "pipewire_clock_constraints": [
         "pipewire_quantum",
         "pipewire_sample_rate",
@@ -59,6 +62,7 @@ SECTION_MAP: dict[str, list[str]] = {
         "IRQ Housekeeping + kernel irqaffinity",
     ],
     "irq_pinning": ["IRQ Pinning + IRQ Balance"],
+    "irqbalance_disable": ["IRQ Pinning + IRQ Balance"],
 }
 
 
