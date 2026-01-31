@@ -57,10 +57,12 @@ done
 install -d \
   "${pkg_root}/usr/libexec" \
   "${pkg_root}/usr/share/polkit-1/actions" \
-  "${pkg_root}/usr/share/applications"
+  "${pkg_root}/usr/share/applications" \
+  "${pkg_root}/usr/share/icons/hicolor/1024x1024/apps"
 install -m 0755 packaging/audioknob-gui-worker "${pkg_root}/usr/libexec/audioknob-gui-worker"
 install -m 0644 polkit/org.audioknob-gui.policy "${pkg_root}/usr/share/polkit-1/actions/org.audioknob-gui.policy"
 install -m 0644 packaging/audioknob-gui.desktop "${pkg_root}/usr/share/applications/audioknob-gui.desktop"
+install -m 0644 packaging/icons/audioknob-gui.png "${pkg_root}/usr/share/icons/hicolor/1024x1024/apps/audioknob-gui.png"
 
 sed -e "s/@VERSION@/${version}/g" -e "s/@ARCH@/${arch}/g" packaging/debian/control > "${pkg_root}/DEBIAN/control"
 install -m 0755 packaging/debian/postinst "${pkg_root}/DEBIAN/postinst"

@@ -2447,7 +2447,29 @@ def cmd_status(args: argparse.Namespace) -> int:
             "pipewire_rtportal_enabled",
         )
         module_configured = any(state.get(key) is not None for key in module_keys)
+        limits_enabled = state.get("pipewire_limits_enabled")
         combined = "unknown"
+        if limits_enabled is False:
+            if module_configured:
+                if module in ("running", "pending_reboot"):
+                    combined = module
+                elif module == "applied":
+                    combined = "applied"
+                elif module in ("not_applied", "sys_default"):
+                    combined = "not_applied"
+                elif module == "unknown":
+                    combined = "unknown"
+                else:
+                    combined = "partial"
+            else:
+                combined = "not_applied"
+            by_id["pipewire_rt_setup"]["status"] = combined
+            statuses = list(by_id.values())
+            print(json.dumps({
+                "schema": 1,
+                "statuses": statuses,
+            }, indent=2))
+            return 0
         if limits in ("running", "pending_reboot"):
             combined = limits
         elif module_configured and module in ("running", "pending_reboot"):

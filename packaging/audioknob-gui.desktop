@@ -2,10 +2,9 @@
 Name=AudioKnob GUI
 Comment=Linux realtime audio configuration tool
 Exec=audioknob-gui
-Icon=audio-card
+Icon=audioknob-gui
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Settings;
 Keywords=audio;realtime;latency;pipewire;jack;tuning;
-
 

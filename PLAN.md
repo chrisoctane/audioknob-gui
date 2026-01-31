@@ -140,7 +140,8 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - Use the **Advanced** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
-- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, RTKit placeholder). These are optional and may require manual configuration.
+- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, kernel RT extras including preempt=full, RTKit placeholder). These are optional and may require manual configuration.
+- PipeWire **RT Setup** includes a Safe RT preset (RTKit/portal only) and an RT limits toggle for safer setups.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - The **Audio Core Plan** panel is collapsible to save space in the Advanced view.
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.
@@ -200,7 +201,10 @@ Use **Tools → Baseline** to manage baselines:
 
 - The app warns on known conflicts and offers an optional **Queue resets** action.
 - The app never auto-disables knobs without explicit confirmation.
+- Conflict prompt options: **Apply + reset conflicts**, **Apply anyway**, **Cancel**, or **See conflicts detail**.
 - Known conflicts, dependencies, and blockers are documented in `docs/KNOB_INTERACTIONS.md`.
+- TSC-related kernel knobs show a pre-flight warning if safety checks look risky.
+- Status labels include a conflict indicator when a knob is currently conflicting.
 
 ---
 

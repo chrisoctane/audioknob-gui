@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QTextEdit, QVBoxLayout
@@ -59,6 +60,9 @@ def on_apply_knob(ui, knob_id: str) -> None:
     k = next((k for k in ui.registry if k.id == knob_id), None)
     if not k:
         return
+    if knob_id in ("kernel_clocksource_tsc", "kernel_tsc_reliable"):
+        if not _confirm_tsc_preflight(ui, knob_id):
+            return
     if knob_id == "qjackctl_server_prefix_rt" and ui._is_process_running(["qjackctl", "qjackctl6"]):
         QMessageBox.information(
             ui,
@@ -83,6 +87,9 @@ def on_apply_knob(ui, knob_id: str) -> None:
 def on_queue_knob(ui, knob_id: str, action: str) -> None:
     if knob_id in ui._busy_knobs:
         return
+    if action == "apply" and knob_id in ("kernel_clocksource_tsc", "kernel_tsc_reliable"):
+        if not _confirm_tsc_preflight(ui, knob_id):
+            return
     if ui._queued_actions.get(knob_id) == action:
         ui._queued_actions.pop(knob_id, None)
     else:
@@ -159,6 +166,103 @@ def on_knob_task_finished(
                 "Log out/in or reboot to activate.",
             )
     ui._populate()
+
+
+def _confirm_tsc_preflight(ui, knob_id: str) -> bool:
+    current = ""
+    available = ""
+    flags: set[str] = set()
+    dmesg_note = ""
+    dmesg_warn = ""
+
+    try:
+        current = Path("/sys/devices/system/clocksource/clocksource0/current_clocksource").read_text(
+            encoding="utf-8"
+        ).strip()
+    except Exception:
+        current = ""
+    try:
+        available = Path("/sys/devices/system/clocksource/clocksource0/available_clocksource").read_text(
+            encoding="utf-8"
+        ).strip()
+    except Exception:
+        available = ""
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+            if line.lower().startswith("flags"):
+                _, _, raw = line.partition(":")
+                flags = set(raw.strip().split())
+                break
+    except Exception:
+        flags = set()
+    try:
+        result = subprocess.run(["dmesg"], capture_output=True, text=True, check=False, timeout=2)
+        if result.stdout:
+            dmesg_text = result.stdout.lower()
+            if "tsc unstable" in dmesg_text or "marking tsc unstable" in dmesg_text:
+                dmesg_warn = "Kernel reported TSC instability."
+            else:
+                dmesg_note = "No TSC instability warnings found."
+        else:
+            dmesg_note = "Kernel log not available (permission restricted)."
+    except Exception:
+        dmesg_note = "Kernel log not available (permission restricted)."
+
+    issues: list[str] = []
+    info: list[str] = []
+
+    if not current:
+        issues.append("Current clocksource: unknown (could not read).")
+    else:
+        info.append(f"Current clocksource: {current}")
+        if current != "tsc":
+            issues.append("Current clocksource is not TSC.")
+
+    if not available:
+        issues.append("Available clocksources: unknown (could not read).")
+    else:
+        info.append(f"Available clocksources: {available}")
+        if "tsc" not in available.split():
+            issues.append("TSC is not listed as an available clocksource.")
+
+    needs_flags = knob_id == "kernel_tsc_reliable"
+    if needs_flags:
+        if "constant_tsc" not in flags:
+            issues.append("CPU flag missing: constant_tsc")
+        if "nonstop_tsc" not in flags:
+            issues.append("CPU flag missing: nonstop_tsc")
+        if flags:
+            present = sorted(f for f in flags if f in {"constant_tsc", "nonstop_tsc"})
+            if present:
+                info.append("CPU flags include: " + " ".join(present))
+        else:
+            issues.append("CPU flags could not be read.")
+
+    if dmesg_warn:
+        issues.append(dmesg_warn)
+    elif dmesg_note:
+        info.append(dmesg_note)
+
+    if not issues:
+        return True
+
+    label = "TSC pre-flight check warnings"
+    if knob_id == "kernel_tsc_reliable":
+        label = "TSC reliable pre-flight check warnings"
+
+    msg = label + ":\n\n" + "\n".join(f"• {i}" for i in issues)
+    if info:
+        msg += "\n\nDetails:\n" + "\n".join(f"- {i}" for i in info)
+    msg += "\n\nProceed anyway?"
+
+    box = QMessageBox(ui)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle("TSC pre-flight warning")
+    box.setText(msg)
+    proceed = box.addButton("Proceed", QMessageBox.DestructiveRole)
+    box.addButton(QMessageBox.Cancel)
+    box.exec()
+    return box.clickedButton() == proceed
 
 
 def run_force_reset(ui, knob_id: str) -> None:

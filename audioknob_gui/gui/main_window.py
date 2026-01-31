@@ -44,6 +44,7 @@ from audioknob_gui.gui.dialogs.confirm import ConfirmDialog
 from audioknob_gui.gui.dialogs.jitter_monitor import JitterMonitorDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
 from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
+from audioknob_gui.gui.conflicts import build_conflict_details, find_conflicts
 from audioknob_gui.gui.knobs.registry import (
     InfoHelpers,
     add_info_buttons,
@@ -325,6 +326,11 @@ class MainWindow(TableMixin, QMainWindow):
                 "kernel_nohz_full",
                 "kernel_rcu_nocbs",
                 "kernel_irqaffinity",
+                "kernel_preempt_full",
+                "kernel_clocksource_tsc",
+                "kernel_tsc_reliable",
+                "kernel_nmi_watchdog_off",
+                "kernel_nosoftlockup",
                 "pipewire_clock_constraints",
                 "pipewire_mlock_policy",
                 "pipewire_rt_setup",
@@ -337,6 +343,11 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _dev_knob_ids(self) -> set[str]:
         return {
+            "kernel_preempt_full",
+            "kernel_clocksource_tsc",
+            "kernel_tsc_reliable",
+            "kernel_nmi_watchdog_off",
+            "kernel_nosoftlockup",
             "pipewire_clock_constraints",
             "pipewire_mlock_policy",
             "pipewire_data_loop_affinity",
@@ -2333,7 +2344,10 @@ class MainWindow(TableMixin, QMainWindow):
         
         impl_info = "Not implemented yet"
         if k.impl:
-            impl_info = f"<b>Kind:</b> {k.impl.kind}<br/>"
+            kind_label = k.impl.kind
+            if k.id == "pipewire_rt_setup":
+                kind_label = "composite (queues PipeWire RT Limits + PipeWire RT Module)"
+            impl_info = f"<b>Kind:</b> {kind_label}<br/>"
             # For configurable knobs, show current configured values rather than registry defaults.
             params = dict(k.impl.params)
             apply_info_param_overrides(self, k, params)
@@ -2670,28 +2684,61 @@ class MainWindow(TableMixin, QMainWindow):
         except Exception:
             return False
 
-    def _prompt_tuned_conflicts(self, conflict_ids: list[str]) -> str:
+    def _show_conflict_details(self, conflict_ids: set[str]) -> None:
+        from PySide6.QtWidgets import QTextEdit
+
+        repo_root = Path(__file__).resolve().parents[2]
+        details = build_conflict_details(conflict_ids, interactions_path=repo_root / "docs" / "KNOB_INTERACTIONS.md")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Conflict details")
+        dialog.resize(640, 460)
+        layout = QVBoxLayout(dialog)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setPlainText(details)
+        layout.addWidget(text)
+        btns = QDialogButtonBox(QDialogButtonBox.Close)
+        btns.rejected.connect(dialog.reject)
+        layout.addWidget(btns)
+        dialog.exec()
+
+    def _prompt_conflicts(self, conflicts: dict[str, set[str]]) -> str:
         by_id = {k.id: k for k in self.registry}
-        titles = [by_id.get(cid).title if cid in by_id else cid for cid in conflict_ids]
-        msg = (
-            "tuned can override settings from these knobs:\n\n"
-            + ", ".join(titles)
-            + "\n\nQueue resets for the conflicting knobs?"
+        lines: list[str] = []
+        conflict_ids: set[str] = set()
+        for src_id, targets in conflicts.items():
+            src_title = by_id.get(src_id).title if src_id in by_id else src_id
+            target_titles = [by_id.get(t).title if t in by_id else t for t in sorted(targets)]
+            if target_titles:
+                lines.append(f"{src_title} ↔ {', '.join(target_titles)}")
+            conflict_ids.update(targets)
+        msg = "Potential conflicts detected:\n\n" + "\n".join(lines)
+        msg += (
+            "\n\nChoose how to proceed:\n"
+            "• Apply + reset conflicts: queue resets for the conflicting knobs\n"
+            "• Apply anyway: keep current settings (may override)\n"
         )
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Warning)
-        box.setWindowTitle("tuned conflicts")
-        box.setText(msg)
-        reset_btn = box.addButton("Queue resets", QMessageBox.AcceptRole)
-        box.addButton("Continue", QMessageBox.DestructiveRole)
-        cancel_btn = box.addButton(QMessageBox.Cancel)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked == reset_btn:
-            return "reset"
-        if clicked == cancel_btn:
+        while True:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("Conflicts detected")
+            box.setText(msg)
+            reset_btn = box.addButton("Apply + reset conflicts", QMessageBox.AcceptRole)
+            apply_btn = box.addButton("Apply anyway", QMessageBox.DestructiveRole)
+            details_btn = box.addButton("See conflicts detail", QMessageBox.ActionRole)
+            cancel_btn = box.addButton(QMessageBox.Cancel)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked == details_btn:
+                self._show_conflict_details(conflict_ids)
+                continue
+            if clicked == reset_btn:
+                return "reset"
+            if clicked == apply_btn:
+                return "apply"
+            if clicked == cancel_btn:
+                return "cancel"
             return "cancel"
-        return "continue"
 
     def _on_apply_queue(self, reboot_after: bool) -> bool:
         if not self._queued_actions or self._queue_busy:
@@ -2707,27 +2754,34 @@ class MainWindow(TableMixin, QMainWindow):
         queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
         if not queued:
             return False
-        if any(kid == "power_profile_performance" and action == "apply" for kid, action in queued):
-            if self._power_profile_backend_is_tuned():
-                conflict_ids = [
-                    cid
-                    for cid in self._tuned_conflict_ids()
-                    if self._queued_actions.get(cid) == "apply"
-                    or self._knob_statuses.get(cid) in ("applied", "pending_reboot")
-                ]
-                if conflict_ids:
-                    choice = self._prompt_tuned_conflicts(conflict_ids)
-                    if choice == "cancel":
-                        return False
-                    if choice == "reset":
-                        for cid in conflict_ids:
-                            self._queued_actions[cid] = "reset"
-                        self._save_queue()
-                        self._update_queue_ui()
-                        self._populate()
-                        queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
-                        if not queued:
-                            return False
+        conflicts = find_conflicts(self._queued_actions, self._knob_statuses)
+        if conflicts and not self._power_profile_backend_is_tuned():
+            filtered: dict[str, set[str]] = {}
+            for src_id, targets in conflicts.items():
+                if src_id == "power_profile_performance":
+                    continue
+                new_targets = {t for t in targets if t != "power_profile_performance"}
+                if new_targets:
+                    filtered[src_id] = new_targets
+            conflicts = filtered
+        if conflicts:
+            choice = self._prompt_conflicts(conflicts)
+            if choice == "cancel":
+                return False
+            if choice == "reset":
+                apply_set = {kid for kid, action in queued if action == "apply"}
+                reset_targets: set[str] = set()
+                for targets in conflicts.values():
+                    reset_targets.update(targets)
+                reset_targets -= apply_set
+                for cid in reset_targets:
+                    self._queued_actions[cid] = "reset"
+                self._save_queue()
+                self._update_queue_ui()
+                self._populate()
+                queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
+                if not queued:
+                    return False
         if any(kid == "qjackctl_server_prefix_rt" for kid, _ in queued) and self._is_process_running(
             ["qjackctl", "qjackctl6"]
         ):

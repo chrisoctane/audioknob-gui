@@ -797,6 +797,15 @@ class TableMixin:
                 status_tip = not_applicable_reason
             else:
                 status_text, status_color = self._status_display(display_status)
+                conflict_ids = set()
+                try:
+                    from audioknob_gui.gui.conflicts import active_conflicts
+
+                    conflict_ids = active_conflicts(k.id, self._queued_actions, self._knob_statuses)
+                except Exception:
+                    conflict_ids = set()
+                if conflict_ids:
+                    status_text = f"{status_text} !"
                 tooltip_map = {
                     "applied": "Baseline captured; patch applied successfully.",
                     "sys_default": "Baseline; captured before optimisation.",
@@ -815,6 +824,11 @@ class TableMixin:
                     status_tip = "Test result."
                 else:
                     status_tip = tooltip_map.get(display_status, "")
+                if conflict_ids:
+                    by_id = {kn.id: kn.title for kn in self.registry}
+                    conflict_titles = [by_id.get(cid, cid) for cid in sorted(conflict_ids)]
+                    conflict_tip = "Conflicts with: " + ", ".join(conflict_titles)
+                    status_tip = conflict_tip if not status_tip else f"{status_tip}\n{conflict_tip}"
             status_item = QTableWidgetItem("")
             status_item.setData(Qt.UserRole, status_text)
             status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)

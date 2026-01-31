@@ -10,7 +10,7 @@
 
 ### What Works
 - **Release version**: 0.6.3
-- **40 knobs defined** (ALL 40 IMPLEMENTED, including Dev tab)
+- **44 knobs defined** (ALL 44 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
@@ -33,6 +33,7 @@
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity). Separate RT limits/module knobs are hidden in the UI.
+- **PipeWire RT Setup presets** - Safe RT preset (RTKit/portal only) and RT limits toggle in the setup dialog.
 - **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in
 - **Pro Audio profile (dev)** - per-device toggle via wpctl with pactl fallback; reset restores prior profile
 - **XRUN monitor** - streams live `pw-top` data into the app (uses the latest batch iteration to avoid zeroed metrics; pw-dump fallback for QUANT/RATE when batch output is blank; ERR summary lists ERR/ID/NAME; Reset Count sets a local baseline)
@@ -45,11 +46,15 @@
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
 - **PipeWire RT Setup dirty state** - changing RT setup config marks the knob as needing apply so the action shows Apply even if the last status was applied.
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
+- **Conflict prompt** - apply flow detects known conflicts and offers Apply + reset conflicts / Apply anyway / Cancel / Details.
+- **Conflict indicator** - Status labels append a conflict marker with a tooltip listing conflicting knobs.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
 - **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
+- **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup
+- **TSC pre-flight warning** - TSC knobs warn before apply when safety checks look risky.
 - **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 
 ### GUI Layout
@@ -59,7 +64,7 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
-- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, RTKit placeholder). Baseline capture/import/export live in Tools → Baseline.
+- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Baseline capture/import/export live in Tools → Baseline.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.

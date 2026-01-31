@@ -528,6 +528,116 @@
         "restore": true
       },
       "category": "kernel",
+      "description": "[i] adds preempt=full to kernel cmdline (PREEMPT_DYNAMIC).\n[+] increases kernel preemption for lower scheduling latency.\n[-] higher overhead; may affect stability on some systems; requires reboot.",
+      "id": "kernel_preempt_full",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "preempt=full"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "Kernel Preemption (full)"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "[i] adds clocksource=tsc to kernel cmdline.\n[+] uses TSC as the kernel clocksource for lower latency.\n[-] may be unstable on some hardware; requires reboot.",
+      "id": "kernel_clocksource_tsc",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "clocksource=tsc"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "Kernel Clocksource (TSC)"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "[i] adds tsc=reliable to kernel cmdline.\n[+] marks TSC as reliable and disables runtime stability checks.\n[-] may be unsafe on some systems; requires reboot.",
+      "id": "kernel_tsc_reliable",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "tsc=reliable"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "TSC Reliable"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "[i] adds nmi_watchdog=0 to kernel cmdline.\n[+] disables the NMI watchdog to reduce RT latency.\n[-] removes a safety diagnostic; requires reboot.",
+      "id": "kernel_nmi_watchdog_off",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "nmi_watchdog=0"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "NMI Watchdog"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
+      "description": "[i] adds nosoftlockup to kernel cmdline.\n[+] disables the soft lockup detector to reduce jitter.\n[-] removes a safety diagnostic; requires reboot.",
+      "id": "kernel_nosoftlockup",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "nosoftlockup"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "Soft Lockup Detector"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
       "description": "[i] adds audit=0 to kernel cmdline.\n[+] reduces audit overhead on realtime workloads.\n[-] disables kernel audit logging (security tradeoff).",
       "id": "kernel_audit_off",
       "impl": {
@@ -889,7 +999,7 @@
         "restore": false
       },
       "category": "services",
-      "description": "[i] RTKit daemon tuning (on hold; distro-specific).\n[+] can enable higher RT budgets when supported.\n[-] blocked until verified; no changes applied.",
+      "description": "[i] RTKit daemon tuning (on hold; distro-specific). This does not affect PipeWire's use of RTKit.\n[+] can enable higher RT budgets when supported.\n[-] blocked until verified; no changes applied.",
       "id": "rtkit_daemon_tuning",
       "impl": {
         "kind": "read_only",

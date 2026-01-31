@@ -53,10 +53,12 @@ Security model:
 # Root worker wrapper + polkit policy + desktop entry
 %{__install} -d %{buildroot}%{_libexecdir} \
   %{buildroot}%{_datadir}/polkit-1/actions \
-  %{buildroot}%{_datadir}/applications
+  %{buildroot}%{_datadir}/applications \
+  %{buildroot}%{_datadir}/icons/hicolor/1024x1024/apps
 %{__install} -m 0755 packaging/audioknob-gui-worker %{buildroot}%{_libexecdir}/audioknob-gui-worker
 %{__install} -m 0644 polkit/org.audioknob-gui.policy %{buildroot}%{_datadir}/polkit-1/actions/org.audioknob-gui.policy
 %{__install} -m 0644 packaging/audioknob-gui.desktop %{buildroot}%{_datadir}/applications/audioknob-gui.desktop
+%{__install} -m 0644 packaging/icons/audioknob-gui.png %{buildroot}%{_datadir}/icons/hicolor/1024x1024/apps/audioknob-gui.png
 
 %fdupes %{buildroot}%{python3_sitelib}
 
@@ -76,6 +78,7 @@ Security model:
 %{_libexecdir}/audioknob-gui-worker
 %{_datadir}/polkit-1/actions/org.audioknob-gui.policy
 %{_datadir}/applications/audioknob-gui.desktop
+%{_datadir}/icons/hicolor/1024x1024/apps/audioknob-gui.png
 
 %{python3_sitelib}/audioknob_gui
 %{python3_sitelib}/audioknob_gui-%{version}.dist-info

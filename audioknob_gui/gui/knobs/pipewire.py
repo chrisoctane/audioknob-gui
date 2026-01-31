@@ -204,7 +204,11 @@ def configure_rt_module_dialog(ui) -> None:
 
 
 def configure_rt_setup_dialog(ui) -> None:
+    limits_enabled = ui.state.get("pipewire_limits_enabled")
+    if limits_enabled is None:
+        limits_enabled = True
     limits_current = {
+        "enabled": limits_enabled,
         "group": ui.state.get("pipewire_limits_group") or "pipewire",
         "rtprio": ui.state.get("pipewire_limits_rtprio") or 95,
         "nice": ui.state.get("pipewire_limits_nice") or -19,
@@ -249,6 +253,7 @@ def configure_rt_setup_dialog(ui) -> None:
     ui.state["pipewire_limits_rtprio"] = limits.get("rtprio")
     ui.state["pipewire_limits_nice"] = limits.get("nice")
     ui.state["pipewire_limits_memlock"] = limits.get("memlock")
+    ui.state["pipewire_limits_enabled"] = limits.get("enabled")
 
     ui.state["pipewire_rt_prio"] = module.get("rt_prio")
     ui.state["pipewire_rt_time_soft"] = module.get("rt_time_soft")
@@ -459,20 +464,22 @@ def info_extra_html(ui, knob) -> str:
         limits = _status_label(ui._knob_statuses.get("pipewire_rt_limits_group", "unknown"))
         module = _status_label(ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown"))
         overall = _status_label(ui._knob_statuses.get("pipewire_rt_setup", "unknown"))
+        limits_enabled = ui.state.get("pipewire_limits_enabled")
+        limits_mode = "enabled" if limits_enabled is not False else "disabled"
         return (
             "<h4>What this does</h4>"
             "<ul>"
             "<li>Sets RT limits (permissions) and module-rt behavior together.</li>"
-            "<li>Limits are always applied using the values below.</li>"
+            "<li>Limits can be disabled; Safe RT preset uses RTKit/portal only.</li>"
             "<li>Module-rt settings apply only for fields you fill in.</li>"
             "</ul>"
             "<p><b>Status:</b></p>"
             "<ul>"
-            f"<li>RT limits: {limits}</li>"
+            f"<li>RT limits: {limits} ({limits_mode})</li>"
             f"<li>RT module: {module}</li>"
             f"<li>Overall: {overall}</li>"
             "</ul>"
-            "<p><b>Tip:</b> Configure first, then Apply.</p>"
+            "<p><b>Tip:</b> Configure first, then Apply. Use Reset to remove existing limits.</p>"
         )
     if kid == "pipewire_clock_constraints":
         return (
@@ -557,14 +564,21 @@ def build_rt_setup_action(ui, knob, ctx):
     applied = status in ("applied", "pending_reboot") and not dirty
     btn = ui._make_reset_button() if applied else ui._make_apply_button()
     action = "reset" if applied else "apply"
-    target_ids = ["pipewire_rt_limits_group"]
+    limits_enabled = ui.state.get("pipewire_limits_enabled")
+    if limits_enabled is None:
+        limits_enabled = True
+    target_ids = ["pipewire_rt_limits_group"] if limits_enabled else []
     if _rt_module_configured(ui):
         target_ids.append("pipewire_rt_module_tuning")
 
     def _queue_apply() -> None:
+        if not limits_enabled and not _rt_module_configured(ui):
+            QMessageBox.information(ui, "Nothing to apply", "No RT settings are configured.")
+            return
         ui.state["pipewire_rt_setup_dirty"] = False
         save_state(ui.state)
-        ui._on_queue_knob("pipewire_rt_limits_group", "apply")
+        if limits_enabled:
+            ui._on_queue_knob("pipewire_rt_limits_group", "apply")
         if _rt_module_configured(ui):
             ui._on_queue_knob("pipewire_rt_module_tuning", "apply")
 
@@ -604,7 +618,8 @@ def build_rtkit_info_action(ui, knob, ctx):
         lambda: QMessageBox.information(
             ui,
             "RTKit Tuning",
-            "RTKit tuning is on hold until distro-specific configuration is verified.\n\n"
+            "RTKit daemon tuning is on hold until distro-specific configuration is verified.\n\n"
+            "PipeWire can still use RTKit via module-rt (Safe RT preset), but this knob does not change RTKit itself.\n\n"
             "See docs/knobs.md for current research notes.",
         )
     )

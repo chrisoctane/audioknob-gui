@@ -25,6 +25,44 @@ Common sources
 - PipeWire Performance Tuning (user-provided excerpt, Wim Taymans, 20 Apr 2023)
 
 -------------------------------------------------------------------------------
+## Kernel RT Extras (Dev)
+
+Goal
+- Provide optional kernel boot parameters that can improve RT latency on some
+  systems, while keeping them gated as dev-only until validated on user rigs.
+
+Knobs (kernel cmdline)
+- clocksource=tsc
+- tsc=reliable
+- nmi_watchdog=0
+- nosoftlockup
+- preempt=full
+
+UI
+- Dev tab only. High-risk warnings in Info.
+- Requires reboot toggle and Advanced knobs toggle (consistent with other kernel
+  cmdline knobs).
+
+Apply/Reset
+- Use existing kernel cmdline editing; apply appends the parameter.
+- Reset removes only the knob’s parameter (surgical).
+
+Status
+- Applied when the parameter is present in the configured boot cmdline file.
+- Reboot required warning until the system has rebooted into the new cmdline.
+
+Risks/notes
+- Disabling watchdogs removes diagnostics that can catch hangs.
+- clocksource/tsc options can be unstable on some hardware.
+- The app runs a pre-flight warning for TSC knobs when safety checks look risky.
+
+Sources
+- Kernel parameters reference (clocksource=, tsc=, nmi_watchdog=, nosoftlockup)
+  - https://www.kernel.org/doc/html/latest/admin-guide/kernel-parameters.html
+- Ubuntu RT kernel tuning parameters (NMI watchdog, softlockup, TSC)
+  - https://documentation.ubuntu.com/real-time/en/latest/tutorial/intel-tcc/kernel-parameters/
+
+-------------------------------------------------------------------------------
 ## PipeWire Clock Constraints (Advanced)
 
 Goal
@@ -178,7 +216,8 @@ Notes
   Use drop-ins rather than editing these vendor files.
 - UI note: the app now exposes a combined **PipeWire RT Setup** knob that configures
   RT limits and module-rt together for simpler setup; the standalone knobs are
-  hidden in the UI but retained for worker operations.
+  hidden in the UI but retained for worker operations. RT limits can be disabled
+  in the setup dialog (Safe RT preset uses RTKit/portal only).
 
 -------------------------------------------------------------------------------
 ## WirePlumber ALSA USB Period/Buffer Tuning
@@ -312,6 +351,7 @@ Risk
 
 Status
 - On hold until distro-specific configuration guidance is confirmed.
+- PipeWire can still use RTKit via module-rt; this knob only tunes the daemon.
 
 TODO (research gate)
 - Identify authoritative config locations per distro (systemd override or

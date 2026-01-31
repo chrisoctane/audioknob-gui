@@ -49,6 +49,12 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - These knobs should use a consistent audio core set.
 - Mismatched core sets cause partial status and weaker isolation.
 
+### Kernel RT extras (clocksource=tsc / tsc=reliable / nmi_watchdog=0 / nosoftlockup / preempt=full)
+- Disables watchdog diagnostics (NMI/soft lockup); reduces visibility into hangs.
+- clocksource/tsc options are hardware-specific and can be unstable on some systems.
+- The app warns before applying TSC-related knobs if pre-flight checks look unsafe.
+- Requires reboot; should remain dev-only until validated on target hardware.
+
 ### QjackCtl RT
 - Must quit QjackCtl before applying (QjackCtl rewrites its config on exit).
 - Uses a post-start script to pin JACK; JACK must be restarted to take effect.
@@ -97,6 +103,10 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - LinuxMusicians.net threads (see docs/research for captured PDFs).
 - Distro docs for power management:
   - power-profiles-daemon, tuned, cpupower/cpufrequtils.
+- Kernel parameter reference:
+  - https://www.kernel.org/doc/html/latest/admin-guide/kernel-parameters.html
+- Ubuntu RT kernel tuning parameters:
+  - https://documentation.ubuntu.com/real-time/en/latest/tutorial/intel-tcc/kernel-parameters/
 
 ## Maintenance rules
 - Update this file when adding a new knob, changing behavior, or discovering

@@ -8,6 +8,11 @@ Format: Keep a short summary per release with clear headings.
 
 ### Added
 - PipeWire RT Setup status check (Status column + info dialog) with component breakdown.
+- PipeWire RT Setup Safe RT preset (RTKit/portal only) and RT limits toggle.
+- Apply-time conflict prompt with Apply+Reset / Apply anyway / Cancel and details from KNOB_INTERACTIONS.
+- TSC knobs now show a pre-flight warning when safety checks look risky.
+- Status labels now show a conflict marker and tooltip when a knob conflicts with other applied/queued knobs.
+- Dev kernel knob for preempt=full.
 
 ### Changed
 - PipeWire RT Setup promoted out of Dev and shown in main/advanced views.

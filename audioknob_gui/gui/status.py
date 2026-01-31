@@ -465,6 +465,22 @@ def _apply_pipewire_rt_setup_status(ui) -> None:
     limits = ui._knob_statuses.get("pipewire_rt_limits_group", "unknown")
     module = ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown")
     module_configured = _pipewire_rt_module_configured(ui)
+    limits_enabled = ui.state.get("pipewire_limits_enabled")
+    if limits_enabled is False:
+        if module_configured:
+            if module in ("running", "pending_reboot"):
+                ui._knob_statuses["pipewire_rt_setup"] = module
+            elif module in ("applied",):
+                ui._knob_statuses["pipewire_rt_setup"] = "applied"
+            elif module in ("not_applied", "sys_default"):
+                ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+            elif module == "unknown":
+                ui._knob_statuses["pipewire_rt_setup"] = "unknown"
+            else:
+                ui._knob_statuses["pipewire_rt_setup"] = "partial"
+        else:
+            ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+        return
 
     if limits in ("running", "pending_reboot"):
         ui._knob_statuses["pipewire_rt_setup"] = limits
@@ -745,13 +761,19 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
         limits_status = ui._knob_statuses.get("pipewire_rt_limits_group", "unknown")
         module_status = ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown")
         module_configured = _pipewire_rt_module_configured(ui)
+        limits_enabled = ui.state.get("pipewire_limits_enabled")
+        limits_label = limits_status
+        if limits_enabled is False:
+            limits_label = "disabled"
         lines.append("components:")
-        lines.append(f"  pipewire_rt_limits_group: {limits_status}")
+        lines.append(f"  pipewire_rt_limits_group: {limits_label}")
         lines.append(f"  pipewire_rt_module_tuning: {module_status}")
-        if not module_configured:
+        if limits_enabled is False:
+            lines.append("  note: RT limits disabled in config; status reflects module-rt only.")
+        elif not module_configured:
             lines.append("  note: module-rt not configured; status reflects RT limits only.")
         if status == "partial":
-            if limits_status not in ("applied", "pending_reboot"):
+            if limits_enabled is not False and limits_status not in ("applied", "pending_reboot"):
                 lines.append("partial_reason: RT limits are not fully applied.")
             if module_configured and module_status not in ("applied", "pending_reboot"):
                 lines.append("partial_reason: module-rt config does not match configured values.")

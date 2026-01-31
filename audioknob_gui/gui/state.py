@@ -49,6 +49,7 @@ def load_state() -> dict:
         "pipewire_mlock_allow": None,  # bool | None
         "pipewire_mlock_all": None,  # bool | None
         "pipewire_limits_group": None,  # str | None
+        "pipewire_limits_enabled": True,  # bool
         "pipewire_rt_prio": None,  # int | None
         "pipewire_rt_time_soft": None,  # int | None
         "pipewire_rt_time_hard": None,  # int | None
@@ -133,6 +134,8 @@ def load_state() -> dict:
             data["pipewire_mlock_all"] = None
         if "pipewire_limits_group" not in data:
             data["pipewire_limits_group"] = None
+        if "pipewire_limits_enabled" not in data:
+            data["pipewire_limits_enabled"] = True
         if "pipewire_rt_prio" not in data:
             data["pipewire_rt_prio"] = None
         if "pipewire_rt_time_soft" not in data:
@@ -318,6 +321,10 @@ def load_state() -> dict:
         group = data.get("pipewire_limits_group")
         if group is not None and not isinstance(group, str):
             data["pipewire_limits_group"] = None
+        if data.get("pipewire_limits_enabled") is not None and not isinstance(
+            data.get("pipewire_limits_enabled"), bool
+        ):
+            data["pipewire_limits_enabled"] = True
         loops = data.get("pipewire_data_loops")
         if loops is not None and not (isinstance(loops, list) and all(isinstance(x, dict) for x in loops)):
             data["pipewire_data_loops"] = None

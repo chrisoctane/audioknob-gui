@@ -10,6 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 INSTALL_DIR="$HOME/.local/share/applications"
 DESKTOP_FILE="$INSTALL_DIR/audioknob-gui.desktop"
+ICON_SRC="$REPO_ROOT/packaging/icons/audioknob-gui.png"
+ICON_DIR="$HOME/.local/share/icons/hicolor/1024x1024/apps"
 
 # Detect Python interpreter (prefer venv if present)
 if [ -x "$REPO_ROOT/.venv/bin/python3" ]; then
@@ -24,13 +26,17 @@ fi
 
 # Create the .desktop file with correct paths
 mkdir -p "$INSTALL_DIR"
+if [ -f "$ICON_SRC" ]; then
+    mkdir -p "$ICON_DIR"
+    install -m 0644 "$ICON_SRC" "$ICON_DIR/audioknob-gui.png"
+fi
 
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Name=AudioKnob GUI
 Comment=Linux realtime audio configuration tool (dev mode)
 Exec=/usr/bin/env AUDIOKNOB_DEV_REPO=$REPO_ROOT $PYTHON -m audioknob_gui.gui.app
-Icon=audio-card
+Icon=audioknob-gui
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Settings;

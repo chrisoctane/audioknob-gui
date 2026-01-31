@@ -319,8 +319,26 @@ class PipeWireRtSetupDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Configure PipeWire realtime limits and module-rt behavior."))
 
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Presets:"))
+        safe_btn = QPushButton("Safe RT (RTKit)")
+        safe_btn.setToolTip("Use RTKit/portal and disable direct RT limits for safer operation.")
+        safe_btn.clicked.connect(self._apply_safe_rt_preset)
+        preset_row.addWidget(safe_btn)
+        preset_row.addStretch(1)
+        root.addLayout(preset_row)
+
         limits_box = QGroupBox("RT Limits (permissions)")
         limits_layout = QFormLayout(limits_box)
+        self.limits_enabled = QCheckBox("Enable RT limits (PAM limits)")
+        limits_enabled = limits_current.get("enabled")
+        self.limits_enabled.setChecked(bool(limits_enabled) if limits_enabled is not None else True)
+        self.limits_enabled.setToolTip(
+            "Grant realtime permissions via PAM limits (rtprio/nice/memlock). "
+            "Disable to avoid writing limits; use Reset to remove existing limits."
+        )
+        self.limits_enabled.stateChanged.connect(self._on_limits_toggle)
+        limits_layout.addRow(self.limits_enabled)
         self.group = QComboBox()
         self.group.addItem("Auto (pipewire -> audio -> realtime)", "")
         for group in ["pipewire", "audio", "realtime"]:
@@ -338,6 +356,7 @@ class PipeWireRtSetupDialog(QDialog):
         self.memlock = QLineEdit(str(limits_current.get("memlock") or ""))
         limits_layout.addRow("memlock (KB)", self.memlock)
         root.addWidget(limits_box)
+        self._on_limits_toggle()
 
         module_box = QGroupBox("module-rt behavior")
         module_layout = QFormLayout(module_box)
@@ -383,6 +402,18 @@ class PipeWireRtSetupDialog(QDialog):
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
+    def _on_limits_toggle(self, *_args) -> None:
+        enabled = self.limits_enabled.isChecked()
+        for widget in (self.group, self.rtprio, self.nice, self.memlock):
+            widget.setEnabled(enabled)
+
+    def _apply_safe_rt_preset(self) -> None:
+        self.limits_enabled.setChecked(False)
+        self._on_limits_toggle()
+        self.rlimits_enabled.setCheckState(Qt.Unchecked)
+        self.rtkit_enabled.setCheckState(Qt.Checked)
+        self.rtportal_enabled.setCheckState(Qt.Checked)
+
     @staticmethod
     def _read_int(field: QLineEdit, label: str) -> int | None:
         raw = field.text().strip()
@@ -400,6 +431,7 @@ class PipeWireRtSetupDialog(QDialog):
             "rtprio": self._read_int(self.rtprio, "rtprio"),
             "nice": self._read_int(self.nice, "nice"),
             "memlock": self._read_int(self.memlock, "memlock"),
+            "enabled": bool(self.limits_enabled.isChecked()),
         }
 
     def module_values(self) -> dict[str, object]:
