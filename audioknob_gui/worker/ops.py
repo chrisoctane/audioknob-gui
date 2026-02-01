@@ -1807,8 +1807,21 @@ def check_knob_status(knob: Any) -> str:
         backend = select_power_profile_backend(params)
         if not backend:
             return "not_applicable"
+        service_state = None
+        service = backend.get("service")
+        if service:
+            try:
+                svc = run(["systemctl", "is-active", service])
+                svc_msg = (svc.stdout or svc.stderr or "").strip().lower()
+                if "not-found" in svc_msg or "not found" in svc_msg or "no such file" in svc_msg:
+                    return "not_applicable"
+                service_state = svc.stdout.strip()
+            except Exception:
+                service_state = None
         current = read_power_profile(backend["backend"], backend["cmd"])
         if current is None:
+            if service_state in ("inactive", "failed", "deactivating", "activating", "maintenance"):
+                return "not_applied"
             return "unknown"
         if backend["backend"] == "powerprofilesctl":
             expected = str(params.get("ppd_profile", "performance")).strip() or "performance"
@@ -2215,7 +2228,7 @@ def check_knob_status(knob: Any) -> str:
     
     if kind == "pipewire_conf":
         if not _pipewire_has_settings(params):
-            return "unknown"
+            return "not_applied"
         path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
         path = Path(path_str).expanduser()
         if not path.exists():
@@ -2231,7 +2244,7 @@ def check_knob_status(knob: Any) -> str:
 
     if kind == "wireplumber_conf":
         if not _wireplumber_has_settings(params):
-            return "unknown"
+            return "not_applied"
         path_str = str(
             params.get(
                 "path",
@@ -2253,7 +2266,7 @@ def check_knob_status(knob: Any) -> str:
     if kind == "wpctl_profile":
         device_id = params.get("device_id")
         if device_id is None or str(device_id).strip() == "":
-            return "unknown"
+            return "not_applied"
         try:
             from audioknob_gui.platform.packages import which_command
             cmd = which_command("wpctl")
@@ -2276,6 +2289,8 @@ def check_knob_status(knob: Any) -> str:
             current = None
             card_name = None
             pro_available = False
+            profiles_seen = False
+            device_profile_pro = None
             in_profiles = False
             for line in text.splitlines():
                 raw = line.strip()
@@ -2288,7 +2303,16 @@ def check_knob_status(knob: Any) -> str:
                     name = value.strip().strip('"')
                     if name:
                         card_name = name
+                if low.startswith("api.alsa.card.name"):
+                    _, _, value = clean.partition("=")
+                    name = value.strip().strip('"')
+                    if name and not card_name:
+                        card_name = name
+                if low.startswith("device.profile.pro"):
+                    _, _, value = clean.partition("=")
+                    device_profile_pro = value.strip().strip('"').lower() in ("true", "1", "yes")
                 if low.startswith("profiles:"):
+                    profiles_seen = True
                     in_profiles = True
                     continue
                 if in_profiles and ":" in clean and not re.match(r"^\d+\.", clean):
@@ -2303,6 +2327,8 @@ def check_knob_status(knob: Any) -> str:
                         name = name_raw.split("(", 1)[0].strip()
                         if "pro audio" in name.lower() or "pro-audio" in name.lower():
                             pro_available = True
+            if device_profile_pro is True:
+                return "applied"
             pactl_current = None
             if (current is None or not pro_available) and card_name:
                 pactl = which_command("pactl")
@@ -2326,6 +2352,7 @@ def check_knob_status(knob: Any) -> str:
                         if not in_card:
                             continue
                         if raw.strip().startswith("Profiles:"):
+                            profiles_seen = True
                             in_profiles = True
                             continue
                         if raw.strip().startswith("Active Profile:"):
@@ -2340,6 +2367,8 @@ def check_knob_status(knob: Any) -> str:
                     if current is None and pactl_current:
                         current = pactl_current
             if not current:
+                if profiles_seen and not pro_available:
+                    return "not_applicable"
                 return "unknown"
             current_low = current.lower()
             if pro_available and ("pro audio" in current_low or "pro-audio" in current_low):

@@ -4,6 +4,15 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.5] - 2026-02-01
+
+### Changed
+- Power profile status now falls back to service state and reports not_applied when the backend is inactive.
+- Unconfigured PipeWire/WirePlumber knobs report not_applied instead of unknown.
+
+### Fixed
+- PipeWire Pro Audio status detection now handles node-based IDs via device.profile.pro and ALSA card name fallback.
+
 ## [0.6.4] - 2026-02-01
 
 ### Added

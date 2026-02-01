@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.6.4
+- **Release version**: 0.6.5
 - **45 knobs defined** (ALL 45 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -46,6 +46,7 @@
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
 - **PipeWire RT Setup dirty state** - changing RT setup config marks the knob as needing apply so the action shows Apply even if the last status was applied.
+- **PipeWire config status** - unconfigured PipeWire/WirePlumber knobs report not_applied; Pro Audio reports not_applied when no device is selected.
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **Conflict prompt** - apply flow detects known conflicts and offers Apply + reset conflicts / Apply anyway / Cancel / Details.
 - **Conflict indicator** - Status labels turn red with a tooltip listing conflicting knobs.
@@ -54,6 +55,7 @@
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
+- **Power profile status fallback** - if the backend service is inactive, status shows not_applied; unknown is reserved for read errors.
 - **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup, nosmt
