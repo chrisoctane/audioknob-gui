@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from copy import deepcopy
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -47,11 +48,69 @@ def baseline_is_manual(ui) -> bool:
     return ui.state.get("baseline_source") in ("capture", "import")
 
 
+def _baseline_config_keys() -> list[str]:
+    return [
+        "qjackctl_cpu_cores",
+        "kernel_isolcpus_cores",
+        "kernel_nohz_full_cores",
+        "kernel_rcu_nocbs_cores",
+        "kernel_irqaffinity_cores",
+        "irq_housekeeping_auto",
+        "irq_pinning_devices",
+        "irq_pinning_cpu_cores",
+        "audio_core_plan_count",
+        "pipewire_quantum",
+        "pipewire_sample_rate",
+        "pipewire_clock_allowed_rates",
+        "pipewire_clock_min_quantum",
+        "pipewire_clock_max_quantum",
+        "pipewire_clock_quantum_limit",
+        "pipewire_clock_quantum_floor",
+        "pipewire_clock_power_of_two",
+        "pipewire_mlock_allow",
+        "pipewire_mlock_all",
+        "pipewire_limits_group",
+        "pipewire_limits_enabled",
+        "pipewire_rt_prio",
+        "pipewire_rt_time_soft",
+        "pipewire_rt_time_hard",
+        "pipewire_nice_level",
+        "pipewire_rlimits_enabled",
+        "pipewire_rtkit_enabled",
+        "pipewire_rtportal_enabled",
+        "pipewire_num_data_loops",
+        "pipewire_data_loops",
+        "wireplumber_alsa_period_size",
+        "wireplumber_alsa_period_num",
+        "wireplumber_alsa_headroom",
+        "wireplumber_alsa_disable_batch",
+        "pipewire_pro_audio_device_id",
+        "power_profile_backend",
+    ]
+
+
+def _extract_baseline_config(ui) -> dict[str, object]:
+    config: dict[str, object] = {}
+    for key in _baseline_config_keys():
+        if key in ui.state:
+            config[key] = deepcopy(ui.state.get(key))
+    return config
+
+
+def _apply_baseline_config(ui, config: dict[str, object]) -> None:
+    if not isinstance(config, dict):
+        return
+    for key in _baseline_config_keys():
+        if key in config:
+            ui.state[key] = deepcopy(config.get(key))
+    save_state(ui.state)
+
+
 def set_baseline_buttons_enabled(ui, enabled: bool) -> None:
     btn = getattr(ui, "btn_baseline_menu", None)
     if isinstance(btn, QToolButton):
         btn.setEnabled(enabled)
-    for name in ("act_baseline_capture", "act_baseline_import", "act_baseline_export"):
+    for name in ("act_baseline_capture", "act_baseline_import", "act_baseline_export", "act_baseline_restore"):
         action = getattr(ui, name, None)
         if action is not None:
             action.setEnabled(enabled)
@@ -64,6 +123,7 @@ def set_baseline_state(
     checks: dict[str, list[str]] | None = None,
     captured_at: str | None = None,
     source: str = "initial",
+    config: dict[str, object] | None = None,
 ) -> None:
     if not isinstance(statuses, dict) or not statuses:
         return
@@ -78,6 +138,12 @@ def set_baseline_state(
     ui.state["baseline_txid_user"] = ui.state.get("last_user_txid")
     ui.state["baseline_txid_root"] = ui.state.get("last_root_txid")
     ui.state["baseline_source"] = source if source in ("initial", "capture", "import") else "initial"
+    if config is None and source != "import":
+        ui.state["baseline_config"] = _extract_baseline_config(ui)
+    elif isinstance(config, dict):
+        ui.state["baseline_config"] = config
+    elif source == "import":
+        ui.state["baseline_config"] = {}
     if checks is None:
         ui.state["baseline_checks"] = build_baseline_checks(ui, cleaned)
     elif isinstance(checks, dict):
@@ -106,6 +172,7 @@ def baseline_snapshot(ui) -> dict[str, object]:
         "baseline_checks": dict(ui.state.get("baseline_checks") or {}),
         "baseline_captured_at": ui.state.get("baseline_captured_at"),
         "baseline_source": ui.state.get("baseline_source", "initial"),
+        "baseline_config": dict(ui.state.get("baseline_config") or {}),
         "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "app_version": __version__,
     }
@@ -152,10 +219,14 @@ def load_baseline_snapshot(ui, path: str) -> dict[str, object] | None:
     captured_at = raw.get("baseline_captured_at")
     if not isinstance(captured_at, str) or not captured_at:
         captured_at = None
+    config = raw.get("baseline_config")
+    if not isinstance(config, dict):
+        config = None
     return {
         "statuses": cleaned,
         "checks": clean_checks,
         "captured_at": captured_at,
+        "config": config,
     }
 
 
@@ -293,7 +364,8 @@ def on_capture_baseline(ui) -> None:
         return
 
     def _on_success(statuses: dict[str, str]) -> None:
-        set_baseline_state(ui, statuses, source="capture")
+        config = _extract_baseline_config(ui)
+        set_baseline_state(ui, statuses, source="capture", config=config)
         snapshot = baseline_snapshot(ui)
         if write_baseline_snapshot(ui, path, snapshot):
             QMessageBox.information(ui, "Baseline", f"Baseline saved to:\n{path}")
@@ -327,6 +399,7 @@ def on_import_baseline(ui) -> None:
         return
     statuses = payload.get("statuses")
     checks = payload.get("checks")
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
     if not isinstance(statuses, dict):
         return
     set_baseline_state(
@@ -335,6 +408,7 @@ def on_import_baseline(ui) -> None:
         checks=checks if isinstance(checks, dict) else None,
         captured_at=payload.get("captured_at"),
         source="import",
+        config=config if isinstance(config, dict) else {},
     )
     QMessageBox.information(ui, "Baseline", "Baseline imported.")
 
@@ -359,6 +433,93 @@ def on_export_baseline(ui) -> None:
     snapshot = baseline_snapshot(ui)
     if write_baseline_snapshot(ui, path, snapshot):
         QMessageBox.information(ui, "Baseline", f"Baseline exported to:\n{path}")
+
+
+def on_restore_baseline(ui) -> None:
+    if not baseline_available(ui):
+        QMessageBox.information(ui, "Baseline", "No baseline captured yet.")
+        return
+    baseline = ui.state.get("baseline_statuses") or {}
+    if not isinstance(baseline, dict) or not baseline:
+        QMessageBox.information(ui, "Baseline", "No baseline captured yet.")
+        return
+    config = ui.state.get("baseline_config")
+    if isinstance(config, dict) and config:
+        _apply_baseline_config(ui, config)
+    by_id = {k.id: k for k in ui.registry}
+    apply_ids: list[str] = []
+    reset_ids: list[str] = []
+    skipped: list[str] = []
+    partial_ids: list[str] = []
+    for knob in ui.registry:
+        base = baseline.get(knob.id)
+        if base is None:
+            continue
+        if knob.impl is None or (knob.impl and knob.impl.kind == "read_only"):
+            continue
+        if knob.id == "audio_group_membership":
+            skipped.append(f"{knob.title}: group changes require manual action")
+            continue
+        if base in ("applied", "pending_reboot"):
+            desired = "apply"
+        elif base in ("not_applied", "sys_default"):
+            desired = "reset"
+        elif base == "partial":
+            desired = "apply"
+            partial_ids.append(knob.title)
+        else:
+            skipped.append(f"{knob.title}: baseline status '{base}' not actionable")
+            continue
+        current = ui._knob_statuses.get(knob.id, "unknown")
+        if desired == "apply" and current in ("applied", "pending_reboot"):
+            continue
+        if desired == "reset" and current in ("not_applied", "sys_default", "not_applicable"):
+            continue
+        if desired == "apply":
+            allowed, reason = ui._queue_apply_allowed(knob)
+            if not allowed:
+                skipped.append(f"{knob.title}: {reason}")
+                continue
+            apply_ids.append(knob.id)
+        else:
+            reset_ids.append(knob.id)
+
+    if not apply_ids and not reset_ids:
+        msg = "Baseline matches current state; no changes queued."
+        if skipped:
+            msg += "\n\nSkipped:\n" + "\n".join(f"- {s}" for s in skipped)
+        QMessageBox.information(ui, "Baseline", msg)
+        return
+
+    summary: list[str] = []
+    if apply_ids:
+        summary.append("Will queue Apply for:")
+        summary.extend(f"- {by_id[kid].title}" for kid in apply_ids if kid in by_id)
+    if reset_ids:
+        if summary:
+            summary.append("")
+        summary.append("Will queue Reset for:")
+        summary.extend(f"- {by_id[kid].title}" for kid in reset_ids if kid in by_id)
+    if skipped:
+        summary.append("")
+        summary.append("Skipped:")
+        summary.extend(f"- {s}" for s in skipped)
+    if partial_ids:
+        summary.append("")
+        summary.append("Note: baseline was partial for:")
+        summary.extend(f"- {t}" for t in partial_ids)
+    summary_text = "\n".join(summary)
+    msg = "Queue actions to restore the baseline snapshot?\n\n" + summary_text
+    if QMessageBox.question(ui, "Restore Baseline", msg) != QMessageBox.Yes:
+        return
+    for kid in apply_ids:
+        ui._queued_actions[kid] = "apply"
+    for kid in reset_ids:
+        ui._queued_actions[kid] = "reset"
+    ui._save_queue()
+    ui._update_queue_ui()
+    ui._refresh_statuses()
+    ui._populate()
 
 
 def prune_queue_from_statuses(ui) -> None:

@@ -44,7 +44,7 @@ from audioknob_gui.gui.dialogs.confirm import ConfirmDialog
 from audioknob_gui.gui.dialogs.jitter_monitor import JitterMonitorDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
 from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
-from audioknob_gui.gui.conflicts import build_conflict_details, find_conflicts
+from audioknob_gui.gui.conflicts import active_conflicts, build_conflict_details, find_conflicts
 from audioknob_gui.gui.knobs.registry import (
     InfoHelpers,
     add_info_buttons,
@@ -52,6 +52,7 @@ from audioknob_gui.gui.knobs.registry import (
     build_info_extra_html,
     handle_configure_knob,
 )
+from audioknob_gui.platform.packages import which_command
 from audioknob_gui.registry import load_registry
 
 from PySide6.QtCore import Qt, QThread
@@ -71,6 +72,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -187,6 +190,13 @@ class MainWindow(TableMixin, QMainWindow):
         self.reboot_button.clicked.connect(self._on_reboot_now)
         self.reboot_button.setVisible(False)
         top.addWidget(self.reboot_button)
+
+        self.btn_conflicts = QPushButton("Conflicts")
+        self.btn_conflicts.setToolTip("Show detected conflicts")
+        self.btn_conflicts.clicked.connect(self._on_show_conflicts)
+        self.btn_conflicts.setVisible(True)
+        top.addWidget(self.btn_conflicts)
+
         top.addSpacing(8)
 
         self.btn_tools_menu = QPushButton("Tools")
@@ -194,14 +204,24 @@ class MainWindow(TableMixin, QMainWindow):
         tools_menu = QMenu(self.btn_tools_menu)
         self.act_discover_system = tools_menu.addAction("Scan System Profile...")
         self.act_discover_system.triggered.connect(self._on_discover_system)
+        self.act_jitter_monitor = tools_menu.addAction("Jitter Monitor...")
+        self.act_jitter_monitor.triggered.connect(self.on_open_jitter_monitor)
+        self.act_jitter_snapshot = tools_menu.addAction("Jitter Test Snapshot...")
+        self.act_jitter_snapshot.triggered.connect(self.on_tests)
+        self.act_latencytop = tools_menu.addAction("Latencytop (Terminal)...")
+        self.act_latencytop.triggered.connect(self._on_launch_latencytop)
+        self.act_cyclictest = tools_menu.addAction("Cyclictest (Terminal)...")
+        self.act_cyclictest.triggered.connect(self._on_launch_cyclictest_terminal)
         tools_menu.addSeparator()
         baseline_menu = tools_menu.addMenu("Baseline")
         self.act_baseline_capture = baseline_menu.addAction("Capture Baseline...")
         self.act_baseline_import = baseline_menu.addAction("Import Baseline...")
         self.act_baseline_export = baseline_menu.addAction("Export Baseline...")
+        self.act_baseline_restore = baseline_menu.addAction("Queue Restore Baseline...")
         self.act_baseline_capture.triggered.connect(self._on_capture_baseline)
         self.act_baseline_import.triggered.connect(self._on_import_baseline)
         self.act_baseline_export.triggered.connect(self._on_export_baseline)
+        self.act_baseline_restore.triggered.connect(self._on_restore_baseline)
         self.act_tx_history = tools_menu.addAction("Tx History...")
         self.act_tx_history.triggered.connect(self._on_show_tx_history)
         self._ensure_menu_width(tools_menu)
@@ -331,6 +351,7 @@ class MainWindow(TableMixin, QMainWindow):
                 "kernel_tsc_reliable",
                 "kernel_nmi_watchdog_off",
                 "kernel_nosoftlockup",
+                "kernel_nosmt",
                 "pipewire_clock_constraints",
                 "pipewire_mlock_policy",
                 "pipewire_rt_setup",
@@ -348,6 +369,7 @@ class MainWindow(TableMixin, QMainWindow):
             "kernel_tsc_reliable",
             "kernel_nmi_watchdog_off",
             "kernel_nosoftlockup",
+            "kernel_nosmt",
             "pipewire_clock_constraints",
             "pipewire_mlock_policy",
             "pipewire_data_loop_affinity",
@@ -1571,6 +1593,9 @@ class MainWindow(TableMixin, QMainWindow):
     def _on_export_baseline(self) -> None:
         status.on_export_baseline(self)
 
+    def _on_restore_baseline(self) -> None:
+        status.on_restore_baseline(self)
+
     def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
         if not isinstance(raw, dict):
             return {}
@@ -2232,6 +2257,181 @@ class MainWindow(TableMixin, QMainWindow):
         dialog.activateWindow()
         self._jitter_dialog = dialog
 
+    def _launch_in_terminal(self, command: list[str]) -> bool:
+        candidates: list[tuple[str, list[str]]] = [
+            ("x-terminal-emulator", ["-e"]),
+            ("gnome-terminal", ["--"]),
+            ("konsole", ["-e"]),
+            ("xterm", ["-e"]),
+            ("alacritty", ["-e"]),
+            ("kitty", ["-e"]),
+            ("wezterm", ["start", "--"]),
+        ]
+        for exe, prefix in candidates:
+            path = shutil.which(exe)
+            if not path:
+                continue
+            try:
+                subprocess.Popen(
+                    [path, *prefix, *command],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _on_launch_latencytop(self) -> None:
+        latencytop = which_command("latencytop")
+        if not latencytop:
+            QMessageBox.warning(
+                self,
+                "Latencytop not found",
+                "latencytop is not installed. Install the 'latencytop' package and try again.",
+            )
+            return
+        if not self._launch_in_terminal([latencytop]):
+            QMessageBox.warning(
+                self,
+                "No terminal available",
+                "Could not find a terminal emulator to launch latencytop.",
+            )
+
+    def _on_launch_cyclictest_terminal(self) -> None:
+        cyclictest = which_command("cyclictest")
+        if not cyclictest:
+            QMessageBox.warning(
+                self,
+                "cyclictest not found",
+                "cyclictest is not installed. Install the 'cyclictest' package and try again.",
+            )
+            return
+        if not self._launch_in_terminal([cyclictest]):
+            QMessageBox.warning(
+                self,
+                "No terminal available",
+                "Could not find a terminal emulator to launch cyclictest.",
+            )
+
+    def _collect_conflict_pairs(self) -> list[tuple[str, str]]:
+        if not hasattr(self, "_knob_statuses"):
+            return []
+        pairs: set[tuple[str, str]] = set()
+        statuses = self._knob_statuses
+        for k in self.registry:
+            status = statuses.get(k.id, "unknown")
+            if status in ("unknown", "not_applicable", "read_only") and self._queued_actions.get(k.id) != "apply":
+                continue
+            for other_id in active_conflicts(
+                k.id, self._queued_actions, statuses, state=self.state
+            ):
+                other_status = statuses.get(other_id, "unknown")
+                if other_status in ("unknown", "not_applicable", "read_only") and self._queued_actions.get(other_id) != "apply":
+                    continue
+                pair = tuple(sorted((k.id, other_id)))
+                pairs.add(pair)
+        return sorted(pairs)
+
+    def _queue_conflict_resets(self, conflict_ids: set[str]) -> int:
+        apply_set = {kid for kid, action in self._queued_actions.items() if action == "apply"}
+        reset_targets: set[str] = set()
+        for kid in conflict_ids:
+            if kid in apply_set:
+                continue
+            status = self._knob_statuses.get(kid, "unknown")
+            if status in ("applied", "pending_reboot", "partial", "running"):
+                reset_targets.add(kid)
+        if not reset_targets:
+            return 0
+        for kid in reset_targets:
+            self._queued_actions[kid] = "reset"
+        self._save_queue()
+        self._update_queue_ui()
+        self._populate()
+        return len(reset_targets)
+
+    def _on_show_conflicts(self) -> None:
+        pairs = self._collect_conflict_pairs()
+        if not pairs:
+            QMessageBox.information(self, "Conflicts", "No conflicts detected.")
+            return
+        by_id = {k.id: k for k in self.registry}
+        lines: list[str] = []
+        conflict_ids: set[str] = set()
+        for left, right in pairs:
+            left_title = by_id.get(left).title if left in by_id else left
+            right_title = by_id.get(right).title if right in by_id else right
+            left_status = self._knob_statuses.get(left, "unknown")
+            right_status = self._knob_statuses.get(right, "unknown")
+            lines.append(f"{left_title} ({left_status}) ↔ {right_title} ({right_status})")
+            conflict_ids.update((left, right))
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Conflicts")
+        dialog.resize(680, 520)
+        layout = QVBoxLayout(dialog)
+        summary = QTextEdit()
+        summary.setReadOnly(True)
+        summary.setPlainText("Current conflicts:\n\n" + "\n".join(lines))
+        layout.addWidget(summary)
+
+        pick_label = QLabel("Choose knobs to reset (unchecked knobs will be kept):")
+        layout.addWidget(pick_label)
+        pick_list = QListWidget()
+        pick_list.setSelectionMode(QAbstractItemView.NoSelection)
+        for kid in sorted(conflict_ids):
+            title = by_id.get(kid).title if kid in by_id else kid
+            status = self._knob_statuses.get(kid, "unknown")
+            item = QListWidgetItem(f"{title} ({status})")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, kid)
+            pick_list.addItem(item)
+        layout.addWidget(pick_list)
+        btns = QDialogButtonBox()
+        reset_btn = btns.addButton("Queue selected resets", QDialogButtonBox.AcceptRole)
+        detail_btn = btns.addButton("See details", QDialogButtonBox.ActionRole)
+        close_btn = btns.addButton(QDialogButtonBox.Close)
+        layout.addWidget(btns)
+
+        def _queue_resets() -> None:
+            selected: set[str] = set()
+            for i in range(pick_list.count()):
+                item = pick_list.item(i)
+                if item.checkState() == Qt.Checked:
+                    kid = item.data(Qt.UserRole)
+                    if isinstance(kid, str):
+                        selected.add(kid)
+            if not selected:
+                QMessageBox.information(self, "Conflicts", "No knobs selected for reset.")
+                return
+            count = self._queue_conflict_resets(selected)
+            if count == 0:
+                QMessageBox.information(self, "Conflicts", "No applicable conflicts to reset.")
+            dialog.accept()
+
+        reset_btn.clicked.connect(_queue_resets)
+        detail_btn.clicked.connect(lambda: self._show_conflict_details(conflict_ids))
+        close_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
+    def _update_conflict_indicator(self) -> None:
+        if not hasattr(self, "btn_conflicts"):
+            return
+        pairs = self._collect_conflict_pairs()
+        self._conflict_pairs = pairs
+        if not pairs:
+            self.btn_conflicts.setText("Conflicts: 0")
+            self.btn_conflicts.setToolTip("No conflicts detected")
+            self.btn_conflicts.setStyleSheet("")
+            return
+        self.btn_conflicts.setText(f"Conflicts: {len(pairs)}")
+        self.btn_conflicts.setToolTip("Open conflict resolutions")
+        self.btn_conflicts.setStyleSheet(
+            "QPushButton { color: #d32f2f; }"
+        )
+
     def _update_knob_status(self, knob_id: str, status: str, display: str) -> None:
         """Update the status cell for a specific knob."""
         # Keep backing store in sync so subsequent _populate() reflects the new state.
@@ -2754,7 +2954,7 @@ class MainWindow(TableMixin, QMainWindow):
         queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
         if not queued:
             return False
-        conflicts = find_conflicts(self._queued_actions, self._knob_statuses)
+        conflicts = find_conflicts(self._queued_actions, self._knob_statuses, state=self.state)
         if conflicts and not self._power_profile_backend_is_tuned():
             filtered: dict[str, set[str]] = {}
             for src_id, targets in conflicts.items():

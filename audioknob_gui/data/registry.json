@@ -638,6 +638,28 @@
         "restore": true
       },
       "category": "kernel",
+      "description": "[i] adds nosmt to kernel cmdline to disable SMT/Hyper-Threading.\n[+] can reduce scheduling jitter on some systems.\n[-] reduces CPU throughput and changes core topology; requires reboot.",
+      "id": "kernel_nosmt",
+      "impl": {
+        "kind": "kernel_cmdline",
+        "params": {
+          "param": "nosmt"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "Disable SMT (nosmt)"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
       "description": "[i] adds audit=0 to kernel cmdline.\n[+] reduces audit overhead on realtime workloads.\n[-] disables kernel audit logging (security tradeoff).",
       "id": "kernel_audit_off",
       "impl": {

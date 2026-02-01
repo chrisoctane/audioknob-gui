@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -42,6 +43,17 @@ class TableMixin:
                 continue
             missing.append(dep)
         return missing
+
+    def _confirm_conflict_reset(self, knob_id: str) -> None:
+        titles = {knob.id: knob.title for knob in self.registry}
+        title = titles.get(knob_id, knob_id)
+        msg = (
+            f"Reset '{title}' to match the baseline/default state?\n\n"
+            "This will queue a Reset for this knob."
+        )
+        if QMessageBox.question(self, "Resolve Conflict", msg) != QMessageBox.Yes:
+            return
+        self._on_queue_knob(knob_id, "reset")
 
     def _requirements_label(self, k, advanced_knobs: set[str]) -> str:
         parts: list[str] = []
@@ -415,7 +427,7 @@ class TableMixin:
             "deviated": ("Deviated", "#607d8b"),      # Blue-gray
             "not_applied": ("—", "#757575"),          # Gray dash
             "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
-            "partial": ("◐ Partial", "#f57c00"),      # Orange
+            "partial": ("◐ Partial", "#f6c343"),      # Pastel yellow
             "pending_reboot": ("⟳ Reboot", "#f57c00"), # Orange - needs reboot
             "read_only": ("—", "#9e9e9e"),            # Gray dash
             "unknown": ("—", "#9e9e9e"),              # Gray dash
@@ -729,6 +741,17 @@ class TableMixin:
                         or isinstance(self.state.get("pipewire_data_loops"), list)
                     )
 
+            conflict_ids = set()
+            try:
+                from audioknob_gui.gui.conflicts import active_conflicts
+
+                conflict_ids = active_conflicts(
+                    k.id, self._queued_actions, self._knob_statuses, state=self.state
+                )
+            except Exception:
+                conflict_ids = set()
+            conflict_lock = bool(conflict_ids) and status not in ("applied", "pending_reboot")
+
             row_dim = locked or not_applicable or requires_config
             self._row_dim[r] = row_dim
             
@@ -752,6 +775,11 @@ class TableMixin:
                 lock_reason = f"Depends on: {', '.join(dep_titles)}"
             elif requires_config:
                 lock_reason = "Configure this knob before applying"
+            if conflict_ids:
+                by_id = {knob.id: knob.title for knob in self.registry}
+                conflict_titles = [by_id.get(cid, cid) for cid in sorted(conflict_ids)]
+                conflict_tip = "Conflicts with: " + ", ".join(conflict_titles)
+                lock_reason = conflict_tip if not lock_reason else f"{lock_reason}\n{conflict_tip}"
             
             # Column 0: Info button
             info_btn = QPushButton("i")
@@ -797,15 +825,8 @@ class TableMixin:
                 status_tip = not_applicable_reason
             else:
                 status_text, status_color = self._status_display(display_status)
-                conflict_ids = set()
-                try:
-                    from audioknob_gui.gui.conflicts import active_conflicts
-
-                    conflict_ids = active_conflicts(k.id, self._queued_actions, self._knob_statuses)
-                except Exception:
-                    conflict_ids = set()
                 if conflict_ids:
-                    status_text = f"{status_text} !"
+                    status_color = "#d32f2f"
                 tooltip_map = {
                     "applied": "Baseline captured; patch applied successfully.",
                     "sys_default": "Baseline; captured before optimisation.",
@@ -825,10 +846,7 @@ class TableMixin:
                 else:
                     status_tip = tooltip_map.get(display_status, "")
                 if conflict_ids:
-                    by_id = {kn.id: kn.title for kn in self.registry}
-                    conflict_titles = [by_id.get(cid, cid) for cid in sorted(conflict_ids)]
-                    conflict_tip = "Conflicts with: " + ", ".join(conflict_titles)
-                    status_tip = conflict_tip if not status_tip else f"{status_tip}\n{conflict_tip}"
+                    status_tip = lock_reason if not status_tip else f"{status_tip}\n{lock_reason}"
             status_item = QTableWidgetItem("")
             status_item.setData(Qt.UserRole, status_text)
             status_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
@@ -976,6 +994,24 @@ class TableMixin:
                 btn.setToolTip(lock_reason)
                 btn.setStyleSheet(locked_style)
                 self._set_action_cell(r, btn)
+            elif conflict_lock:
+                btn = self._make_action_button("Conflict")
+                btn.setToolTip(lock_reason)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setStyleSheet(
+                    "QPushButton {"
+                    " color: #d32f2f;"
+                    " background-color: #2a2a2a;"
+                    " border: 1px solid #3a3a3a;"
+                    " border-radius: 6px;"
+                    " padding: 2px 6px;"
+                    "}"
+                    "QPushButton:hover {"
+                    " background-color: #333333;"
+                    "}"
+                )
+                btn.clicked.connect(lambda _, kid=k.id: self._confirm_conflict_reset(kid))
+                self._set_action_cell(r, btn)
             else:
                 if action_override and action_priority == "post_lock":
                     btn = action_override(self, k, ctx)
@@ -1045,6 +1081,8 @@ class TableMixin:
             self.table.resizeRowsToContents()
         except Exception:
             pass
+        if hasattr(self, "_update_conflict_indicator"):
+            self._update_conflict_indicator()
 
 
     def _apply_default_column_widths(self) -> None:
@@ -1123,6 +1161,8 @@ class TableMixin:
         self.table.setColumnWidth(7, risk_width)
         self.table.setColumnWidth(8, sys_width)
         self._enforce_min_column_widths()
+        if hasattr(self, "_update_conflict_indicator"):
+            self._update_conflict_indicator()
 
 
     def _enforce_min_column_widths(self) -> None:

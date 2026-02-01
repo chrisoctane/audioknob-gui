@@ -140,7 +140,7 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - Use the **Advanced** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
-- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, kernel RT extras including preempt=full, RTKit placeholder). These are optional and may require manual configuration.
+- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, kernel RT extras including preempt=full and nosmt, RTKit placeholder). These are optional and may require manual configuration.
 - PipeWire **RT Setup** includes a Safe RT preset (RTKit/portal only) and an RT limits toggle for safer setups.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - The **Audio Core Plan** panel is collapsible to save space in the Advanced view.
@@ -174,7 +174,7 @@ is removed, the schema changes, or the distro/boot system changes, the scan runs
 **Manual discovery:** Use **Tools → Scan System Profile...** to re-run the system
 profile scan on demand, view the resolved paths/commands, and optionally save
 the JSON snapshot to a file. This does not change system settings.
-**Tools menu:** Also includes **Baseline** actions and **Tx History**.
+**Tools menu:** Also includes **Baseline** actions (Capture / Import / Export / Restore), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
 
 ### Baseline state capture (first run)
 
@@ -188,8 +188,10 @@ before the baseline is captured.
 
 Use **Tools → Baseline** to manage baselines:
 - **Capture Baseline...** snapshots the current system and saves a JSON file.
+- Baseline snapshots also capture per‑knob config values (core selections, PipeWire settings) for restore.
 - **Import Baseline...** loads a baseline JSON and overwrites the current baseline (no system changes).
 - **Export Baseline...** saves the currently stored baseline snapshot to a JSON file.
+- **Queue Restore Baseline...** queues Apply/Reset actions to match the captured baseline (using saved config values when present).
 
 ### Info vs Status panels
 
@@ -202,9 +204,11 @@ Use **Tools → Baseline** to manage baselines:
 - The app warns on known conflicts and offers an optional **Queue resets** action.
 - The app never auto-disables knobs without explicit confirmation.
 - Conflict prompt options: **Apply + reset conflicts**, **Apply anyway**, **Cancel**, or **See conflicts detail**.
+- Conflicting knobs are gated; the Action column shows a red **Conflict** button that queues a reset for that knob.
 - Known conflicts, dependencies, and blockers are documented in `docs/KNOB_INTERACTIONS.md`.
 - TSC-related kernel knobs show a pre-flight warning if safety checks look risky.
 - Status labels include a conflict indicator when a knob is currently conflicting.
+- Conflict warnings cover power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
 
 ---
 
@@ -324,7 +328,7 @@ In `gui/app.py` → `_populate()`:
 
 **CLI column**: Shows the target command/file/parameter shorthand for each knob.
 
-**Header row**: Font size control on the left, queue status + Apply/Apply & Reboot + Re-check State + Logs + Reset All on the right
+**Header row**: Font size control on the left, queue status + Conflicts indicator + Apply/Apply & Reboot + Re-check State + Logs + Reset All on the right
 
 ---
 
@@ -385,7 +389,7 @@ PipeWire buffer size (quantum) and sample rate are configurable via in-row selec
 
 ---
 
-## Current Knobs (27) - ALL IMPLEMENTED ✓
+## Current Knobs (see registry.json) - ALL IMPLEMENTED ✓
 
 ### Permissions
 | Knob | Kind | Status |

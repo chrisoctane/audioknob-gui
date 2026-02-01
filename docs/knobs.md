@@ -37,6 +37,7 @@ Knobs (kernel cmdline)
 - nmi_watchdog=0
 - nosoftlockup
 - preempt=full
+- nosmt
 
 UI
 - Dev tab only. High-risk warnings in Info.
@@ -54,6 +55,7 @@ Status
 Risks/notes
 - Disabling watchdogs removes diagnostics that can catch hangs.
 - clocksource/tsc options can be unstable on some hardware.
+- nosmt disables SMT/Hyper-Threading and can change core topology; re-check core plans after applying.
 - The app runs a pre-flight warning for TSC knobs when safety checks look risky.
 
 Sources

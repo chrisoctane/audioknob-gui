@@ -4,6 +4,23 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.4] - 2026-02-01
+
+### Added
+- Baseline snapshots now capture per-knob config values and support queued restore via Tools → Baseline → Queue Restore Baseline.
+- Conflict resolution dialog in the header with selectable resets.
+- Dev kernel knob for nosmt (Disable SMT).
+- Tools menu shortcuts for Jitter Monitor/Jitter Test plus terminal launchers for Latencytop and Cyclictest.
+
+### Changed
+- Conflicting knobs now show a red Conflict action and red status instead of a lock icon.
+- Conflict detection ignores unknown/not applicable knobs unless queued.
+- Partial status color adjusted to a lighter pastel yellow.
+
+### Fixed
+- Conflict counter now refreshes after status updates.
+- Terminal tool detection now respects GUI PATH quirks via which_command.
+
 ## [0.6.3] - 2026-01-29
 
 ### Added
@@ -13,6 +30,7 @@ Format: Keep a short summary per release with clear headings.
 - TSC knobs now show a pre-flight warning when safety checks look risky.
 - Status labels now show a conflict marker and tooltip when a knob conflicts with other applied/queued knobs.
 - Dev kernel knob for preempt=full.
+- Expanded conflict warnings: PipeWire mlock vs RT limits, RTIRQ vs threadirqs, and CPU isolation core mismatches.
 
 ### Changed
 - PipeWire RT Setup promoted out of Dev and shown in main/advanced views.

@@ -73,6 +73,7 @@ def load_state() -> dict:
         "baseline_txid_user": None,  # last_user_txid at capture time
         "baseline_txid_root": None,  # last_root_txid at capture time
         "baseline_source": "initial",  # initial | capture | import
+        "baseline_config": {},  # per-knob config snapshot for baseline restore
     }
     if not p.exists():
         return default
@@ -182,6 +183,8 @@ def load_state() -> dict:
             data["baseline_txid_root"] = None
         if "baseline_source" not in data:
             data["baseline_source"] = "initial"
+        if "baseline_config" not in data:
+            data["baseline_config"] = {}
         if "enable_reboot_knobs" not in data:
             data["enable_reboot_knobs"] = False
         if "queued_knobs" not in data:
@@ -257,6 +260,8 @@ def load_state() -> dict:
             data["baseline_source"] = "initial"
         if data.get("baseline_source") not in ("initial", "capture", "import"):
             data["baseline_source"] = "initial"
+        if data.get("baseline_config") is not None and not isinstance(data.get("baseline_config"), dict):
+            data["baseline_config"] = {}
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
         try:
             q = data.get("pipewire_quantum")

@@ -9,8 +9,8 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.6.3
-- **44 knobs defined** (ALL 44 IMPLEMENTED, including Dev tab)
+- **Release version**: 0.6.4
+- **45 knobs defined** (ALL 45 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
@@ -29,6 +29,7 @@
 - **Reset All** - reverts all changes to system defaults
 - **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
 - **Baseline capture/import/export** - Tools → Baseline to snapshot baseline to JSON, import a baseline file, or export the current baseline (no system changes)
+- **Baseline restore queue** - Tools → Baseline → Queue Restore Baseline queues Apply/Reset actions to match the captured baseline (uses saved config values when present)
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
@@ -41,19 +42,21 @@
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
-- **Baseline management** - Tools → Baseline supports capture/import/export of baseline snapshots (no system changes on import/export)
+- **Baseline management** - Tools → Baseline supports capture/import/export of baseline snapshots plus a queued restore option
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
 - **PipeWire RT Setup dirty state** - changing RT setup config marks the knob as needing apply so the action shows Apply even if the last status was applied.
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **Conflict prompt** - apply flow detects known conflicts and offers Apply + reset conflicts / Apply anyway / Cancel / Details.
-- **Conflict indicator** - Status labels append a conflict marker with a tooltip listing conflicting knobs.
+- **Conflict indicator** - Status labels turn red with a tooltip listing conflicting knobs.
+- **Conflict gating** - conflicting knobs show a red Conflict action that queues a reset for that knob.
+- **Conflict coverage** - power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches surface as warnings.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
 - **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
-- **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup
+- **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup, nosmt
 - **TSC pre-flight warning** - TSC knobs warn before apply when safety checks look risky.
 - **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 
@@ -64,7 +67,7 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
-- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Baseline capture/import/export live in Tools → Baseline.
+- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Baseline capture/import/export/restore live in Tools → Baseline.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
@@ -76,7 +79,7 @@ Notes:
 - Sorting by Category/Req./Status/Risk keeps grouped headers; other columns sort flat.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
 - IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also sweeps non-audio IRQs off the selected audio cores (using IRQ Housekeeping cores if set, otherwise all cores minus audio cores) and enables `audioknob-irq-pinning.service` so pinning persists across reboots. IRQ Housekeeping supports an Auto mode that inverts selected audio cores.
-- Header row includes the queued changes label and Apply/Apply & Reboot button that executes queued changes.
+- Header row includes the queued changes label, a Conflicts indicator (when present), and Apply/Apply & Reboot button that executes queued changes.
 - Header row includes a Re-check State button to refresh current status.
 - Reboot-required banner appears below the header row (wraps to avoid widening the window).
 - Category headers, separators, and the empty table background use the same dark gray as the main window header; knob rows use a lighter gray so each group floats on the backdrop.

@@ -35,6 +35,7 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - RTIRQ only helps when IRQs are threaded:
   - RT kernel, or kernel cmdline "threadirqs".
 - Without threaded IRQs, RTIRQ will not take effect (partial).
+- The app warns when RTIRQ is enabled without Threaded IRQs.
 
 ### IRQ Pinning + IRQ Balance
 - irqbalance can override IRQ pinning and undo affinity changes.
@@ -48,12 +49,18 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ### CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)
 - These knobs should use a consistent audio core set.
 - Mismatched core sets cause partial status and weaker isolation.
+- The app warns when isolation knobs use mismatched core sets.
 
 ### Kernel RT extras (clocksource=tsc / tsc=reliable / nmi_watchdog=0 / nosoftlockup / preempt=full)
 - Disables watchdog diagnostics (NMI/soft lockup); reduces visibility into hangs.
 - clocksource/tsc options are hardware-specific and can be unstable on some systems.
 - The app warns before applying TSC-related knobs if pre-flight checks look unsafe.
 - Requires reboot; should remain dev-only until validated on target hardware.
+
+### Disable SMT (nosmt)
+- Disables SMT/Hyper-Threading and reduces logical core count.
+- Can invalidate audio core plans, IRQ pinning selections, and isolation core sets.
+- Re-run core selection and IRQ pinning after changes.
 
 ### QjackCtl RT
 - Must quit QjackCtl before applying (QjackCtl rewrites its config on exit).

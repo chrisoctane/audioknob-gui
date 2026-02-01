@@ -65,10 +65,31 @@ SECTION_MAP: dict[str, list[str]] = {
     "irqbalance_disable": ["IRQ Pinning + IRQ Balance"],
 }
 
+_ISOLATION_IDS = ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity")
+_ISOLATION_STATE_KEYS = {
+    "kernel_isolcpus": "kernel_isolcpus_cores",
+    "kernel_nohz_full": "kernel_nohz_full_cores",
+    "kernel_rcu_nocbs": "kernel_rcu_nocbs_cores",
+    "kernel_irqaffinity": "kernel_irqaffinity_cores",
+}
+
+
+def _normalized_core_list(state: dict, knob_id: str) -> tuple[int, ...] | None:
+    key = _ISOLATION_STATE_KEYS.get(knob_id)
+    if not key:
+        return None
+    raw = state.get(key)
+    if not isinstance(raw, list) or not raw:
+        return None
+    cores = [int(x) for x in raw if isinstance(x, int)]
+    return tuple(sorted(cores)) if cores else None
+
 
 def find_conflicts(
     queued_actions: dict[str, str],
     statuses: dict[str, str],
+    *,
+    state: dict | None = None,
 ) -> dict[str, set[str]]:
     conflicts: dict[str, set[str]] = {}
     for src_id, action in queued_actions.items():
@@ -86,6 +107,22 @@ def find_conflicts(
                 "partial",
             ):
                 conflicts.setdefault(src_id, set()).add(other_id)
+        if state and src_id in _ISOLATION_IDS:
+            src_cores = _normalized_core_list(state, src_id)
+            if not src_cores:
+                continue
+            for other_id in _ISOLATION_IDS:
+                if other_id == src_id:
+                    continue
+                other_action = queued_actions.get(other_id)
+                other_status = statuses.get(other_id, "unknown")
+                if other_action != "apply" and other_status not in ("applied", "pending_reboot", "partial"):
+                    continue
+                other_cores = _normalized_core_list(state, other_id)
+                if not other_cores:
+                    continue
+                if other_cores != src_cores:
+                    conflicts.setdefault(src_id, set()).add(other_id)
     return conflicts
 
 
@@ -93,6 +130,8 @@ def active_conflicts(
     knob_id: str,
     queued_actions: dict[str, str],
     statuses: dict[str, str],
+    *,
+    state: dict | None = None,
 ) -> set[str]:
     conflicts: set[str] = set()
     for other_id in CONFLICT_MAP.get(knob_id, set()):
@@ -102,6 +141,19 @@ def active_conflicts(
         other_status = statuses.get(other_id, "unknown")
         if other_action == "apply" or other_status in ("applied", "pending_reboot", "running", "partial"):
             conflicts.add(other_id)
+    if state and knob_id in _ISOLATION_IDS:
+        src_cores = _normalized_core_list(state, knob_id)
+        if src_cores:
+            for other_id in _ISOLATION_IDS:
+                if other_id == knob_id:
+                    continue
+                other_action = queued_actions.get(other_id)
+                other_status = statuses.get(other_id, "unknown")
+                if other_action != "apply" and other_status not in ("applied", "pending_reboot", "partial"):
+                    continue
+                other_cores = _normalized_core_list(state, other_id)
+                if other_cores and other_cores != src_cores:
+                    conflicts.add(other_id)
     return conflicts
 
 
