@@ -26,10 +26,14 @@
 - **Status tooltips** - Status column includes brief tooltips for each state (baseline/applied/deviated/etc.).
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
-- **Reset All** - reverts all changes to system defaults
+- **Factory Defaults (Reset All)** - reverts all changes to system defaults (leave no trace)
 - **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
 - **Baseline capture/import/export** - Tools → Baseline to snapshot baseline to JSON, import a baseline file, or export the current baseline (no system changes)
 - **Baseline restore queue** - Tools → Baseline → Queue Restore Baseline queues Apply/Reset actions to match the captured baseline (uses saved config values when present)
+- **Baseline portability** - Baseline files include system profile metadata; mismatched imports offer a portable mode that drops config overrides and normalizes unknown/partial statuses to not_applied.
+- **Baseline pre-import backup** - Restoring a mismatched imported baseline captures a pre-import snapshot (`ak-pre-<import>-YYYYMMDD-HHMMSS.json`) before queueing changes, applies what it can, and skips incompatible knobs.
+- **Factory defaults** - Tools → Factory Defaults supports capture/import/export of factory snapshots, queued restore, and a full “Reset All” leave‑no‑trace reset.
+- **Factory pre-import backup** - Restoring mismatched factory imports captures a pre-import snapshot and queues only compatible changes.
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
@@ -220,7 +224,7 @@ Next phases (planned, incremental):
   changes, effects, and command output/errors.
 - GUI-only actions (group changes, package installs) also emit audit entries
 - Log viewer stamps each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) for clarity.
-- GUI log includes action start/finish markers for queued apply/reset and Reset All.
+- GUI log includes action start/finish markers for queued apply/reset and Factory Defaults reset.
 - GUI log includes force-reset prompt/decision and force-reset run results.
   into the user-scope worker log for a unified audit trail.
 - The GUI header includes **Logs** (view + copy) and **Clear Logs** (clears GUI
@@ -1589,7 +1593,7 @@ sudo ./packaging/install-polkit.sh
 - [ ] **Test button**: Click Test on jitter → runs 5s → status shows "XX µs"
 - [ ] **Info pane**: Jitter knob info shows the last per-thread max values from the most recent test run
 - If the test fails unprivileged, it retries via pkexec and surfaces errors.
-- [ ] **Reset All**: Apply multiple → Reset All → all restored
+- [ ] **Factory Defaults (Reset All)**: Apply multiple → reset → all restored
 
 ### Verification Commands
 ```bash
@@ -1640,7 +1644,7 @@ python3 -m audioknob_gui.worker.cli list-pending
 # - `list-pending` is current-state (what still needs reset). For files and effects, it keeps the OLDEST entry
 #   so restore returns to the original baseline state.
 
-# Reset defaults in two phases (what GUI does for “Reset All”):
+# Reset defaults in two phases (what GUI does for “Factory Defaults (Reset All)”):
 python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 

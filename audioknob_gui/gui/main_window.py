@@ -222,10 +222,23 @@ class MainWindow(TableMixin, QMainWindow):
         self.act_baseline_import.triggered.connect(self._on_import_baseline)
         self.act_baseline_export.triggered.connect(self._on_export_baseline)
         self.act_baseline_restore.triggered.connect(self._on_restore_baseline)
+        factory_menu = tools_menu.addMenu("Factory Defaults")
+        self.act_factory_capture = factory_menu.addAction("Capture Factory Defaults...")
+        self.act_factory_import = factory_menu.addAction("Import Factory Defaults...")
+        self.act_factory_export = factory_menu.addAction("Export Factory Defaults...")
+        self.act_factory_restore = factory_menu.addAction("Queue Restore Factory Defaults...")
+        factory_menu.addSeparator()
+        self.act_factory_reset = factory_menu.addAction("Factory Defaults (Reset All)...")
+        self.act_factory_capture.triggered.connect(self._on_capture_factory)
+        self.act_factory_import.triggered.connect(self._on_import_factory)
+        self.act_factory_export.triggered.connect(self._on_export_factory)
+        self.act_factory_restore.triggered.connect(self._on_restore_factory)
+        self.act_factory_reset.triggered.connect(self.on_reset_defaults)
         self.act_tx_history = tools_menu.addAction("Tx History...")
         self.act_tx_history.triggered.connect(self._on_show_tx_history)
         self._ensure_menu_width(tools_menu)
         self._ensure_menu_width(baseline_menu)
+        self._ensure_menu_width(factory_menu)
         self.btn_tools_menu.setMenu(tools_menu)
         top.addWidget(self.btn_tools_menu)
 
@@ -238,11 +251,6 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_logs.setToolTip("Open logs for copy/paste")
         self.btn_logs.clicked.connect(self._on_show_logs)
         top.addWidget(self.btn_logs)
-
-        self.btn_reset = QPushButton("Reset All")
-        self.btn_reset.setToolTip("Reset all changes to system defaults")
-        self.btn_reset.setEnabled(self._baseline_ready)
-        top.addWidget(self.btn_reset)
         root.addLayout(top)
         root.addWidget(self.reboot_banner)
 
@@ -321,7 +329,6 @@ class MainWindow(TableMixin, QMainWindow):
         self._populate()
         QTimer.singleShot(0, self._apply_window_constraints)
 
-        self.btn_reset.clicked.connect(self.on_reset_defaults)
         self.table.cellEntered.connect(self._on_row_hover)
         self.table.viewport().installEventFilter(self)
         self.table.horizontalHeader().installEventFilter(self)
@@ -1596,6 +1603,18 @@ class MainWindow(TableMixin, QMainWindow):
     def _on_restore_baseline(self) -> None:
         status.on_restore_baseline(self)
 
+    def _on_capture_factory(self) -> None:
+        status.on_capture_factory(self)
+
+    def _on_import_factory(self) -> None:
+        status.on_import_factory(self)
+
+    def _on_export_factory(self) -> None:
+        status.on_export_factory(self)
+
+    def _on_restore_factory(self) -> None:
+        status.on_restore_factory(self)
+
     def _sanitize_queue_actions(self, raw: object) -> dict[str, str]:
         if not isinstance(raw, dict):
             return {}
@@ -1647,7 +1666,6 @@ class MainWindow(TableMixin, QMainWindow):
             enabled = False
         self.btn_apply_queue.setEnabled(enabled)
         self.btn_apply_queue_reboot.setEnabled(enabled and self._queue_requires_reboot())
-        self.btn_reset.setEnabled(self._baseline_ready)
 
     def _apply_queue_button_state(
         self, btn: QPushButton, knob_id: str, action: str, *, row_dim: bool = False
@@ -1741,7 +1759,6 @@ class MainWindow(TableMixin, QMainWindow):
             self.font_spinner.setFont(font)
             self.reboot_toggle.setFont(font)
             self.advanced_toggle.setFont(font)
-            self.btn_reset.setFont(font)
             for r in range(self.table.rowCount()):
                 for c in range(self.table.columnCount()):
                     it = self.table.item(r, c)

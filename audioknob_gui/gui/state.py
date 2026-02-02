@@ -74,6 +74,17 @@ def load_state() -> dict:
         "baseline_txid_root": None,  # last_root_txid at capture time
         "baseline_source": "initial",  # initial | capture | import
         "baseline_config": {},  # per-knob config snapshot for baseline restore
+        "baseline_profile": None,  # system_profile captured with baseline snapshot
+        "baseline_import_path": None,  # last imported baseline path
+        "baseline_preimport_path": None,  # last pre-import backup path
+        "factory_statuses": {},  # knob_id -> status string (factory defaults)
+        "factory_checks": {},  # knob_id -> list[str] lines (factory snapshot)
+        "factory_captured_at": None,  # ISO timestamp
+        "factory_source": None,  # capture | import | None
+        "factory_config": {},  # per-knob config snapshot for factory restore
+        "factory_profile": None,  # system_profile captured with factory snapshot
+        "factory_import_path": None,  # last imported factory path
+        "factory_preimport_path": None,  # last pre-import backup path
     }
     if not p.exists():
         return default
@@ -185,6 +196,28 @@ def load_state() -> dict:
             data["baseline_source"] = "initial"
         if "baseline_config" not in data:
             data["baseline_config"] = {}
+        if "baseline_profile" not in data:
+            data["baseline_profile"] = None
+        if "baseline_import_path" not in data:
+            data["baseline_import_path"] = None
+        if "baseline_preimport_path" not in data:
+            data["baseline_preimport_path"] = None
+        if "factory_statuses" not in data:
+            data["factory_statuses"] = {}
+        if "factory_checks" not in data:
+            data["factory_checks"] = {}
+        if "factory_captured_at" not in data:
+            data["factory_captured_at"] = None
+        if "factory_source" not in data:
+            data["factory_source"] = None
+        if "factory_config" not in data:
+            data["factory_config"] = {}
+        if "factory_profile" not in data:
+            data["factory_profile"] = None
+        if "factory_import_path" not in data:
+            data["factory_import_path"] = None
+        if "factory_preimport_path" not in data:
+            data["factory_preimport_path"] = None
         if "enable_reboot_knobs" not in data:
             data["enable_reboot_knobs"] = False
         if "queued_knobs" not in data:
@@ -262,6 +295,18 @@ def load_state() -> dict:
             data["baseline_source"] = "initial"
         if data.get("baseline_config") is not None and not isinstance(data.get("baseline_config"), dict):
             data["baseline_config"] = {}
+        if data.get("baseline_profile") is not None and not isinstance(data.get("baseline_profile"), dict):
+            data["baseline_profile"] = None
+        if data.get("baseline_import_path") is not None and not isinstance(data.get("baseline_import_path"), str):
+            data["baseline_import_path"] = None
+        if data.get("baseline_preimport_path") is not None and not isinstance(data.get("baseline_preimport_path"), str):
+            data["baseline_preimport_path"] = None
+        if data.get("factory_profile") is not None and not isinstance(data.get("factory_profile"), dict):
+            data["factory_profile"] = None
+        if data.get("factory_import_path") is not None and not isinstance(data.get("factory_import_path"), str):
+            data["factory_import_path"] = None
+        if data.get("factory_preimport_path") is not None and not isinstance(data.get("factory_preimport_path"), str):
+            data["factory_preimport_path"] = None
         # Sanitize known UI config values (can be corrupted by older bugs / manual edits).
         try:
             q = data.get("pipewire_quantum")

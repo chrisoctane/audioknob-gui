@@ -4,6 +4,16 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.6] - 2026-02-02
+
+### Added
+- Factory Defaults workflow (capture/import/export/restore/reset) in Tools menu.
+- Pre-import backup capture for mismatched baseline/factory restores (saved in `~/Documents/audioknob/`).
+
+### Changed
+- Baseline/factory snapshots preserve the originating system profile metadata on export.
+- Mismatched baseline/factory restores warn, capture a backup, and queue only compatible changes.
+
 ## [0.6.5] - 2026-02-01
 
 ### Changed

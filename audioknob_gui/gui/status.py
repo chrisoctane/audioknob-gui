@@ -48,6 +48,76 @@ def baseline_is_manual(ui) -> bool:
     return ui.state.get("baseline_source") in ("capture", "import")
 
 
+def factory_available(ui) -> bool:
+    factory = ui.state.get("factory_statuses")
+    return isinstance(factory, dict) and bool(factory)
+
+
+def _profiles_dir() -> Path:
+    docs = Path.home() / "Documents"
+    base = docs if docs.exists() else Path.home()
+    out = base / "audioknob"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _sanitize_label(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-")
+    return cleaned or "import"
+
+
+def _import_label(path: str | None, *, fallback: str) -> str:
+    if path:
+        try:
+            return _sanitize_label(Path(path).stem)
+        except Exception:
+            pass
+    return _sanitize_label(fallback)
+
+
+def _profile_mismatch_notes(
+    source_profile: dict[str, object] | None,
+    current_profile: dict[str, object] | None,
+) -> list[str]:
+    mismatch_notes: list[str] = []
+    if source_profile and current_profile:
+        for key in ("distro_id", "version_id", "boot_system"):
+            a = source_profile.get(key)
+            b = current_profile.get(key)
+            if a and b and a != b:
+                mismatch_notes.append(f"{key}: {a} → {b}")
+    elif source_profile or current_profile:
+        mismatch_notes.append("Profile metadata is missing on one side.")
+    return mismatch_notes
+
+
+def _baseline_snapshot_payload(
+    ui,
+    statuses: dict[str, str],
+    *,
+    source: str,
+    config: dict[str, object] | None,
+    captured_at: str | None = None,
+) -> dict[str, object]:
+    from audioknob_gui import __version__
+
+    if not isinstance(captured_at, str) or not captured_at:
+        captured_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    profile = ui.state.get("system_profile")
+    profile_payload = deepcopy(profile) if isinstance(profile, dict) else None
+    return {
+        "schema": 1,
+        "baseline_statuses": dict(statuses),
+        "baseline_checks": build_baseline_checks(ui, statuses),
+        "baseline_captured_at": captured_at,
+        "baseline_source": source,
+        "baseline_config": dict(config or {}),
+        "system_profile": profile_payload,
+        "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "app_version": __version__,
+    }
+
+
 def _baseline_config_keys() -> list[str]:
     return [
         "qjackctl_cpu_cores",
@@ -114,6 +184,16 @@ def set_baseline_buttons_enabled(ui, enabled: bool) -> None:
         action = getattr(ui, name, None)
         if action is not None:
             action.setEnabled(enabled)
+    for name in (
+        "act_factory_capture",
+        "act_factory_import",
+        "act_factory_export",
+        "act_factory_restore",
+        "act_factory_reset",
+    ):
+        action = getattr(ui, name, None)
+        if action is not None:
+            action.setEnabled(enabled)
 
 
 def set_baseline_state(
@@ -124,6 +204,8 @@ def set_baseline_state(
     captured_at: str | None = None,
     source: str = "initial",
     config: dict[str, object] | None = None,
+    profile: dict[str, object] | None = None,
+    import_path: str | None = None,
 ) -> None:
     if not isinstance(statuses, dict) or not statuses:
         return
@@ -138,6 +220,13 @@ def set_baseline_state(
     ui.state["baseline_txid_user"] = ui.state.get("last_user_txid")
     ui.state["baseline_txid_root"] = ui.state.get("last_root_txid")
     ui.state["baseline_source"] = source if source in ("initial", "capture", "import") else "initial"
+    if not isinstance(profile, dict):
+        profile = ui.state.get("system_profile") if isinstance(ui.state.get("system_profile"), dict) else None
+    ui.state["baseline_profile"] = deepcopy(profile) if isinstance(profile, dict) else None
+    if source == "import":
+        ui.state["baseline_import_path"] = import_path if isinstance(import_path, str) else None
+    else:
+        ui.state["baseline_import_path"] = None
     if config is None and source != "import":
         ui.state["baseline_config"] = _extract_baseline_config(ui)
     elif isinstance(config, dict):
@@ -163,9 +252,61 @@ def set_baseline_state(
     ui._populate()
 
 
+def set_factory_state(
+    ui,
+    statuses: dict[str, str],
+    *,
+    checks: dict[str, list[str]] | None = None,
+    captured_at: str | None = None,
+    source: str | None = None,
+    config: dict[str, object] | None = None,
+    profile: dict[str, object] | None = None,
+    import_path: str | None = None,
+) -> None:
+    if not isinstance(statuses, dict) or not statuses:
+        return
+    valid_ids = {k.id for k in ui.registry}
+    cleaned = {k: str(v) for k, v in statuses.items() if k in valid_ids}
+    if not cleaned:
+        return
+    ui.state["factory_statuses"] = cleaned
+    if not isinstance(profile, dict):
+        profile = ui.state.get("system_profile") if isinstance(ui.state.get("system_profile"), dict) else None
+    ui.state["factory_profile"] = deepcopy(profile) if isinstance(profile, dict) else None
+    if isinstance(checks, dict):
+        clean_checks: dict[str, list[str]] = {}
+        for knob_id, lines in checks.items():
+            if knob_id not in valid_ids:
+                continue
+            if not isinstance(lines, list):
+                continue
+            clean_checks[knob_id] = [str(x) for x in lines]
+        ui.state["factory_checks"] = clean_checks
+    else:
+        ui.state["factory_checks"] = {}
+    if isinstance(captured_at, str) and captured_at:
+        ui.state["factory_captured_at"] = captured_at
+    else:
+        ui.state["factory_captured_at"] = None
+    ui.state["factory_source"] = source
+    if source == "import":
+        ui.state["factory_import_path"] = import_path if isinstance(import_path, str) else None
+    else:
+        ui.state["factory_import_path"] = None
+    if isinstance(config, dict):
+        ui.state["factory_config"] = config
+    else:
+        ui.state["factory_config"] = {}
+    save_state(ui.state)
+
+
 def baseline_snapshot(ui) -> dict[str, object]:
     from audioknob_gui import __version__
 
+    profile = ui.state.get("baseline_profile")
+    if not isinstance(profile, dict):
+        profile = ui.state.get("system_profile")
+    profile_payload = deepcopy(profile) if isinstance(profile, dict) else None
     return {
         "schema": 1,
         "baseline_statuses": dict(ui.state.get("baseline_statuses") or {}),
@@ -173,6 +314,27 @@ def baseline_snapshot(ui) -> dict[str, object]:
         "baseline_captured_at": ui.state.get("baseline_captured_at"),
         "baseline_source": ui.state.get("baseline_source", "initial"),
         "baseline_config": dict(ui.state.get("baseline_config") or {}),
+        "system_profile": profile_payload,
+        "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "app_version": __version__,
+    }
+
+
+def factory_snapshot(ui) -> dict[str, object]:
+    from audioknob_gui import __version__
+
+    profile = ui.state.get("factory_profile")
+    if not isinstance(profile, dict):
+        profile = ui.state.get("system_profile")
+    profile_payload = deepcopy(profile) if isinstance(profile, dict) else None
+    return {
+        "schema": 1,
+        "factory_statuses": dict(ui.state.get("factory_statuses") or {}),
+        "factory_checks": dict(ui.state.get("factory_checks") or {}),
+        "factory_captured_at": ui.state.get("factory_captured_at"),
+        "factory_source": ui.state.get("factory_source"),
+        "factory_config": dict(ui.state.get("factory_config") or {}),
+        "system_profile": profile_payload,
         "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "app_version": __version__,
     }
@@ -184,6 +346,16 @@ def write_baseline_snapshot(ui, path: str, snapshot: dict[str, object]) -> bool:
         Path(path).write_text(payload, encoding="utf-8")
     except Exception as exc:
         QMessageBox.warning(ui, "Baseline", f"Failed to save baseline:\n{exc}")
+        return False
+    return True
+
+
+def write_factory_snapshot(ui, path: str, snapshot: dict[str, object]) -> bool:
+    try:
+        payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+        Path(path).write_text(payload, encoding="utf-8")
+    except Exception as exc:
+        QMessageBox.warning(ui, "Factory Defaults", f"Failed to save factory defaults:\n{exc}")
         return False
     return True
 
@@ -222,11 +394,61 @@ def load_baseline_snapshot(ui, path: str) -> dict[str, object] | None:
     config = raw.get("baseline_config")
     if not isinstance(config, dict):
         config = None
+    profile = raw.get("system_profile")
+    if not isinstance(profile, dict):
+        profile = None
     return {
         "statuses": cleaned,
         "checks": clean_checks,
         "captured_at": captured_at,
         "config": config,
+        "profile": profile,
+    }
+
+
+def load_factory_snapshot(ui, path: str) -> dict[str, object] | None:
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        QMessageBox.warning(ui, "Factory Defaults", f"Failed to load factory defaults:\n{exc}")
+        return None
+    if not isinstance(raw, dict):
+        QMessageBox.warning(ui, "Factory Defaults", "Factory defaults file is not a JSON object.")
+        return None
+    statuses = raw.get("factory_statuses")
+    if not isinstance(statuses, dict) or not statuses:
+        QMessageBox.warning(ui, "Factory Defaults", "Factory defaults file is missing status data.")
+        return None
+    valid_ids = {k.id for k in ui.registry}
+    cleaned = {k: str(v) for k, v in statuses.items() if k in valid_ids}
+    if not cleaned:
+        QMessageBox.warning(ui, "Factory Defaults", "Factory defaults file has no known knob ids.")
+        return None
+    checks = raw.get("factory_checks")
+    clean_checks: dict[str, list[str]] | None = None
+    if isinstance(checks, dict):
+        clean_checks = {}
+        for knob_id, lines in checks.items():
+            if knob_id not in valid_ids:
+                continue
+            if not isinstance(lines, list):
+                continue
+            clean_checks[knob_id] = [str(x) for x in lines]
+    captured_at = raw.get("factory_captured_at")
+    if not isinstance(captured_at, str) or not captured_at:
+        captured_at = None
+    config = raw.get("factory_config")
+    if not isinstance(config, dict):
+        config = None
+    profile = raw.get("system_profile")
+    if not isinstance(profile, dict):
+        profile = None
+    return {
+        "statuses": cleaned,
+        "checks": clean_checks,
+        "captured_at": captured_at,
+        "config": config,
+        "profile": profile,
     }
 
 
@@ -239,6 +461,42 @@ def confirm_baseline_overwrite(ui, summary: str) -> bool:
         "This does not change system settings.\n\nContinue?"
     )
     return QMessageBox.question(ui, "Baseline", msg) == QMessageBox.Yes
+
+
+def confirm_factory_overwrite(ui, summary: str) -> bool:
+    msg = (
+        f"{summary}\n\n"
+        "This will update the active factory defaults snapshot in the app.\n"
+        "Existing snapshot files are preserved on disk.\n\n"
+        "This does not change system settings.\n\nContinue?"
+    )
+    return QMessageBox.question(ui, "Factory Defaults", msg) == QMessageBox.Yes
+
+
+def _baseline_profile_summary(profile: dict[str, object] | None) -> str:
+    if not isinstance(profile, dict):
+        return "unknown"
+    parts: list[str] = []
+    distro = profile.get("pretty_name") or profile.get("distro_id")
+    boot = profile.get("boot_system")
+    version = profile.get("version_id")
+    if distro:
+        parts.append(str(distro))
+    if version:
+        parts.append(f"version {version}")
+    if boot:
+        parts.append(f"boot {boot}")
+    return ", ".join(parts) if parts else "unknown"
+
+
+def _normalize_baseline_statuses(statuses: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key, value in statuses.items():
+        if value in ("unknown", "not_applicable", "partial", "pending_reboot"):
+            normalized[key] = "not_applied"
+        else:
+            normalized[key] = value
+    return normalized
 
 
 def start_baseline_scan(
@@ -349,7 +607,8 @@ def build_baseline_checks(ui, statuses: dict[str, str]) -> dict[str, list[str]]:
 def on_capture_baseline(ui) -> None:
     if ui._baseline_busy:
         return
-    default_name = str(Path.home() / "audioknob-baseline.json")
+    stamp = datetime.now().strftime("%Y%m%d")
+    default_name = str(_profiles_dir() / f"ak-baseline-{stamp}.json")
     path, _ = QFileDialog.getSaveFileName(
         ui,
         "Save Baseline Snapshot",
@@ -386,7 +645,7 @@ def on_import_baseline(ui) -> None:
     path, _ = QFileDialog.getOpenFileName(
         ui,
         "Import Baseline Snapshot",
-        str(Path.home()),
+        str(_profiles_dir()),
         "JSON Files (*.json)",
     )
     if not path:
@@ -395,13 +654,45 @@ def on_import_baseline(ui) -> None:
     if not payload:
         return
     captured_at = payload.get("captured_at") or "unknown"
-    if not confirm_baseline_overwrite(ui, f"Import baseline from:\n{path}\nCaptured: {captured_at}"):
-        return
+    summary = f"Import baseline from:\n{path}\nCaptured: {captured_at}"
+    current_profile = ui.state.get("system_profile") if isinstance(ui.state.get("system_profile"), dict) else None
+    baseline_profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else None
+    mismatch_notes = _profile_mismatch_notes(baseline_profile, current_profile)
+
+    use_portable = False
+    if mismatch_notes:
+        details = "\n".join(f"- {line}" for line in mismatch_notes)
+        msg = (
+            f"{summary}\n\n"
+            "The baseline profile does not match this system:\n"
+            f"{details}\n\n"
+            "Import options:\n"
+            "• Import (portable): drop config overrides and normalize unknown/partial to not_applied.\n"
+            "• Import anyway: keep settings; restore will warn and create a pre-import backup.\n"
+        )
+        box = QMessageBox(ui)
+        box.setWindowTitle("Baseline")
+        box.setText(msg)
+        portable_btn = box.addButton("Import (portable)", QMessageBox.AcceptRole)
+        full_btn = box.addButton("Import anyway", QMessageBox.DestructiveRole)
+        cancel_btn = box.addButton(QMessageBox.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == cancel_btn:
+            return
+        use_portable = clicked == portable_btn
+    else:
+        if not confirm_baseline_overwrite(ui, summary):
+            return
     statuses = payload.get("statuses")
     checks = payload.get("checks")
     config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
     if not isinstance(statuses, dict):
         return
+    if use_portable:
+        statuses = _normalize_baseline_statuses(statuses)
+        checks = None
+        config = {}
     set_baseline_state(
         ui,
         statuses,
@@ -409,6 +700,8 @@ def on_import_baseline(ui) -> None:
         captured_at=payload.get("captured_at"),
         source="import",
         config=config if isinstance(config, dict) else {},
+        profile=baseline_profile,
+        import_path=path,
     )
     QMessageBox.information(ui, "Baseline", "Baseline imported.")
 
@@ -419,7 +712,8 @@ def on_export_baseline(ui) -> None:
     if not baseline_available(ui):
         QMessageBox.information(ui, "Baseline", "No baseline captured yet.")
         return
-    default_name = str(Path.home() / "audioknob-baseline.json")
+    stamp = datetime.now().strftime("%Y%m%d")
+    default_name = str(_profiles_dir() / f"ak-baseline-{stamp}.json")
     path, _ = QFileDialog.getSaveFileName(
         ui,
         "Export Baseline Snapshot",
@@ -443,9 +737,10 @@ def on_restore_baseline(ui) -> None:
     if not isinstance(baseline, dict) or not baseline:
         QMessageBox.information(ui, "Baseline", "No baseline captured yet.")
         return
-    config = ui.state.get("baseline_config")
-    if isinstance(config, dict) and config:
-        _apply_baseline_config(ui, config)
+    current_config_snapshot = _extract_baseline_config(ui)
+    restore_config = ui.state.get("baseline_config")
+    if isinstance(restore_config, dict) and restore_config:
+        _apply_baseline_config(ui, restore_config)
     by_id = {k.id: k for k in ui.registry}
     apply_ids: list[str] = []
     reset_ids: list[str] = []
@@ -491,6 +786,12 @@ def on_restore_baseline(ui) -> None:
         QMessageBox.information(ui, "Baseline", msg)
         return
 
+    mismatch_notes: list[str] = []
+    if ui.state.get("baseline_source") == "import":
+        baseline_profile = ui.state.get("baseline_profile") if isinstance(ui.state.get("baseline_profile"), dict) else None
+        current_profile = ui.state.get("system_profile") if isinstance(ui.state.get("system_profile"), dict) else None
+        mismatch_notes = _profile_mismatch_notes(baseline_profile, current_profile)
+
     summary: list[str] = []
     if apply_ids:
         summary.append("Will queue Apply for:")
@@ -508,10 +809,326 @@ def on_restore_baseline(ui) -> None:
         summary.append("")
         summary.append("Note: baseline was partial for:")
         summary.extend(f"- {t}" for t in partial_ids)
+    if mismatch_notes:
+        summary.append("")
+        summary.append("Warning: imported baseline does not match this system:")
+        summary.extend(f"- {line}" for line in mismatch_notes)
+        summary.append("")
+        summary.append("A pre-import backup will be captured before queueing actions.")
     summary_text = "\n".join(summary)
     msg = "Queue actions to restore the baseline snapshot?\n\n" + summary_text
     if QMessageBox.question(ui, "Restore Baseline", msg) != QMessageBox.Yes:
         return
+
+    if mismatch_notes:
+        import_path = ui.state.get("baseline_import_path")
+        label = _import_label(import_path, fallback="baseline-import")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        pre_path = str(_profiles_dir() / f"ak-pre-{label}-{stamp}.json")
+
+        def _on_success(statuses: dict[str, str]) -> None:
+            snapshot = _baseline_snapshot_payload(
+                ui,
+                statuses,
+                source="pre-import",
+                config=current_config_snapshot if isinstance(current_config_snapshot, dict) else {},
+            )
+            if not write_baseline_snapshot(ui, pre_path, snapshot):
+                return
+            ui.state["baseline_preimport_path"] = pre_path
+            save_state(ui.state)
+            for kid in apply_ids:
+                ui._queued_actions[kid] = "apply"
+            for kid in reset_ids:
+                ui._queued_actions[kid] = "reset"
+            ui._save_queue()
+            ui._update_queue_ui()
+            QMessageBox.information(
+                ui,
+                "Restore Baseline",
+                "Restore actions queued.\n\n"
+                f"Pre-import backup saved to:\n{pre_path}\n\n"
+                "Undo: Tools → Baseline → Import and Queue Restore.",
+            )
+
+        start_baseline_scan(
+            ui,
+            on_success=_on_success,
+            on_cancel_title="Restore Baseline",
+            on_cancel_message="Pre-import backup was cancelled. No changes queued.",
+            on_error_title="Restore Baseline",
+            on_error_message="Failed to capture pre-import backup.",
+        )
+        return
+
+    for kid in apply_ids:
+        ui._queued_actions[kid] = "apply"
+    for kid in reset_ids:
+        ui._queued_actions[kid] = "reset"
+    ui._save_queue()
+    ui._update_queue_ui()
+
+
+def on_capture_factory(ui) -> None:
+    if ui._baseline_busy:
+        return
+    stamp = datetime.now().strftime("%Y%m%d")
+    default_name = str(_profiles_dir() / f"ak-factory-{stamp}.json")
+    path, _ = QFileDialog.getSaveFileName(
+        ui,
+        "Save Factory Defaults Snapshot",
+        default_name,
+        "JSON Files (*.json)",
+    )
+    if not path:
+        return
+    if not path.lower().endswith(".json"):
+        path = path + ".json"
+    if not confirm_factory_overwrite(ui, "Capture factory defaults"):
+        return
+
+    def _on_success(statuses: dict[str, str]) -> None:
+        config = _extract_baseline_config(ui)
+        set_factory_state(ui, statuses, source="capture", config=config)
+        snapshot = factory_snapshot(ui)
+        if write_factory_snapshot(ui, path, snapshot):
+            QMessageBox.information(ui, "Factory Defaults", f"Factory defaults saved to:\n{path}")
+
+    start_baseline_scan(
+        ui,
+        on_success=_on_success,
+        on_cancel_title="Factory Defaults",
+        on_cancel_message="Factory defaults capture was cancelled.",
+        on_error_title="Factory Defaults",
+        on_error_message="Failed to capture factory defaults.",
+    )
+
+
+def on_import_factory(ui) -> None:
+    if ui._baseline_busy:
+        return
+    path, _ = QFileDialog.getOpenFileName(
+        ui,
+        "Import Factory Defaults Snapshot",
+        str(_profiles_dir()),
+        "JSON Files (*.json)",
+    )
+    if not path:
+        return
+    payload = load_factory_snapshot(ui, path)
+    if not payload:
+        return
+    captured_at = payload.get("captured_at") or "unknown"
+    summary = f"Import factory defaults from:\n{path}\nCaptured: {captured_at}"
+    current_profile = ui.state.get("system_profile") if isinstance(ui.state.get("system_profile"), dict) else None
+    factory_profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else None
+    mismatch_notes = _profile_mismatch_notes(factory_profile, current_profile)
+
+    use_portable = False
+    if mismatch_notes:
+        details = "\n".join(f"- {line}" for line in mismatch_notes)
+        msg = (
+            f"{summary}\n\n"
+            "The factory profile does not match this system:\n"
+            f"{details}\n\n"
+            "Import options:\n"
+            "• Import (portable): drop config overrides and normalize unknown/partial to not_applied.\n"
+            "• Import anyway: keep settings; restore will warn and create a pre-import backup.\n"
+        )
+        box = QMessageBox(ui)
+        box.setWindowTitle("Factory Defaults")
+        box.setText(msg)
+        portable_btn = box.addButton("Import (portable)", QMessageBox.AcceptRole)
+        full_btn = box.addButton("Import anyway", QMessageBox.DestructiveRole)
+        cancel_btn = box.addButton(QMessageBox.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == cancel_btn:
+            return
+        use_portable = clicked == portable_btn
+    else:
+        if not confirm_factory_overwrite(ui, summary):
+            return
+
+    statuses = payload.get("statuses")
+    checks = payload.get("checks")
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    if not isinstance(statuses, dict):
+        return
+    if use_portable:
+        statuses = _normalize_baseline_statuses(statuses)
+        checks = None
+        config = {}
+    set_factory_state(
+        ui,
+        statuses,
+        checks=checks if isinstance(checks, dict) else None,
+        captured_at=payload.get("captured_at"),
+        source="import",
+        config=config if isinstance(config, dict) else {},
+        profile=factory_profile,
+        import_path=path,
+    )
+    QMessageBox.information(ui, "Factory Defaults", "Factory defaults imported.")
+
+
+def on_export_factory(ui) -> None:
+    if ui._baseline_busy:
+        return
+    if not factory_available(ui):
+        QMessageBox.information(ui, "Factory Defaults", "No factory defaults captured yet.")
+        return
+    stamp = datetime.now().strftime("%Y%m%d")
+    default_name = str(_profiles_dir() / f"ak-factory-{stamp}.json")
+    path, _ = QFileDialog.getSaveFileName(
+        ui,
+        "Export Factory Defaults Snapshot",
+        default_name,
+        "JSON Files (*.json)",
+    )
+    if not path:
+        return
+    if not path.lower().endswith(".json"):
+        path = path + ".json"
+    snapshot = factory_snapshot(ui)
+    if write_factory_snapshot(ui, path, snapshot):
+        QMessageBox.information(ui, "Factory Defaults", f"Factory defaults exported to:\n{path}")
+
+
+def on_restore_factory(ui) -> None:
+    if not factory_available(ui):
+        QMessageBox.information(ui, "Factory Defaults", "No factory defaults captured yet.")
+        return
+    factory = ui.state.get("factory_statuses") or {}
+    if not isinstance(factory, dict) or not factory:
+        QMessageBox.information(ui, "Factory Defaults", "No factory defaults captured yet.")
+        return
+    current_config_snapshot = _extract_baseline_config(ui)
+    restore_config = ui.state.get("factory_config")
+    if isinstance(restore_config, dict) and restore_config:
+        _apply_baseline_config(ui, restore_config)
+    by_id = {k.id: k for k in ui.registry}
+    apply_ids: list[str] = []
+    reset_ids: list[str] = []
+    skipped: list[str] = []
+    partial_ids: list[str] = []
+    for knob in ui.registry:
+        base = factory.get(knob.id)
+        if base is None:
+            continue
+        if knob.impl is None or (knob.impl and knob.impl.kind == "read_only"):
+            continue
+        if knob.id == "audio_group_membership":
+            skipped.append(f"{knob.title}: group changes require manual action")
+            continue
+        if base in ("applied", "pending_reboot"):
+            desired = "apply"
+        elif base in ("not_applied", "sys_default"):
+            desired = "reset"
+        elif base == "partial":
+            desired = "apply"
+            partial_ids.append(knob.title)
+        else:
+            skipped.append(f"{knob.title}: factory status '{base}' not actionable")
+            continue
+        current = ui._knob_statuses.get(knob.id, "unknown")
+        if desired == "apply" and current in ("applied", "pending_reboot"):
+            continue
+        if desired == "reset" and current in ("not_applied", "sys_default", "not_applicable"):
+            continue
+        if desired == "apply":
+            allowed, reason = ui._queue_apply_allowed(knob)
+            if not allowed:
+                skipped.append(f"{knob.title}: {reason}")
+                continue
+            apply_ids.append(knob.id)
+        else:
+            reset_ids.append(knob.id)
+
+    if not apply_ids and not reset_ids:
+        msg = "Factory defaults match current state; no changes queued."
+        if skipped:
+            msg += "\n\nSkipped:\n" + "\n".join(f"- {s}" for s in skipped)
+        QMessageBox.information(ui, "Factory Defaults", msg)
+        return
+
+    mismatch_notes: list[str] = []
+    if ui.state.get("factory_source") == "import":
+        factory_profile = ui.state.get("factory_profile") if isinstance(ui.state.get("factory_profile"), dict) else None
+        current_profile = ui.state.get("system_profile") if isinstance(ui.state.get("system_profile"), dict) else None
+        mismatch_notes = _profile_mismatch_notes(factory_profile, current_profile)
+
+    summary: list[str] = []
+    if apply_ids:
+        summary.append("Will queue Apply for:")
+        summary.extend(f"- {by_id[kid].title}" for kid in apply_ids if kid in by_id)
+    if reset_ids:
+        if summary:
+            summary.append("")
+        summary.append("Will queue Reset for:")
+        summary.extend(f"- {by_id[kid].title}" for kid in reset_ids if kid in by_id)
+    if skipped:
+        summary.append("")
+        summary.append("Skipped:")
+        summary.extend(f"- {s}" for s in skipped)
+    if partial_ids:
+        summary.append("")
+        summary.append("Note: factory defaults were partial for:")
+        summary.extend(f"- {t}" for t in partial_ids)
+    if mismatch_notes:
+        summary.append("")
+        summary.append("Warning: imported factory defaults do not match this system:")
+        summary.extend(f"- {line}" for line in mismatch_notes)
+        summary.append("")
+        summary.append("A pre-import backup will be captured before queueing actions.")
+    summary_text = "\n".join(summary)
+    msg = "Queue actions to restore factory defaults?\n\n" + summary_text
+    if QMessageBox.question(ui, "Factory Defaults", msg) != QMessageBox.Yes:
+        return
+
+    if mismatch_notes:
+        import_path = ui.state.get("factory_import_path")
+        label = _import_label(import_path, fallback="factory-import")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        pre_path = str(_profiles_dir() / f"ak-pre-{label}-{stamp}.json")
+
+        def _on_success(statuses: dict[str, str]) -> None:
+            snapshot = _baseline_snapshot_payload(
+                ui,
+                statuses,
+                source="pre-import",
+                config=current_config_snapshot if isinstance(current_config_snapshot, dict) else {},
+            )
+            if not write_baseline_snapshot(ui, pre_path, snapshot):
+                return
+            ui.state["factory_preimport_path"] = pre_path
+            save_state(ui.state)
+            for kid in apply_ids:
+                ui._queued_actions[kid] = "apply"
+            for kid in reset_ids:
+                ui._queued_actions[kid] = "reset"
+            ui._save_queue()
+            ui._update_queue_ui()
+            ui._refresh_statuses()
+            ui._populate()
+            QMessageBox.information(
+                ui,
+                "Factory Defaults",
+                "Restore actions queued.\n\n"
+                f"Pre-import backup saved to:\n{pre_path}\n\n"
+                "Undo: Tools → Baseline → Import and Queue Restore.",
+            )
+
+        start_baseline_scan(
+            ui,
+            on_success=_on_success,
+            on_cancel_title="Factory Defaults",
+            on_cancel_message="Pre-import backup was cancelled. No changes queued.",
+            on_error_title="Factory Defaults",
+            on_error_message="Failed to capture pre-import backup.",
+        )
+        return
+
     for kid in apply_ids:
         ui._queued_actions[kid] = "apply"
     for kid in reset_ids:

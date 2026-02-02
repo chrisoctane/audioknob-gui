@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QTextEdit, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QTextEdit, QVBoxLayout, QPushButton
 
 from audioknob_gui.gui.logging_utils import _get_gui_logger
 from audioknob_gui.gui.state import save_state
@@ -399,6 +399,15 @@ def restore_knob(ui, knob_id: str, requires_root: bool) -> tuple[bool, str]:
 
 def on_reset_defaults(ui) -> None:
     """Reset ALL audioknob-gui changes to system defaults."""
+    def _set_reset_ui(busy: bool) -> None:
+        btn = getattr(ui, "btn_reset", None)
+        action = getattr(ui, "act_factory_reset", None)
+        if isinstance(btn, QPushButton):
+            btn.setEnabled(not busy)
+            btn.setText("Working..." if busy else "Reset All")
+        if action is not None:
+            action.setEnabled(not busy)
+            action.setText("Factory Defaults (Working...)" if busy else "Factory Defaults (Reset All)...")
     # First, show what will be reset
     _get_gui_logger().info("reset defaults requested")
     try:
@@ -474,7 +483,7 @@ def on_reset_defaults(ui) -> None:
                 summary_lines.append(f"• {count} {kind} effect(s)")
 
     confirm_dialog = QDialog(ui)
-    confirm_dialog.setWindowTitle("Reset to System Defaults")
+    confirm_dialog.setWindowTitle("Factory Defaults")
     confirm_dialog.resize(600, 350)
     layout = QVBoxLayout(confirm_dialog)
 
@@ -511,8 +520,7 @@ def on_reset_defaults(ui) -> None:
     root_files = [f for f in files if f.get("scope") == "root"]
     needs_root = bool(root_files) or has_root_effects
 
-    ui.btn_reset.setEnabled(False)
-    ui.btn_reset.setText("Working...")
+    _set_reset_ui(True)
 
     def _task() -> tuple[bool, object, str]:
         results_text: list[str] = []
@@ -587,8 +595,7 @@ def on_reset_defaults(ui) -> None:
     worker = QueueTaskWorker(_task, parent=ui)
 
     def _on_done(success: bool, payload: object, message: str) -> None:
-        ui.btn_reset.setEnabled(True)
-        ui.btn_reset.setText("Reset All")
+        _set_reset_ui(False)
 
         results_text: list[str] = []
         errors: list[str] = []
@@ -621,7 +628,7 @@ def on_reset_defaults(ui) -> None:
             )
             QMessageBox.warning(
                 ui,
-                "Reset completed with errors",
+                "Factory Defaults (with errors)",
                 "\n".join(results_text)
                 + "\n\nErrors:\n"
                 + "\n".join(errors[:5])
@@ -634,7 +641,7 @@ def on_reset_defaults(ui) -> None:
             )
             QMessageBox.information(
                 ui,
-                "Reset complete",
+                "Factory Defaults complete",
                 "All audioknob-gui changes have been reset to system defaults.\n\n"
                 + "\n".join(results_text)
                 + reboot_note,

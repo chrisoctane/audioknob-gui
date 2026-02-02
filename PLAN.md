@@ -174,7 +174,7 @@ is removed, the schema changes, or the distro/boot system changes, the scan runs
 **Manual discovery:** Use **Tools → Scan System Profile...** to re-run the system
 profile scan on demand, view the resolved paths/commands, and optionally save
 the JSON snapshot to a file. This does not change system settings.
-**Tools menu:** Also includes **Baseline** actions (Capture / Import / Export / Restore), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
+**Tools menu:** Also includes **Baseline** actions (Capture / Import / Export / Restore), **Factory Defaults** actions (Capture / Import / Export / Restore / Reset), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
 
 ### Baseline state capture (first run)
 
@@ -187,11 +187,20 @@ Package install actions remain available so missing dependencies can be installe
 before the baseline is captured.
 
 Use **Tools → Baseline** to manage baselines:
-- **Capture Baseline...** snapshots the current system and saves a JSON file.
+- **Capture Baseline...** snapshots the current system and saves a JSON file (default: `~/Documents/audioknob`).
 - Baseline snapshots also capture per‑knob config values (core selections, PipeWire settings) for restore.
 - **Import Baseline...** loads a baseline JSON and overwrites the current baseline (no system changes).
 - **Export Baseline...** saves the currently stored baseline snapshot to a JSON file.
 - **Queue Restore Baseline...** queues Apply/Reset actions to match the captured baseline (using saved config values when present).
+- Baseline files include system profile metadata; if the profile doesn’t match the current system, import offers a **portable** mode that strips config overrides and normalizes unknown/partial statuses to not_applied.
+- When restoring a mismatched import, the app warns about incompatibilities, captures a **pre‑import backup** (saved in `~/Documents/audioknob/ak-pre-<import>-YYYYMMDD-HHMMSS.json`), applies what it can, and skips incompatible knobs. The backup can be used to undo via **Tools → Baseline → Import / Queue Restore**.
+
+Use **Tools → Factory Defaults** to manage factory defaults:
+- **Capture Factory Defaults...** snapshots a clean/default system state and saves it (default: `~/Documents/audioknob/ak-factory-YYYYMMDD.json`).
+- **Import/Export Factory Defaults...** loads or saves the factory snapshot (no system changes).
+- **Queue Restore Factory Defaults...** queues Apply/Reset actions to match the factory snapshot.
+- **Factory Defaults (Reset All)...** performs a full “leave no trace” reset of all Audioknob changes.
+- When restoring a mismatched factory import, the app warns about incompatibilities, captures a **pre‑import backup** (saved as `ak-pre-<import>-YYYYMMDD-HHMMSS.json`), and queues only compatible changes.
 
 ### Info vs Status panels
 
@@ -328,7 +337,7 @@ In `gui/app.py` → `_populate()`:
 
 **CLI column**: Shows the target command/file/parameter shorthand for each knob.
 
-**Header row**: Font size control on the left, queue status + Conflicts indicator + Apply/Apply & Reboot + Re-check State + Logs + Reset All on the right
+**Header row**: Font size control on the left, queue status + Conflicts indicator + Apply/Apply & Reboot + Re-check State + Logs on the right
 
 ---
 
