@@ -4,6 +4,15 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.7] - 2026-02-03
+
+### Added
+- App window icon now loads from the system theme (with fallback to hicolor sizes) to fix taskbar icons.
+
+### Changed
+- Package installs now include the app icon at 64/128/256/512/1024 sizes for better desktop integration.
+- Placeholder app icon updated with transparent background.
+
 ## [0.6.6] - 2026-02-02
 
 ### Added

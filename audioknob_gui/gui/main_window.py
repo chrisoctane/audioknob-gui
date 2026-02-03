@@ -56,7 +56,7 @@ from audioknob_gui.platform.packages import which_command
 from audioknob_gui.registry import load_registry
 
 from PySide6.QtCore import Qt, QThread
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -3423,6 +3423,19 @@ class MainWindow(TableMixin, QMainWindow):
 
 def run_app() -> int:
     app = QApplication(sys.argv)
+    icon = QIcon.fromTheme("audioknob-gui")
+    if icon.isNull():
+        for path in (
+            "/usr/share/icons/hicolor/256x256/apps/audioknob-gui.png",
+            "/usr/share/icons/hicolor/128x128/apps/audioknob-gui.png",
+            "/usr/share/icons/hicolor/64x64/apps/audioknob-gui.png",
+            "/usr/share/icons/hicolor/1024x1024/apps/audioknob-gui.png",
+        ):
+            if os.path.exists(path):
+                icon = QIcon(path)
+                break
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     win = MainWindow()
     win.show()
     return app.exec()
