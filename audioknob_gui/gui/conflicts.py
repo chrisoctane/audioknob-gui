@@ -72,6 +72,48 @@ _ISOLATION_STATE_KEYS = {
     "kernel_rcu_nocbs": "kernel_rcu_nocbs_cores",
     "kernel_irqaffinity": "kernel_irqaffinity_cores",
 }
+ACTIVE_CONFLICT_STATES = frozenset({"applied", "pending_reboot", "running", "partial"})
+
+
+def is_conflict_participant(status: str, action: str | None) -> bool:
+    if action == "reset":
+        return False
+    if action == "apply":
+        return True
+    return status in ACTIVE_CONFLICT_STATES
+
+
+def filtered_active_conflicts(
+    knob_id: str,
+    queued_actions: dict[str, str],
+    statuses: dict[str, str],
+    *,
+    state: dict | None = None,
+) -> set[str]:
+    src_status = statuses.get(knob_id, "unknown")
+    src_action = queued_actions.get(knob_id)
+    if not is_conflict_participant(src_status, src_action):
+        return set()
+    conflicts: set[str] = set()
+    for other_id in active_conflicts(knob_id, queued_actions, statuses, state=state):
+        other_status = statuses.get(other_id, "unknown")
+        other_action = queued_actions.get(other_id)
+        if is_conflict_participant(other_status, other_action):
+            conflicts.add(other_id)
+    return conflicts
+
+
+def prune_power_profile_conflicts(
+    knob_id: str,
+    conflict_ids: set[str],
+    *,
+    backend_is_tuned: bool,
+) -> set[str]:
+    if backend_is_tuned:
+        return set(conflict_ids)
+    if knob_id == "power_profile_performance":
+        return set()
+    return {cid for cid in conflict_ids if cid != "power_profile_performance"}
 
 
 def _normalized_core_list(state: dict, knob_id: str) -> tuple[int, ...] | None:

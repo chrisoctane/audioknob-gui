@@ -206,6 +206,7 @@ Use **Tools → Factory Defaults** to manage factory defaults:
 
 - **Info** uses a simple tag format: `[i]` summary, `[r]` requirements, `[+]` benefits, `[-]` tradeoffs.
 - **Status/Check** shows live technical details (service states, group gaps, sysctl/sysfs values, PipeWire runtime settings, etc.); when status is **partial**, it includes a short reason line and raw checks below.
+- Partial reasons are explicit for mixed states (for example: masked/unmasked user services, partial group membership activation, sysfs match counts, and WirePlumber/PipeWire config drift).
 - Status column states include short tooltips (baseline, deviated, applied, partial, reboot required, etc.).
 
 ### Conflicts and blockers
@@ -213,11 +214,15 @@ Use **Tools → Factory Defaults** to manage factory defaults:
 - The app warns on known conflicts and offers an optional **Queue resets** action.
 - The app never auto-disables knobs without explicit confirmation.
 - Conflict prompt options: **Apply + reset conflicts**, **Apply anyway**, **Cancel**, or **See conflicts detail**.
+- Conflict prompts and row tooltips include active/queued state labels so users can see exactly why a conflict is flagged.
 - Conflicting knobs are gated; the Action column shows a red **Conflict** button that queues a reset for that knob.
 - Known conflicts, dependencies, and blockers are documented in `docs/KNOB_INTERACTIONS.md`.
 - TSC-related kernel knobs show a pre-flight warning if safety checks look risky.
 - Status labels include a conflict indicator when a knob is currently conflicting.
+- Conflict indicator counts only active/queued knobs (applied/pending/running/partial or queued apply), so idle defaults do not appear as conflicts.
+- The row-level **Conflict** button uses the same active/queued rules as the header counter, so row badges and header counts stay consistent.
 - Conflict warnings cover power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
+- Baseline relabeling treats baseline `partial` as non-authoritative, so knobs with dynamic external state changes won’t flip between `partial` and `deviated`.
 
 ---
 

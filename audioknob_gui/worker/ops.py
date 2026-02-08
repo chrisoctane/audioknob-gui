@@ -2171,15 +2171,9 @@ def check_knob_status(knob: Any) -> str:
         
         def _param_in_tokens(p: str, tokens: list[str]) -> bool:
             """Check if param is present in token list."""
-            for token in tokens:
-                if token == p:
-                    return True
-                # Handle param=value form
-                if "=" in p:
-                    param_key = p.split("=")[0]
-                    if token.startswith(param_key + "=") and token == p:
-                        return True
-            return False
+            if "=" in p:
+                return any(token == p for token in tokens)
+            return any(token == p or token.startswith(p + "=") for token in tokens)
         
         try:
             # Check current running kernel cmdline

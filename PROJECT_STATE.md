@@ -23,6 +23,7 @@
 - **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
 - **Info popup status check** - Run a live per-knob diagnostic snapshot
 - **Partial status notes** - Status/Check view includes a brief reason line when partial
+- **Partial reason specificity** - partial states now report concrete causes (for example: masked service counts, group activation gaps, sysfs match/mismatch counts, and WirePlumber/PipeWire config drift) instead of generic fallback text.
 - **Status tooltips** - Status column includes brief tooltips for each state (baseline/applied/deviated/etc.).
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
@@ -36,6 +37,7 @@
 - **Factory pre-import backup** - Restoring mismatched factory imports captures a pre-import snapshot and queues only compatible changes.
 - **Re-check State** - header button refreshes current status for dev/testing
 - **Deviated status** - shows when current state matches neither baseline nor expected tweak
+- **Baseline partial handling** - baseline status `partial` is treated as non-authoritative for Sys Default/Deviated relabeling to avoid oscillation from dynamic external state changes.
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity). Separate RT limits/module knobs are hidden in the UI.
 - **PipeWire RT Setup presets** - Safe RT preset (RTKit/portal only) and RT limits toggle in the setup dialog.
@@ -54,6 +56,9 @@
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **Conflict prompt** - apply flow detects known conflicts and offers Apply + reset conflicts / Apply anyway / Cancel / Details.
 - **Conflict indicator** - Status labels turn red with a tooltip listing conflicting knobs.
+- **Conflict indicator precision** - header conflict counts only include active/queued knobs (applied/pending/running/partial or queued apply), and excludes power-profile conflict badges when backend is not tuned.
+- **Conflict action precision** - row-level `Conflict` buttons use the same active/queued + backend filtering as the header conflict counter, preventing mismatch between row badges and header count.
+- **Conflict prompt clarity** - conflict dialogs include per-knob active/queued state labels so the reason for each conflict pair is explicit.
 - **Conflict gating** - conflicting knobs show a red Conflict action that queues a reset for that knob.
 - **Conflict coverage** - power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches surface as warnings.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
@@ -61,8 +66,10 @@
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
 - **Power profile status fallback** - if the backend service is inactive, status shows not_applied; unknown is reserved for read errors.
 - **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
+- **CPU governor partial reason** - Status/Check now reports explicit persistence mismatch causes (runtime governor match vs cpupower config and service enablement) instead of a generic partial note.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup, nosmt
+- **Kernel isolation status fallback** - isolation cmdline knobs (`isolcpus`/`nohz_full`/`rcu_nocbs`) report applied/not_applied by key presence even before per-core config is set, avoiding false unknown on default installs.
 - **TSC pre-flight warning** - TSC knobs warn before apply when safety checks look risky.
 - **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 

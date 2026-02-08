@@ -1318,7 +1318,7 @@ def apply_baseline_statuses(ui) -> None:
         base = baseline.get(knob.id)
         if base is None:
             continue
-        if base in ("unknown", "not_applicable"):
+        if base in ("unknown", "not_applicable", "partial"):
             continue
         tx_time = tx_times.get(knob.id)
         if not manual_baseline:
@@ -1440,6 +1440,86 @@ def audio_groups_active(ui) -> bool:
         return len(get_missing_groups()) == 0
     except Exception:
         return True
+
+
+def _cpu_governor_partial_reason(
+    *,
+    total: int,
+    match: int,
+    unreadable: int,
+    expected_val: str,
+    cfg_ok: bool,
+    cfg_read_error: str | None,
+    service: str | None,
+    service_enabled: str | None,
+) -> str | None:
+    runtime_ok = (
+        total > 0
+        and unreadable == 0
+        and (not expected_val or match == total)
+    )
+    issues: list[str] = []
+    if not runtime_ok:
+        issues.append(
+            f"runtime governor matches {match}/{total} CPUs (unreadable={unreadable}, expected={expected_val or 'n/a'})"
+        )
+    if not cfg_ok:
+        if cfg_read_error:
+            issues.append(f"cpupower config unreadable ({cfg_read_error})")
+        else:
+            issues.append("cpupower config is missing GOVERNOR=performance")
+    if service:
+        if service_enabled not in ("enabled", "static", "indirect"):
+            issues.append(f"{service} is not enabled ({service_enabled or 'unknown'})")
+    if not issues:
+        return None
+    if runtime_ok:
+        return "runtime governor is performance, but persistent setup is incomplete: " + "; ".join(issues) + "."
+    return "runtime and persistent governor state do not fully match: " + "; ".join(issues) + "."
+
+
+def _sysfs_selected_value(raw: str) -> str:
+    text = raw.strip()
+    if "[" in text and "]" in text:
+        match = re.search(r"\[([^\]]+)\]", text)
+        if match:
+            selected = match.group(1).strip()
+            if selected:
+                return selected
+    return text
+
+
+def _sysfs_partial_reason(
+    *,
+    total: int,
+    match: int,
+    mismatch: int,
+    unreadable: int,
+    expected_val: str,
+) -> str | None:
+    if total <= 0:
+        return None
+    parts = [f"matched {match}/{total} paths"]
+    if expected_val:
+        parts[0] += f" (expected {expected_val})"
+    if mismatch:
+        parts.append(f"mismatched={mismatch}")
+    if unreadable:
+        parts.append(f"unreadable={unreadable}")
+    return "sysfs values are mixed: " + ", ".join(parts) + "."
+
+
+def _config_partial_reason(expected_lines: list[str], current_lines: list[str]) -> str:
+    expected_norm = {line.strip() for line in expected_lines if line.strip()}
+    current_norm = {line.strip() for line in current_lines if line.strip()}
+    missing = [line.strip() for line in expected_lines if line.strip() and line.strip() not in current_norm]
+    if missing:
+        snippet = ", ".join(missing[:6])
+        suffix = "..." if len(missing) > 6 else ""
+        return f"missing lines: {snippet}{suffix}"
+    if expected_norm == current_norm:
+        return "config contains expected values but formatting/order differs (re-apply to normalize)."
+    return "config differs from expected (re-apply to rewrite)."
 
 
 def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list[str]:
@@ -1775,12 +1855,57 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                             mismatched.append(irq)
                     except Exception:
                         pass
+        persist_state_path = str(params.get("persist_state_path", "")).strip()
+        persist_state_exists: bool | None = None
+        if persist_state_path:
+            persist_state_exists = Path(persist_state_path).exists()
+            lines.append(f"persist_state_path: {persist_state_path}")
+            lines.append(f"persist_state_present: {persist_state_exists}")
+
+        persist_unit = str(params.get("persist_unit", "")).strip()
+        persist_enabled: str | None = None
+        if persist_unit:
+            lines.append(f"persist_unit: {persist_unit}")
+            try:
+                r = subprocess.run(
+                    ["systemctl", "is-enabled", persist_unit],
+                    capture_output=True,
+                    text=True,
+                )
+                persist_enabled = r.stdout.strip() or r.stderr.strip() or None
+                lines.append(f"persist_unit_enabled: {persist_enabled or 'unknown'}")
+            except Exception:
+                lines.append("persist_unit_enabled: unknown")
+            try:
+                r = subprocess.run(
+                    ["systemctl", "is-active", persist_unit],
+                    capture_output=True,
+                    text=True,
+                )
+                persist_active = r.stdout.strip() or r.stderr.strip() or None
+                lines.append(f"persist_unit_active: {persist_active or 'unknown'}")
+            except Exception:
+                lines.append("persist_unit_active: unknown")
         if status == "partial" and mismatched:
             lines.append(
                 f"partial_reason: IRQs not on selected cores: {', '.join(str(i) for i in mismatched)}"
             )
         if status == "partial" and missing:
             lines.append("partial_reason: missing devices (selection not found); check device list.")
+        if status == "partial":
+            persistence_issues: list[str] = []
+            if persist_state_path and persist_state_exists is False:
+                persistence_issues.append("persist state file is missing")
+            if persist_unit and persist_enabled not in ("enabled", "static", "indirect"):
+                persistence_issues.append(
+                    f"{persist_unit} is not enabled ({persist_enabled or 'unknown'})"
+                )
+            if persistence_issues:
+                lines.append(
+                    "partial_reason: persistence setup incomplete: "
+                    + "; ".join(persistence_issues)
+                    + "."
+                )
         if status == "partial" and cores:
             try:
                 from audioknob_gui.core.irq import list_irqs, parse_cpu_list, read_irq_affinity_list
@@ -1854,6 +1979,15 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                 lines.append("partial_reason: config present but rtirq service not active.")
             elif not cfg_ok and active == "active":
                 lines.append("partial_reason: rtirq service active but config block missing.")
+            elif cfg_ok and enabled not in ("enabled", "static", "indirect"):
+                lines.append(
+                    f"partial_reason: config present but {unit} is not enabled ({enabled or 'unknown'})."
+                )
+            else:
+                lines.append(
+                    "partial_reason: mixed rtirq state "
+                    f"(config={cfg_ok}, service_enabled={enabled or 'unknown'}, service_active={active or 'unknown'})."
+                )
     elif kind == "power_profile":
         try:
             from audioknob_gui.worker.ops import read_power_profile, select_power_profile_backend
@@ -1915,33 +2049,62 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                 r = subprocess.run(cmd, capture_output=True, text=True)
                 lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
     elif kind == "user_service_mask":
-        services = params.get("services")
-        if isinstance(services, list):
-            from audioknob_gui.worker.ops import resolve_user_services
+        services: list[str] = []
+        raw_services = params.get("services")
+        if isinstance(raw_services, list):
+            try:
+                from audioknob_gui.worker.ops import resolve_user_services
 
-            resolved = resolve_user_services([str(s) for s in services if s])
-            if resolved:
-                lines.append(f"user_services: {', '.join(resolved)}")
-            if not resolved:
-                lines.append("user units: [no matches]")
-            for svc in resolved:
-                lines.append(f"user unit: {svc}")
-                for label, cmd in (
-                    ("user is-enabled", ["systemctl", "--user", "is-enabled", svc]),
-                    ("user is-active", ["systemctl", "--user", "is-active", svc]),
-                ):
-                    r = subprocess.run(cmd, capture_output=True, text=True)
-                    lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                services = resolve_user_services([str(s) for s in raw_services if s])
+            except Exception:
+                services = [str(s) for s in raw_services if s]
         else:
-            unit = str(params.get("unit", ""))
+            unit = str(params.get("unit", "")).strip()
             if unit:
-                lines.append(f"user_services: {unit}")
-                for label, cmd in (
-                    ("user is-enabled", ["systemctl", "--user", "is-enabled", unit]),
-                    ("user is-active", ["systemctl", "--user", "is-active", unit]),
-                ):
-                    r = subprocess.run(cmd, capture_output=True, text=True)
-                    lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                services = [unit]
+
+        if services:
+            lines.append(f"user_services: {', '.join(services)}")
+        else:
+            lines.append("user units: [no matches]")
+
+        service_states: list[tuple[str, str | None, str | None]] = []
+        for svc in services:
+            lines.append(f"user unit: {svc}")
+            enabled_state: str | None = None
+            active_state: str | None = None
+            for label, cmd in (
+                ("user is-enabled", ["systemctl", "--user", "is-enabled", svc]),
+                ("user is-active", ["systemctl", "--user", "is-active", svc]),
+            ):
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                value = r.stdout.strip() or r.stderr.strip() or None
+                lines.append(f"{label}: {value or 'unknown'}")
+                if label == "user is-enabled":
+                    enabled_state = value
+                else:
+                    active_state = value
+            service_states.append((svc, enabled_state, active_state))
+
+        if status == "partial" and service_states:
+            masked = [svc for svc, enabled, _ in service_states if enabled == "masked"]
+            unmasked = [
+                f"{svc} (enabled={enabled or 'unknown'}, active={active or 'unknown'})"
+                for svc, enabled, active in service_states
+                if enabled != "masked"
+            ]
+            if unmasked:
+                snippet = ", ".join(unmasked[:4])
+                suffix = "..." if len(unmasked) > 4 else ""
+                lines.append(
+                    f"partial_reason: masked {len(masked)}/{len(service_states)} user services; "
+                    f"still unmasked: {snippet}{suffix}."
+                )
+            else:
+                lines.append(
+                    f"partial_reason: masked {len(masked)}/{len(service_states)} user services; "
+                    "some unit states could not be verified."
+                )
     elif kind == "sysctl_conf":
         path = str(params.get("path", ""))
         if path:
@@ -1998,8 +2161,9 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
             unreadable = 0
             for p in paths:
                 try:
-                    val = Path(p).read_text(encoding="utf-8").strip()
-                    if expected_val and val == expected_val:
+                    raw_val = Path(p).read_text(encoding="utf-8").strip()
+                    current_val = _sysfs_selected_value(raw_val)
+                    if expected_val and current_val == expected_val:
                         match += 1
                 except Exception:
                     unreadable += 1
@@ -2013,11 +2177,29 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                 lines.append(f"sysfs_summary: total={total} unreadable={unreadable}")
             for p in paths[:8]:
                 try:
-                    val = Path(p).read_text(encoding="utf-8").strip()
-                    lines.append(f"{p}: {val}")
+                    raw_val = Path(p).read_text(encoding="utf-8").strip()
+                    current_val = _sysfs_selected_value(raw_val)
+                    if current_val != raw_val:
+                        lines.append(f"{p}: {raw_val} (selected: {current_val})")
+                    else:
+                        lines.append(f"{p}: {raw_val}")
                 except Exception as e:
                     lines.append(f"{p}: unreadable: {e}")
+            if status == "partial" and knob.id != "cpu_governor_performance_persistent":
+                reason = _sysfs_partial_reason(
+                    total=total,
+                    match=match,
+                    mismatch=mismatch,
+                    unreadable=unreadable,
+                    expected_val=expected_val,
+                )
+                if reason:
+                    lines.append(f"partial_reason: {reason}")
             if knob.id == "cpu_governor_performance_persistent":
+                cfg_ok = False
+                cfg_read_error: str | None = None
+                service: str | None = None
+                service_enabled: str | None = None
                 try:
                     from audioknob_gui.worker.ops import (
                         read_os_release,
@@ -2033,8 +2215,16 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                         cfg_text = Path(cfg_path).read_text(encoding="utf-8")
                     except Exception as e:
                         cfg_text = None
+                        cfg_read_error = str(e)
                         lines.append(f"cpupower_config_read_error: {e}")
                     if cfg_text:
+                        cfg_ok = bool(
+                            re.search(
+                                r'^\s*GOVERNOR\s*=\s*"?performance"?\s*$',
+                                cfg_text,
+                                flags=re.MULTILINE,
+                            )
+                        )
                         for line in cfg_text.splitlines():
                             if "GOVERNOR" in line:
                                 lines.append(f"cpupower_config_governor: {line.strip()}")
@@ -2046,7 +2236,23 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                             ("service_active", ["systemctl", "is-active", service]),
                         ):
                             r = subprocess.run(cmd, capture_output=True, text=True)
-                            lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+                            value = r.stdout.strip() or r.stderr.strip()
+                            if label == "service_enabled":
+                                service_enabled = value
+                            lines.append(f"{label}: {value}")
+                    if status == "partial":
+                        reason = _cpu_governor_partial_reason(
+                            total=total,
+                            match=match,
+                            unreadable=unreadable,
+                            expected_val=expected_val,
+                            cfg_ok=cfg_ok,
+                            cfg_read_error=cfg_read_error,
+                            service=service,
+                            service_enabled=service_enabled,
+                        )
+                        if reason:
+                            lines.append(f"partial_reason: {reason}")
                 except Exception:
                     pass
     elif kind == "kernel_cmdline":
@@ -2119,15 +2325,7 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
 
                 expected = build_pipewire_conf_content(params).splitlines()
                 current = Path(path).read_text(encoding="utf-8").splitlines()
-                expected_norm = {line.strip() for line in expected if line.strip()}
-                current_norm = {line.strip() for line in current if line.strip()}
-                missing = [line for line in expected if line.strip() and line.strip() not in current_norm]
-                if missing:
-                    snippet = ", ".join(missing[:6])
-                    suffix = "..." if len(missing) > 6 else ""
-                    lines.append(f"partial_reason: missing lines: {snippet}{suffix}")
-                else:
-                    lines.append("partial_reason: config differs from expected (re-apply to rewrite).")
+                lines.append(f"partial_reason: {_config_partial_reason(expected, current)}")
             except Exception as exc:
                 lines.append(f"partial_reason: unable to compare expected config ({exc})")
         try:
@@ -2168,9 +2366,41 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                         )
         except Exception:
             pass
+    elif kind == "wireplumber_conf":
+        path = str(
+            params.get(
+                "path",
+                "~/.config/wireplumber/wireplumber.conf.d/90-audioknob-alsa.conf",
+            )
+        )
+        lines.extend(_read_file(path))
+        if status == "partial":
+            try:
+                from audioknob_gui.worker.ops import build_wireplumber_conf_content
+
+                expected = build_wireplumber_conf_content(params).splitlines()
+                current = Path(path).read_text(encoding="utf-8").splitlines()
+                lines.append(f"partial_reason: {_config_partial_reason(expected, current)}")
+            except Exception as exc:
+                lines.append(f"partial_reason: unable to compare expected config ({exc})")
+        try:
+            r = subprocess.run(
+                ["systemctl", "--user", "is-active", "wireplumber"],
+                capture_output=True,
+                text=True,
+            )
+            lines.append(f"wireplumber_active: {r.stdout.strip() or r.stderr.strip()}")
+        except Exception:
+            pass
     elif kind == "group_membership":
         r = subprocess.run(["id"], capture_output=True, text=True)
         lines.append(f"id: {r.stdout.strip()}")
+        required_groups = params.get("groups", ["audio", "realtime"])
+        if isinstance(required_groups, str):
+            required_groups = [required_groups]
+        required_groups = [str(g) for g in required_groups if str(g).strip()]
+        if required_groups:
+            lines.append(f"required_groups: {', '.join(required_groups)}")
         try:
             from audioknob_gui.platform.detect import get_missing_groups
 
@@ -2181,6 +2411,51 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                 lines.append("missing_groups: none")
         except Exception:
             pass
+        try:
+            import grp
+            import os
+            import pwd
+
+            user_gids = set(os.getgroups())
+            user_name = pwd.getpwuid(os.getuid()).pw_name
+            primary_gid = os.getgid()
+            existing: list[str] = []
+            active: list[str] = []
+            configured: list[str] = []
+            for group_name in required_groups:
+                try:
+                    gr = grp.getgrnam(group_name)
+                except KeyError:
+                    continue
+                existing.append(group_name)
+                if gr.gr_gid in user_gids:
+                    active.append(group_name)
+                if user_name in gr.gr_mem or gr.gr_gid == primary_gid:
+                    configured.append(group_name)
+
+            if existing:
+                lines.append(f"existing_groups: {', '.join(existing)}")
+                lines.append(f"session_active_groups: {', '.join(active) if active else 'none'}")
+                lines.append(f"configured_groups: {', '.join(configured) if configured else 'none'}")
+
+                if status == "partial":
+                    missing_active = [g for g in existing if g not in active]
+                    missing_configured = [g for g in existing if g not in configured]
+                    reason_parts: list[str] = [
+                        f"session active for {len(active)}/{len(existing)} groups",
+                        f"account configured for {len(configured)}/{len(existing)} groups",
+                    ]
+                    if missing_active:
+                        reason_parts.append(f"missing active groups: {', '.join(missing_active)}")
+                    if missing_configured:
+                        reason_parts.append(
+                            f"missing configured groups: {', '.join(missing_configured)}"
+                        )
+                    lines.append("partial_reason: " + "; ".join(reason_parts) + ".")
+            elif status == "partial":
+                lines.append("partial_reason: required groups were not found on this system.")
+        except Exception as e:
+            lines.append(f"group_check_error: {e}")
     elif kind == "pam_limits_audio_group":
         path = str(params.get("path", ""))
         if path:
@@ -2227,7 +2502,9 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                     lines.append(f"  threads: {len(threads)}")
 
     if status == "partial" and not any(str(line).startswith("partial_reason:") for line in lines):
-        lines.append("partial_reason: current state differs from expected configuration.")
+        lines.append(
+            "partial_reason: mixed state detected; one or more live checks above differ from expected values."
+        )
     return lines
 
 

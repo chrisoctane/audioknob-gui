@@ -21,6 +21,10 @@ from audioknob_gui.gui.knobs.registry import (
     get_action_override,
     get_config_widget_builder,
 )
+from audioknob_gui.gui.conflicts import (
+    filtered_active_conflicts,
+    prune_power_profile_conflicts,
+)
 from audioknob_gui.gui.widgets.cell_container import CellContainer
 
 
@@ -743,10 +747,13 @@ class TableMixin:
 
             conflict_ids = set()
             try:
-                from audioknob_gui.gui.conflicts import active_conflicts
-
-                conflict_ids = active_conflicts(
+                conflict_ids = filtered_active_conflicts(
                     k.id, self._queued_actions, self._knob_statuses, state=self.state
+                )
+                conflict_ids = prune_power_profile_conflicts(
+                    k.id,
+                    conflict_ids,
+                    backend_is_tuned=self._power_profile_backend_is_tuned(),
                 )
             except Exception:
                 conflict_ids = set()
@@ -777,8 +784,22 @@ class TableMixin:
                 lock_reason = "Configure this knob before applying"
             if conflict_ids:
                 by_id = {knob.id: knob.title for knob in self.registry}
-                conflict_titles = [by_id.get(cid, cid) for cid in sorted(conflict_ids)]
-                conflict_tip = "Conflicts with: " + ", ".join(conflict_titles)
+                conflict_titles: list[str] = []
+                for cid in sorted(conflict_ids):
+                    title = by_id.get(cid, cid)
+                    action = self._queued_actions.get(cid)
+                    if action == "apply":
+                        state_desc = "queued apply"
+                    elif action == "reset":
+                        state_desc = "queued reset"
+                    else:
+                        state_desc = self._knob_statuses.get(cid, "unknown")
+                    conflict_titles.append(f"{title} ({state_desc})")
+                conflict_tip = (
+                    "Conflicts with active/queued knobs: "
+                    + ", ".join(conflict_titles)
+                    + ". Resolve by resetting one side or use queue apply options."
+                )
                 lock_reason = conflict_tip if not lock_reason else f"{lock_reason}\n{conflict_tip}"
             
             # Column 0: Info button
@@ -831,12 +852,12 @@ class TableMixin:
                     "applied": "Baseline captured; patch applied successfully.",
                     "sys_default": "Baseline; captured before optimisation.",
                     "deviated": "Differs from both baseline and optimisation.",
-                    "partial": "See Status details.",
+                    "partial": "Partially applied. Click status to view exact reasons.",
                     "pending_reboot": "Applied in boot config; reboot required.",
                     "not_applied": "Not applied.",
                     "not_applicable": "Not available on this system.",
                     "read_only": "Read-only check.",
-                    "unknown": "Status unknown.",
+                    "unknown": "Status unknown. Click status to run live checks.",
                     "running": "Updating...",
                     "done": "Completed.",
                     "error": "Error during operation.",

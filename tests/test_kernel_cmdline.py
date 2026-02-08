@@ -1,5 +1,9 @@
 """Tests for kernel cmdline parameter detection."""
 
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -73,3 +77,33 @@ class TestKernelCmdlineTokenPresence:
         # Not present
         assert _param_present("mitigations=off", tokens) is False
         assert _param_present("nothreadirqs", tokens) is False
+
+
+def test_check_knob_status_bare_key_matches_key_value(monkeypatch, tmp_path: Path) -> None:
+    """Kernel status checker should treat bare key as matching key=value tokens."""
+    from audioknob_gui.registry import load_registry
+    from audioknob_gui.worker import ops
+
+    registry = load_registry("config/registry.json")
+    knob = next(k for k in registry if k.id == "kernel_isolcpus")
+    knob = replace(knob, impl=replace(knob.impl, params={"param": "isolcpus"}))
+
+    boot_cmdline = tmp_path / "cmdline"
+    boot_cmdline.write_text("quiet splash isolcpus=2-3\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ops,
+        "detect_distro",
+        lambda: SimpleNamespace(boot_system="grub2-bls", kernel_cmdline_file=str(boot_cmdline)),
+    )
+
+    original_read_text = Path.read_text
+
+    def fake_read_text(self: Path, *args, **kwargs):
+        if str(self) == "/proc/cmdline":
+            return "BOOT_IMAGE=/vmlinuz root=UUID=test quiet isolcpus=2-3"
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+    assert ops.check_knob_status(knob) == "applied"

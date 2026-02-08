@@ -222,3 +222,56 @@ def test_find_transaction_for_knob_returns_oldest():
                 assert txid == "tx_older"
                 assert scope == "root"
                 assert manifest is not None
+
+
+def test_kernel_cmdline_status_param_fallback_for_dynamic_knobs():
+    """Status checks should use key-name fallback when dynamic cores are unset."""
+    from audioknob_gui.worker.cli import _kernel_cmdline_status_param
+
+    state = {}
+    assert _kernel_cmdline_status_param(state, "kernel_isolcpus") == "isolcpus"
+    assert _kernel_cmdline_status_param(state, "kernel_nohz_full") == "nohz_full"
+    assert _kernel_cmdline_status_param(state, "kernel_rcu_nocbs") == "rcu_nocbs"
+    assert _kernel_cmdline_status_param(state, "kernel_irqaffinity") is None
+
+
+def test_cmd_status_uses_kernel_status_param_fallback(monkeypatch):
+    """cmd_status should pass a non-empty param for dynamic kernel status checks."""
+    import argparse
+    import io
+    import sys
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="kernel_isolcpus",
+        title="CPU Isolation",
+        description="",
+        category="kernel",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=True,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind="kernel_cmdline", params={"param": ""}),
+    )
+
+    captured_param: dict[str, str] = {}
+
+    def _fake_status(k):
+        captured_param["value"] = str(k.impl.params.get("param", ""))
+        return "not_applied"
+
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {})
+    monkeypatch.setattr(cli, "check_knob_status", _fake_status)
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_status(argparse.Namespace(registry="unused"))
+
+    assert rc == 0
+    assert captured_param.get("value") == "isolcpus"

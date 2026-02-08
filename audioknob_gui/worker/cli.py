@@ -508,6 +508,23 @@ def _kernel_cmdline_override(state: dict, knob_id: str) -> str | None:
     return f"{prefix}={cpu_list}"
 
 
+def _kernel_cmdline_status_param(state: dict, knob_id: str) -> str | None:
+    """Resolve kernel cmdline param for status checks.
+
+    Dynamic core-list knobs can be status-checked by key name even before the
+    user configures cores, so they report not_applied/applied instead of unknown.
+    """
+    override = _kernel_cmdline_override(state, knob_id)
+    if override:
+        return override
+    fallback = {
+        "kernel_isolcpus": "isolcpus",
+        "kernel_nohz_full": "nohz_full",
+        "kernel_rcu_nocbs": "rcu_nocbs",
+    }
+    return fallback.get(knob_id)
+
+
 def _kernel_cmdline_param_from_manifest(manifest: dict, knob_id: str) -> str | None:
     prefix_map = {
         "kernel_isolcpus": "isolcpus",
@@ -2409,10 +2426,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             new_params = dict(k.impl.params)
             new_params["backend"] = power_profile_backend
             k = replace(k, impl=replace(k.impl, params=new_params))
-        kernel_override = _kernel_cmdline_override(state, k.id)
-        if kernel_override and k.impl is not None and k.impl.kind == "kernel_cmdline":
+        kernel_param = _kernel_cmdline_status_param(state, k.id)
+        if kernel_param and k.impl is not None and k.impl.kind == "kernel_cmdline":
             new_params = dict(k.impl.params)
-            new_params["param"] = kernel_override
+            new_params["param"] = kernel_param
             k = replace(k, impl=replace(k.impl, params=new_params))
         if k.impl is not None and k.impl.kind == "irq_affinity":
             new_params = dict(k.impl.params)

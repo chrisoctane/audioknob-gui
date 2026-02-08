@@ -44,7 +44,12 @@ from audioknob_gui.gui.dialogs.confirm import ConfirmDialog
 from audioknob_gui.gui.dialogs.jitter_monitor import JitterMonitorDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
 from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
-from audioknob_gui.gui.conflicts import active_conflicts, build_conflict_details, find_conflicts
+from audioknob_gui.gui.conflicts import (
+    build_conflict_details,
+    filtered_active_conflicts,
+    find_conflicts,
+    prune_power_profile_conflicts,
+)
 from audioknob_gui.gui.knobs.registry import (
     InfoHelpers,
     add_info_buttons,
@@ -2337,16 +2342,15 @@ class MainWindow(TableMixin, QMainWindow):
             return []
         pairs: set[tuple[str, str]] = set()
         statuses = self._knob_statuses
+        backend_is_tuned = self._power_profile_backend_is_tuned()
         for k in self.registry:
-            status = statuses.get(k.id, "unknown")
-            if status in ("unknown", "not_applicable", "read_only") and self._queued_actions.get(k.id) != "apply":
-                continue
-            for other_id in active_conflicts(
+            conflict_ids = filtered_active_conflicts(
                 k.id, self._queued_actions, statuses, state=self.state
-            ):
-                other_status = statuses.get(other_id, "unknown")
-                if other_status in ("unknown", "not_applicable", "read_only") and self._queued_actions.get(other_id) != "apply":
-                    continue
+            )
+            conflict_ids = prune_power_profile_conflicts(
+                k.id, conflict_ids, backend_is_tuned=backend_is_tuned
+            )
+            for other_id in conflict_ids:
                 pair = tuple(sorted((k.id, other_id)))
                 pairs.add(pair)
         return sorted(pairs)
@@ -2923,15 +2927,29 @@ class MainWindow(TableMixin, QMainWindow):
         by_id = {k.id: k for k in self.registry}
         lines: list[str] = []
         conflict_ids: set[str] = set()
+
+        def _state_label(knob_id: str) -> str:
+            action = self._queued_actions.get(knob_id)
+            if action == "apply":
+                return "queued apply"
+            if action == "reset":
+                return "queued reset"
+            return self._knob_statuses.get(knob_id, "unknown")
+
         for src_id, targets in conflicts.items():
             src_title = by_id.get(src_id).title if src_id in by_id else src_id
-            target_titles = [by_id.get(t).title if t in by_id else t for t in sorted(targets)]
+            src_state = _state_label(src_id)
+            target_titles = []
+            for target_id in sorted(targets):
+                target_title = by_id.get(target_id).title if target_id in by_id else target_id
+                target_titles.append(f"{target_title} ({_state_label(target_id)})")
             if target_titles:
-                lines.append(f"{src_title} ↔ {', '.join(target_titles)}")
+                lines.append(f"{src_title} ({src_state}) ↔ {', '.join(target_titles)}")
             conflict_ids.update(targets)
         msg = "Potential conflicts detected:\n\n" + "\n".join(lines)
         msg += (
             "\n\nChoose how to proceed:\n"
+            "• Conflicts are based on active/queued knobs (applied, pending reboot, partial, running)\n"
             "• Apply + reset conflicts: queue resets for the conflicting knobs\n"
             "• Apply anyway: keep current settings (may override)\n"
         )
