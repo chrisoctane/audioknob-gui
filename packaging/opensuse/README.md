@@ -10,9 +10,11 @@ on openSUSE Tumbleweed.
 Install tools needed to build an RPM:
 
 ```bash
-sudo zypper install -y rpm-build python-rpm-macros python3-rpm-macros \
+sudo zypper install -y rpm-build python-rpm-macros \
   python313 python313-devel python313-pip python313-setuptools python313-wheel \
   desktop-file-utils polkit
+
+Note: `rpmspec` is provided by `rpm-build` (it is not a separate package).
 ```
 
 Runtime dependencies are handled by the RPM (notably `python313-pyside6` on Tumbleweed).

@@ -18,7 +18,6 @@ BuildRequires:  python313-pip
 BuildRequires:  python313-setuptools
 BuildRequires:  python313-wheel
 BuildRequires:  python-rpm-macros
-BuildRequires:  python3-rpm-macros
 BuildRequires:  desktop-file-utils
 BuildRequires:  fdupes
 
