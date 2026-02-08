@@ -52,7 +52,7 @@ class TableMixin:
         titles = {knob.id: knob.title for knob in self.registry}
         title = titles.get(knob_id, knob_id)
         msg = (
-            f"Reset '{title}' to match the baseline/default state?\n\n"
+            f"Reset '{title}' to match saved preset/default state?\n\n"
             "This will queue a Reset for this knob."
         )
         if QMessageBox.question(self, "Resolve Conflict", msg) != QMessageBox.Yes:
@@ -344,7 +344,7 @@ class TableMixin:
         if label not in ("apply", "reset", "install", "join", "leave"):
             return
         btn.setEnabled(False)
-        btn.setToolTip("Initial state scan pending. Finish baseline scan before changes.")
+        btn.setToolTip("Initial state scan pending. Finish reference preset scan before changes.")
 
 
 
@@ -419,6 +419,16 @@ class TableMixin:
         self._wrap_cell_widget(row, 5, widget)
 
 
+    def _preset_match_tip(self, knob_id: str) -> str:
+        matches = getattr(self, "_knob_preset_matches", {})
+        if not isinstance(matches, dict):
+            return ""
+        text = matches.get(knob_id)
+        if not isinstance(text, str) or not text.strip():
+            return ""
+        return f"Preset: {text.strip()}"
+
+
     def _status_display(self, status: str) -> tuple[str, str]:
         """Return (display_text, color) for a status."""
         # Handle test results: "result:12 µs" → "12 µs"
@@ -427,8 +437,6 @@ class TableMixin:
         
         mapping = {
             "applied": ("✓ Applied", "#2e7d32"),      # Green
-            "sys_default": ("Sys Default", "#1976d2"), # Blue
-            "deviated": ("Deviated", "#607d8b"),      # Blue-gray
             "not_applied": ("—", "#757575"),          # Gray dash
             "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
             "partial": ("◐ Partial", "#f6c343"),      # Pastel yellow
@@ -438,6 +446,8 @@ class TableMixin:
             "running": ("⏳ Updating", "#1976d2"),    # Blue spinner
             "done": ("✓", "#2e7d32"),                 # Green check
             "error": ("✗", "#d32f2f"),                # Red X
+            "sys_default": ("—", "#757575"),
+            "deviated": ("—", "#757575"),
         }
         return mapping.get(status, ("—", "#9e9e9e"))
 
@@ -447,6 +457,11 @@ class TableMixin:
         self.table.setSortingEnabled(False)
         self.table.clearSpans()
         self.table.clearContents()
+        try:
+            if hasattr(self, "_apply_baseline_statuses"):
+                self._apply_baseline_statuses()
+        except Exception:
+            pass
         self._refresh_core_plan_summary()
         reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
         advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
@@ -462,12 +477,12 @@ class TableMixin:
             status_order = {
                 "applied": 0,
                 "pending_reboot": 1,
-                "deviated": 2,
-                "partial": 3,
-                "sys_default": 4,
-                "not_applied": 5,
-                "not_applicable": 6,
-                "unknown": 7,
+                "partial": 2,
+                "not_applied": 3,
+                "not_applicable": 4,
+                "unknown": 5,
+                "sys_default": 3,
+                "deviated": 3,
             }
             risk_order = {"low": 0, "medium": 1, "high": 2}
 
@@ -557,9 +572,7 @@ class TableMixin:
             status_labels = {
                 "applied": "Applied",
                 "pending_reboot": "Reboot Required",
-                "deviated": "Deviated",
                 "partial": "Partial",
-                "sys_default": "Sys Default",
                 "not_applied": "Not Applied",
                 "not_applicable": "N/A",
                 "read_only": "Read Only",
@@ -568,9 +581,7 @@ class TableMixin:
             status_order = [
                 "applied",
                 "pending_reboot",
-                "deviated",
                 "partial",
-                "sys_default",
                 "not_applied",
                 "not_applicable",
                 "read_only",
@@ -849,9 +860,7 @@ class TableMixin:
                 if conflict_ids:
                     status_color = "#d32f2f"
                 tooltip_map = {
-                    "applied": "Baseline captured; patch applied successfully.",
-                    "sys_default": "Baseline; captured before optimisation.",
-                    "deviated": "Differs from both baseline and optimisation.",
+                    "applied": "Applied.",
                     "partial": "Partially applied. Click status to view exact reasons.",
                     "pending_reboot": "Applied in boot config; reboot required.",
                     "not_applied": "Not applied.",
@@ -866,6 +875,9 @@ class TableMixin:
                     status_tip = "Test result."
                 else:
                     status_tip = tooltip_map.get(display_status, "")
+                preset_tip = self._preset_match_tip(k.id)
+                if preset_tip:
+                    status_tip = preset_tip if not status_tip else f"{status_tip}\n{preset_tip}"
                 if conflict_ids:
                     status_tip = lock_reason if not status_tip else f"{status_tip}\n{lock_reason}"
             status_item = QTableWidgetItem("")
@@ -1123,8 +1135,6 @@ class TableMixin:
         status_texts = [
             "Locked",
             "✓ Applied",
-            "Sys Default",
-            "⚠ Deviated",
             "⟳ Reboot",
             "◐ Partial",
             "N/A",

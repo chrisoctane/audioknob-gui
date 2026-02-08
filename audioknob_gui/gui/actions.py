@@ -407,7 +407,7 @@ def on_reset_defaults(ui) -> None:
             btn.setText("Working..." if busy else "Reset All")
         if action is not None:
             action.setEnabled(not busy)
-            action.setText("Factory Defaults (Working...)" if busy else "Factory Defaults (Reset All)...")
+            action.setText("Factory Preset (Working...)" if busy else "Factory Preset (Reset All)...")
     # First, show what will be reset
     _get_gui_logger().info("reset defaults requested")
     try:
@@ -483,7 +483,7 @@ def on_reset_defaults(ui) -> None:
                 summary_lines.append(f"• {count} {kind} effect(s)")
 
     confirm_dialog = QDialog(ui)
-    confirm_dialog.setWindowTitle("Factory Defaults")
+    confirm_dialog.setWindowTitle("Factory Preset")
     confirm_dialog.resize(600, 350)
     layout = QVBoxLayout(confirm_dialog)
 
@@ -628,7 +628,7 @@ def on_reset_defaults(ui) -> None:
             )
             QMessageBox.warning(
                 ui,
-                "Factory Defaults (with errors)",
+                "Factory Preset (with errors)",
                 "\n".join(results_text)
                 + "\n\nErrors:\n"
                 + "\n".join(errors[:5])
@@ -641,7 +641,7 @@ def on_reset_defaults(ui) -> None:
             )
             QMessageBox.information(
                 ui,
-                "Factory Defaults complete",
+                "Factory Preset complete",
                 "All audioknob-gui changes have been reset to system defaults.\n\n"
                 + "\n".join(results_text)
                 + reboot_note,

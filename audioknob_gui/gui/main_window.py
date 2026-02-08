@@ -101,6 +101,7 @@ class MainWindow(TableMixin, QMainWindow):
         self._task_threads: list[QThread] = []
         self.state = load_state()
         self.registry = load_registry(_registry_path())
+        self._knob_preset_matches: dict[str, str] = {}
         build_dep = getattr(self, "_build_dependency_index", None)
         if callable(build_dep):
             self._dependency_index = build_dep()
@@ -205,7 +206,7 @@ class MainWindow(TableMixin, QMainWindow):
         top.addSpacing(8)
 
         self.btn_tools_menu = QPushButton("Tools")
-        self.btn_tools_menu.setToolTip("Diagnostics, baselines, and history")
+        self.btn_tools_menu.setToolTip("Diagnostics, presets, and history")
         tools_menu = QMenu(self.btn_tools_menu)
         self.act_discover_system = tools_menu.addAction("Scan System Profile...")
         self.act_discover_system.triggered.connect(self._on_discover_system)
@@ -218,22 +219,23 @@ class MainWindow(TableMixin, QMainWindow):
         self.act_cyclictest = tools_menu.addAction("Cyclictest (Terminal)...")
         self.act_cyclictest.triggered.connect(self._on_launch_cyclictest_terminal)
         tools_menu.addSeparator()
-        baseline_menu = tools_menu.addMenu("Baseline")
-        self.act_baseline_capture = baseline_menu.addAction("Capture Baseline...")
-        self.act_baseline_import = baseline_menu.addAction("Import Baseline...")
-        self.act_baseline_export = baseline_menu.addAction("Export Baseline...")
-        self.act_baseline_restore = baseline_menu.addAction("Queue Restore Baseline...")
+        presets_menu = tools_menu.addMenu("Presets")
+        baseline_menu = presets_menu.addMenu(status.REFERENCE_PRESET_LABEL)
+        self.act_baseline_capture = baseline_menu.addAction(f"Capture {status.REFERENCE_PRESET_LABEL}...")
+        self.act_baseline_import = baseline_menu.addAction(f"Import {status.REFERENCE_PRESET_LABEL}...")
+        self.act_baseline_export = baseline_menu.addAction(f"Export {status.REFERENCE_PRESET_LABEL}...")
+        self.act_baseline_restore = baseline_menu.addAction(f"Queue Restore {status.REFERENCE_PRESET_LABEL}...")
         self.act_baseline_capture.triggered.connect(self._on_capture_baseline)
         self.act_baseline_import.triggered.connect(self._on_import_baseline)
         self.act_baseline_export.triggered.connect(self._on_export_baseline)
         self.act_baseline_restore.triggered.connect(self._on_restore_baseline)
-        factory_menu = tools_menu.addMenu("Factory Defaults")
-        self.act_factory_capture = factory_menu.addAction("Capture Factory Defaults...")
-        self.act_factory_import = factory_menu.addAction("Import Factory Defaults...")
-        self.act_factory_export = factory_menu.addAction("Export Factory Defaults...")
-        self.act_factory_restore = factory_menu.addAction("Queue Restore Factory Defaults...")
+        factory_menu = presets_menu.addMenu(status.FACTORY_PRESET_LABEL)
+        self.act_factory_capture = factory_menu.addAction(f"Capture {status.FACTORY_PRESET_LABEL}...")
+        self.act_factory_import = factory_menu.addAction(f"Import {status.FACTORY_PRESET_LABEL}...")
+        self.act_factory_export = factory_menu.addAction(f"Export {status.FACTORY_PRESET_LABEL}...")
+        self.act_factory_restore = factory_menu.addAction(f"Queue Restore {status.FACTORY_PRESET_LABEL}...")
         factory_menu.addSeparator()
-        self.act_factory_reset = factory_menu.addAction("Factory Defaults (Reset All)...")
+        self.act_factory_reset = factory_menu.addAction(f"{status.FACTORY_PRESET_LABEL} (Reset All)...")
         self.act_factory_capture.triggered.connect(self._on_capture_factory)
         self.act_factory_import.triggered.connect(self._on_import_factory)
         self.act_factory_export.triggered.connect(self._on_export_factory)
@@ -242,9 +244,11 @@ class MainWindow(TableMixin, QMainWindow):
         self.act_tx_history = tools_menu.addAction("Tx History...")
         self.act_tx_history.triggered.connect(self._on_show_tx_history)
         self._ensure_menu_width(tools_menu)
+        self._ensure_menu_width(presets_menu)
         self._ensure_menu_width(baseline_menu)
         self._ensure_menu_width(factory_menu)
         self.btn_tools_menu.setMenu(tools_menu)
+        self._set_baseline_buttons_enabled(not self._baseline_busy)
         top.addWidget(self.btn_tools_menu)
 
         self.btn_recheck = QPushButton("Re-check State")
@@ -844,7 +848,7 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _queue_apply_allowed(self, k) -> tuple[bool, str]:
         if not self._baseline_ready:
-            return False, "Baseline scan pending"
+            return False, "Reference preset scan pending"
         status = self._knob_statuses.get(k.id, "unknown")
         if status == "not_applicable":
             return False, "Not available on this system"
@@ -1261,9 +1265,15 @@ class MainWindow(TableMixin, QMainWindow):
         baseline_user = self.state.get("baseline_txid_user") or "-"
         baseline_root = self.state.get("baseline_txid_root") or "-"
         baseline_label = QLabel(
-            f"Baseline: {baseline_ts} (user txid: {baseline_user}, root txid: {baseline_root})"
+            f"{status.REFERENCE_PRESET_LABEL}: {baseline_ts} (user txid: {baseline_user}, root txid: {baseline_root})"
         )
         layout.addWidget(baseline_label)
+        factory_ts = self.state.get("factory_captured_at") or "-"
+        factory_source = self.state.get("factory_source") or "-"
+        factory_label = QLabel(
+            f"{status.FACTORY_PRESET_LABEL}: {factory_ts} (source: {factory_source})"
+        )
+        layout.addWidget(factory_label)
 
         table = QTableWidget(0, 7)
         table.setHorizontalHeaderLabels(
@@ -1576,9 +1586,9 @@ class MainWindow(TableMixin, QMainWindow):
         self,
         *,
         on_success: Callable[[dict[str, str]], None],
-        on_cancel_title: str = "Baseline Required",
+        on_cancel_title: str = f"{status.REFERENCE_PRESET_LABEL} Required",
         on_cancel_message: str | None = None,
-        on_error_title: str = "Baseline",
+        on_error_title: str = status.REFERENCE_PRESET_LABEL,
         on_error_message: str | None = None,
     ) -> None:
         status.start_baseline_scan(
@@ -1707,12 +1717,6 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _apply_baseline_statuses(self) -> None:
         status.apply_baseline_statuses(self)
-
-    def _parse_baseline_timestamp(self) -> float | None:
-        return status.parse_baseline_timestamp(self)
-
-    def _collect_transaction_times(self) -> tuple[dict[str, float], bool]:
-        return status.collect_transaction_times(self)
 
     def _rt_limits_active(self) -> bool:
         return status.rt_limits_active(self)
@@ -2457,6 +2461,7 @@ class MainWindow(TableMixin, QMainWindow):
         """Update the status cell for a specific knob."""
         # Keep backing store in sync so subsequent _populate() reflects the new state.
         self._knob_statuses[knob_id] = status
+        self._apply_baseline_statuses()
         for r in range(self.table.rowCount()):
             item = self.table.item(r, 1)
             if item is None:
@@ -2562,7 +2567,12 @@ class MainWindow(TableMixin, QMainWindow):
         # Build detailed info
         status = self._knob_statuses.get(k.id, "unknown")
         status_text, _ = self._status_display(status)
-        
+        preset_match = ""
+        if isinstance(self._knob_preset_matches, dict):
+            value = self._knob_preset_matches.get(k.id)
+            if isinstance(value, str):
+                preset_match = value
+
         impl_info = "Not implemented yet"
         if k.impl:
             kind_label = k.impl.kind
@@ -2679,6 +2689,7 @@ class MainWindow(TableMixin, QMainWindow):
         <table>
         <tr><td><b>ID:</b></td><td>{k.id}</td></tr>
         <tr><td><b>Status:</b></td><td>{status_text}</td></tr>
+        <tr><td><b>Preset match:</b></td><td>{preset_match or '—'}</td></tr>
         <tr><td><b>Category:</b></td><td>{k.category}</td></tr>
         <tr><td><b>Risk:</b></td><td>{k.risk_level}</td></tr>
         <tr><td><b>Requires root:</b></td><td>{'Yes' if k.requires_root else 'No'}</td></tr>

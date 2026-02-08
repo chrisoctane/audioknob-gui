@@ -452,7 +452,8 @@ def _status_label(status: str) -> str:
         "read_only": "Read-only",
         "unknown": "Unknown",
         "not_applicable": "N/A",
-        "sys_default": "System default",
+        "sys_default": "Not applied",
+        "deviated": "Not applied",
         "running": "Updating",
     }
     return mapping.get(status, status)

@@ -148,7 +148,7 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 - **Auto housekeeping** inverts the selected audio cores to derive IRQ housekeeping cores; manual mode uses the IRQ housekeeping core selection.
 - Auto-set updates core selections and queues Apply for affected knobs, so the global Apply button can be used.
 - **IRQ Overview** shows a core map (housekeeping vs audio cores) and a live list of IRQ affinity assignments.
-- Use **Tools → Baseline** to **Capture**, **Import**, or **Export** baseline snapshots for Sys Default/Deviated labeling.
+- Use **Tools → Presets** to manage **Reference Preset** and **Factory Preset** snapshots.
 
 ### Logs (what the app did and where it failed)
 
@@ -174,40 +174,36 @@ is removed, the schema changes, or the distro/boot system changes, the scan runs
 **Manual discovery:** Use **Tools → Scan System Profile...** to re-run the system
 profile scan on demand, view the resolved paths/commands, and optionally save
 the JSON snapshot to a file. This does not change system settings.
-**Tools menu:** Also includes **Baseline** actions (Capture / Import / Export / Restore), **Factory Defaults** actions (Capture / Import / Export / Restore / Reset), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
+**Tools menu:** Also includes **Presets** actions (Reference Preset + Factory Preset capture/import/export/restore), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
 
-### Baseline state capture (first run)
+### Presets (first run)
 
-On first launch, the app captures an **initial system state** (baseline) using
-pkexec so root-only knobs are included. This baseline is used to label knobs as
-**Sys Default** when the current state matches the initial state. A **Re-check State**
-button in the header re-runs current status checks for development/testing. Apply/reset
-actions are disabled until baseline capture completes.
+On first launch, the app captures an initial **Reference Preset** using pkexec so
+root-only knobs are included. It also auto-captures a **Factory Preset** from that
+same initial scan when none exists. A **Re-check State** button in the header
+re-runs current status checks for development/testing. Apply/reset actions are
+disabled until the initial reference scan completes.
 Package install actions remain available so missing dependencies can be installed
-before the baseline is captured.
+before presets are captured.
 
-Use **Tools → Baseline** to manage baselines:
-- **Capture Baseline...** snapshots the current system and saves a JSON file (default: `~/Documents/audioknob`).
-- Baseline snapshots also capture per‑knob config values (core selections, PipeWire settings) for restore.
-- **Import Baseline...** loads a baseline JSON and overwrites the current baseline (no system changes).
-- **Export Baseline...** saves the currently stored baseline snapshot to a JSON file.
-- **Queue Restore Baseline...** queues Apply/Reset actions to match the captured baseline (using saved config values when present).
-- Baseline files include system profile metadata; if the profile doesn’t match the current system, import offers a **portable** mode that strips config overrides and normalizes unknown/partial statuses to not_applied.
-- When restoring a mismatched import, the app warns about incompatibilities, captures a **pre‑import backup** (saved in `~/Documents/audioknob/ak-pre-<import>-YYYYMMDD-HHMMSS.json`), applies what it can, and skips incompatible knobs. The backup can be used to undo via **Tools → Baseline → Import / Queue Restore**.
+Use **Tools → Presets → Reference Preset** to manage reference snapshots:
+- **Capture/Import/Export/Queue Restore Reference Preset...** manage the active reference snapshot.
+- Reference snapshots also capture per‑knob config values (core selections, PipeWire settings) for restore.
+- Reference files include system profile metadata; if the profile doesn’t match the current system, import offers a **portable** mode that strips config overrides and normalizes unknown/partial statuses to not_applied.
+- When restoring a mismatched import, the app warns about incompatibilities, captures a **pre‑import backup** (saved in `~/Documents/audioknob/ak-pre-<import>-YYYYMMDD-HHMMSS.json`), applies what it can, and skips incompatible knobs.
 
-Use **Tools → Factory Defaults** to manage factory defaults:
-- **Capture Factory Defaults...** snapshots a clean/default system state and saves it (default: `~/Documents/audioknob/ak-factory-YYYYMMDD.json`).
-- **Import/Export Factory Defaults...** loads or saves the factory snapshot (no system changes).
-- **Queue Restore Factory Defaults...** queues Apply/Reset actions to match the factory snapshot.
-- **Factory Defaults (Reset All)...** performs a full “leave no trace” reset of all Audioknob changes.
-- When restoring a mismatched factory import, the app warns about incompatibilities, captures a **pre‑import backup** (saved as `ak-pre-<import>-YYYYMMDD-HHMMSS.json`), and queues only compatible changes.
+Use **Tools → Presets → Factory Preset** to manage factory snapshots:
+- **Factory Preset** is immutable once set (initial capture, manual capture, or import); capture/import are blocked after that.
+- **Export/Queue Restore Factory Preset...** remain available.
+- **Factory Preset (Reset All)...** performs a full “leave no trace” reset of all Audioknob changes.
+- Factory preset snapshots are date-stamped (`factory_captured_at`) and include profile metadata.
 
 ### Info vs Status panels
 
 - **Info** uses a simple tag format: `[i]` summary, `[r]` requirements, `[+]` benefits, `[-]` tradeoffs.
 - **Status/Check** shows live technical details (service states, group gaps, sysctl/sysfs values, PipeWire runtime settings, etc.); when status is **partial**, it includes a short reason line and raw checks below.
 - Partial reasons are explicit for mixed states (for example: masked/unmasked user services, partial group membership activation, sysfs match counts, and WirePlumber/PipeWire config drift).
-- Status column states include short tooltips (baseline, deviated, applied, partial, reboot required, etc.).
+- Status column is operational only (`Applied`, `Not applied`, `Partial`, `Reboot`, `Unknown`, `N/A`), with preset-match hints shown as secondary tooltip metadata.
 
 ### Conflicts and blockers
 
@@ -222,7 +218,6 @@ Use **Tools → Factory Defaults** to manage factory defaults:
 - Conflict indicator counts only active/queued knobs (applied/pending/running/partial or queued apply), so idle defaults do not appear as conflicts.
 - The row-level **Conflict** button uses the same active/queued rules as the header counter, so row badges and header counts stay consistent.
 - Conflict warnings cover power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
-- Baseline relabeling treats baseline `partial` as non-authoritative, so knobs with dynamic external state changes won’t flip between `partial` and `deviated`.
 
 ---
 
@@ -383,12 +378,12 @@ self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 
 The jitter test stores the most recent per-thread summary (min/median/avg/p95/max) in the knob info dialog, with a "Show Sample List" button for raw values.
 The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
-Click the Status value in the Status column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. It also shows the initial baseline snapshot for that knob. Read-only test rows show N/A in this column.
+Click the Status value in the Status column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. It also shows reference/factory preset statuses for that knob when available. Read-only test rows show N/A in this column.
 The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) to make mixed logs easy to read.
 The GUI log also records high-level action start/finish entries (apply queue, reset all) so successes are visible in-app.
 Force-reset prompts and outcomes are also logged in the GUI log.
 If a reset would disable a dependency, the GUI prompts and adds dependent knobs to the reset queue when accepted.
-Status uses the initial baseline: if current matches baseline it shows “Sys Default”; if current matches neither baseline nor tweak it shows “Deviated.”
+Status remains operational; preset matches are shown as secondary hints in tooltips/details.
 
 ### With config dialog (via info popup)
 ```python

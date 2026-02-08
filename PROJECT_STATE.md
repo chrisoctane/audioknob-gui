@@ -24,20 +24,20 @@
 - **Info popup status check** - Run a live per-knob diagnostic snapshot
 - **Partial status notes** - Status/Check view includes a brief reason line when partial
 - **Partial reason specificity** - partial states now report concrete causes (for example: masked service counts, group activation gaps, sysfs match/mismatch counts, and WirePlumber/PipeWire config drift) instead of generic fallback text.
-- **Status tooltips** - Status column includes brief tooltips for each state (baseline/applied/deviated/etc.).
+- **Status tooltips** - Status column remains operational-only (applied/not_applied/partial/etc.) and includes secondary preset-match hints in tooltips.
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
-- **Factory Defaults (Reset All)** - reverts all changes to system defaults (leave no trace)
-- **Baseline capture** - first-run pkexec scan stores initial system state in `state.json` for Sys Default/Deviated status
-- **Baseline capture/import/export** - Tools → Baseline to snapshot baseline to JSON, import a baseline file, or export the current baseline (no system changes)
-- **Baseline restore queue** - Tools → Baseline → Queue Restore Baseline queues Apply/Reset actions to match the captured baseline (uses saved config values when present)
-- **Baseline portability** - Baseline files include system profile metadata; mismatched imports offer a portable mode that drops config overrides and normalizes unknown/partial statuses to not_applied.
-- **Baseline pre-import backup** - Restoring a mismatched imported baseline captures a pre-import snapshot (`ak-pre-<import>-YYYYMMDD-HHMMSS.json`) before queueing changes, applies what it can, and skips incompatible knobs.
-- **Factory defaults** - Tools → Factory Defaults supports capture/import/export of factory snapshots, queued restore, and a full “Reset All” leave‑no‑trace reset.
-- **Factory pre-import backup** - Restoring mismatched factory imports captures a pre-import snapshot and queues only compatible changes.
+- **Factory Preset (Reset All)** - reverts all changes to system defaults (leave no trace)
+- **Reference preset capture** - first-run pkexec scan stores initial system state in `state.json` as the Reference Preset.
+- **Factory preset auto-capture** - first-run reference scan also captures Factory Preset if none exists.
+- **Presets management** - Tools → Presets contains Reference Preset and Factory Preset capture/import/export/restore workflows.
+- **Reference preset portability** - reference files include system profile metadata; mismatched imports offer portable mode that drops config overrides and normalizes unknown/partial statuses to not_applied.
+- **Reference preset pre-import backup** - restoring a mismatched imported reference preset captures a pre-import snapshot (`ak-pre-<import>-YYYYMMDD-HHMMSS.json`) before queueing changes, applies what it can, and skips incompatible knobs.
+- **Factory preset immutability** - once set (initial/capture/import), factory preset is immutable; capture/import are blocked and timestamp is retained.
+- **Factory preset pre-import backup** - restoring mismatched factory imports captures a pre-import snapshot and queues only compatible changes.
 - **Re-check State** - header button refreshes current status for dev/testing
-- **Deviated status** - shows when current state matches neither baseline nor expected tweak
-- **Baseline partial handling** - baseline status `partial` is treated as non-authoritative for Sys Default/Deviated relabeling to avoid oscillation from dynamic external state changes.
+- **Preset comparison metadata** - reference/factory matches are tracked separately from operational status and shown as secondary hints.
+- **Reference partial handling** - reference status `partial` is treated as non-authoritative for preset-match hints.
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity). Separate RT limits/module knobs are hidden in the UI.
 - **PipeWire RT Setup presets** - Safe RT preset (RTKit/portal only) and RT limits toggle in the setup dialog.
@@ -48,7 +48,7 @@
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
-- **Baseline management** - Tools → Baseline supports capture/import/export of baseline snapshots plus a queued restore option
+- **Presets workflow** - Tools → Presets exposes Reference Preset and Factory Preset actions without adding new table columns.
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
 - **PipeWire RT Setup dirty state** - changing RT setup config marks the knob as needing apply so the action shows Apply even if the last status was applied.
@@ -80,7 +80,7 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
-- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Baseline capture/import/export/restore live in Tools → Baseline.
+- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Preset actions live in Tools → Presets.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
@@ -162,7 +162,7 @@ Next phases (planned, incremental):
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - RTIRQ knob now writes an audioknob config block (name/high lists + priorities) and enables the rtirq service.
 - KDE Indexer status now handles balooctl output from stderr (balooctl6 on Tumbleweed).
-- Baseline comparisons ignore unknown/not-applicable baselines; Huge Pages status no longer forces sys_default.
+- Preset comparisons ignore unknown/not-applicable snapshot states; Huge Pages no longer forces synthetic status labels.
 - KDE Indexer apply now times out and errors if balooctl hangs or still reports running.
 - KDE Indexer reset triggers balooctl enable in the background to avoid UI hangs.
 - Apply/Reset run in the background with a visible “Updating” status.
@@ -180,7 +180,7 @@ Next phases (planned, incremental):
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
 - "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 - Resetting a knob that others depend on now prompts and cascades dependent resets when accepted.
-- Baseline-aware status labels knobs as “Sys Default” when current matches the initial scan.
+- Preset match hints are computed separately so the main status column remains operational.
 - System profile scan now skips when the stored profile matches schema/distro/boot system, instead of rescanning every launch.
 - Main window can be resized up to the screen size (no max-height clamp to content).
 - Category headers and separators clear all cell widgets so no stray info buttons appear.
@@ -194,7 +194,7 @@ Next phases (planned, incremental):
 - Core plan toggle uses the same dark button styling as table actions; spinbox selection no longer flashes white.
 - Audio Core Plan toggle no longer shows a white highlight when expanded (checked state styled to match theme).
 - Advanced settings warning text now refers to "intensive workloads" (no games mention).
-- Package Install buttons are no longer blocked by pending baseline capture.
+- Package Install buttons are no longer blocked by pending reference preset capture.
 - Install buttons now bind per-row command lists directly to the click handler (no sender/property dependency) and warn when no commands are detected.
 - Row-dim styling now targets the inner cell widget so Install buttons remain clickable when packages are missing.
 - IRQ Overview and IRQ Pinning dialogs now use the dark theme throughout (including group boxes and scroll viewports).
@@ -205,7 +205,7 @@ Next phases (planned, incremental):
 - Sorting/grouping now uses the correct column indices after adding the CLI column (category/risk grouping restored).
 - Table cell backgrounds now reset on every populate so row colors stay consistent after sorting or tab switches.
 - Sysctl status checks now resolve the `sysctl` command path even when GUI PATH omits sbin.
-- Baseline labeling no longer overrides `partial` statuses.
+- Preset hints no longer override `partial` operational statuses.
 - CPU governor status includes cpupower config/service details for persistence checks.
 - Status/Check now includes unit names, group gaps, udev rule matches, PipeWire runtime state, and last jitter test summary.
 - Restoring CPU governor effects now resolves systemd restores via the worker ops module to avoid UnboundLocalError.
@@ -231,7 +231,7 @@ Next phases (planned, incremental):
   changes, effects, and command output/errors.
 - GUI-only actions (group changes, package installs) also emit audit entries
 - Log viewer stamps each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) for clarity.
-- GUI log includes action start/finish markers for queued apply/reset and Factory Defaults reset.
+- GUI log includes action start/finish markers for queued apply/reset and Factory Preset reset.
 - GUI log includes force-reset prompt/decision and force-reset run results.
   into the user-scope worker log for a unified audit trail.
 - The GUI header includes **Logs** (view + copy) and **Clear Logs** (clears GUI
@@ -967,14 +967,14 @@ return "read_only"  # Special case, not apply/reset-able
 | Status | Meaning | GUI Display |
 |--------|---------|-------------|
 | `applied` | Changes are in effect | ✓ Applied (green) |
-| `sys_default` | Matches baseline state | Sys Default (blue) |
 | `not_applied` | Changes are not present | — (gray) |
 | `partial` | Some but not all changes applied | ◐ Partial (orange) |
 | `pending_reboot` | Applied to boot config, needs reboot | ⟳ Reboot (orange) |
 | `read_only` | Informational knob, no changes | — (gray) |
-| `deviated` | Neither baseline nor applied | ⚠ Deviated (orange) |
 | `not_applicable` | Not relevant on this system | N/A (gray) |
 | `unknown` | Could not determine status | — (gray) |
+
+Preset comparison metadata (`Matches Reference preset`, `Matches Factory preset`) is shown as secondary tooltip/detail text and does not replace operational status.
 
 ---
 
@@ -1482,7 +1482,7 @@ We currently detect:
   stored in `state.json` and used to confirm distro-specific paths (kernel cmdline,
   cpupower, rtirq). Rescans on schema/distro/boot system changes.
   - Manual discovery is available via **Tools → Scan System Profile...** in the GUI,
-  - Tools menu includes Baseline actions and Tx History.
+  - Tools menu includes Presets actions and Tx History.
     which re-runs the scan, shows the resolved paths/commands, and can save a JSON snapshot.
 
 #### Phase 2: Needed Detection
@@ -1600,7 +1600,7 @@ sudo ./packaging/install-polkit.sh
 - [ ] **Test button**: Click Test on jitter → runs 5s → status shows "XX µs"
 - [ ] **Info pane**: Jitter knob info shows the last per-thread max values from the most recent test run
 - If the test fails unprivileged, it retries via pkexec and surfaces errors.
-- [ ] **Factory Defaults (Reset All)**: Apply multiple → reset → all restored
+- [ ] **Factory Preset (Reset All)**: Apply multiple → reset → all restored
 
 ### Verification Commands
 ```bash
@@ -1651,7 +1651,7 @@ python3 -m audioknob_gui.worker.cli list-pending
 # - `list-pending` is current-state (what still needs reset). For files and effects, it keeps the OLDEST entry
 #   so restore returns to the original baseline state.
 
-# Reset defaults in two phases (what GUI does for “Factory Defaults (Reset All)”):
+# Reset defaults in two phases (what GUI does for “Factory Preset (Reset All)”):
 python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
