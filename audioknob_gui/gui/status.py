@@ -11,23 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from copy import deepcopy
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QDialog,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QToolButton,
-    QTextEdit,
-    QVBoxLayout,
-)
-from shiboken6 import isValid
-
-from audioknob_gui.gui.actions import QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger
-from audioknob_gui.gui.knobs.registry import apply_info_param_overrides
 from audioknob_gui.gui.state import save_state
 from audioknob_gui.gui.system_info import _param_present
 from audioknob_gui.gui.worker_api import (
@@ -220,6 +204,8 @@ def _apply_baseline_config(ui, config: dict[str, object]) -> None:
 
 
 def set_baseline_buttons_enabled(ui, enabled: bool) -> None:
+    from PySide6.QtWidgets import QToolButton
+
     btn = getattr(ui, "btn_baseline_menu", None)
     if isinstance(btn, QToolButton):
         btn.setEnabled(enabled)
@@ -397,6 +383,8 @@ def factory_snapshot(ui) -> dict[str, object]:
 
 
 def write_baseline_snapshot(ui, path: str, snapshot: dict[str, object]) -> bool:
+    from PySide6.QtWidgets import QMessageBox
+
     try:
         payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
         Path(path).write_text(payload, encoding="utf-8")
@@ -407,6 +395,8 @@ def write_baseline_snapshot(ui, path: str, snapshot: dict[str, object]) -> bool:
 
 
 def write_factory_snapshot(ui, path: str, snapshot: dict[str, object]) -> bool:
+    from PySide6.QtWidgets import QMessageBox
+
     try:
         payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
         Path(path).write_text(payload, encoding="utf-8")
@@ -417,6 +407,8 @@ def write_factory_snapshot(ui, path: str, snapshot: dict[str, object]) -> bool:
 
 
 def load_baseline_snapshot(ui, path: str) -> dict[str, object] | None:
+    from PySide6.QtWidgets import QMessageBox
+
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:
@@ -467,6 +459,8 @@ def load_baseline_snapshot(ui, path: str) -> dict[str, object] | None:
 
 
 def load_factory_snapshot(ui, path: str) -> dict[str, object] | None:
+    from PySide6.QtWidgets import QMessageBox
+
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:
@@ -517,6 +511,8 @@ def load_factory_snapshot(ui, path: str) -> dict[str, object] | None:
 
 
 def confirm_baseline_overwrite(ui, summary: str) -> bool:
+    from PySide6.QtWidgets import QMessageBox
+
     if not ui._baseline_ready:
         return True
     msg = (
@@ -528,6 +524,8 @@ def confirm_baseline_overwrite(ui, summary: str) -> bool:
 
 
 def confirm_factory_overwrite(ui, summary: str) -> bool:
+    from PySide6.QtWidgets import QMessageBox
+
     msg = (
         f"{summary}\n\n"
         f"This will update the active {FACTORY_PRESET_LABEL.lower()} in the app.\n"
@@ -572,6 +570,10 @@ def start_baseline_scan(
     on_error_title: str = REFERENCE_PRESET_LABEL,
     on_error_message: str | None = None,
 ) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    from audioknob_gui.gui.actions import QueueTaskWorker
+
     if ui._baseline_busy:
         return
     ui._baseline_busy = True
@@ -680,6 +682,8 @@ def build_baseline_checks(ui, statuses: dict[str, str]) -> dict[str, list[str]]:
 
 
 def on_capture_baseline(ui) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
     if ui._baseline_busy:
         return
     stamp = datetime.now().strftime("%Y%m%d")
@@ -715,6 +719,8 @@ def on_capture_baseline(ui) -> None:
 
 
 def on_import_baseline(ui) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
     if ui._baseline_busy:
         return
     path, _ = QFileDialog.getOpenFileName(
@@ -782,6 +788,8 @@ def on_import_baseline(ui) -> None:
 
 
 def on_export_baseline(ui) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
     if ui._baseline_busy:
         return
     if not baseline_available(ui):
@@ -805,6 +813,8 @@ def on_export_baseline(ui) -> None:
 
 
 def on_restore_baseline(ui) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
     if not baseline_available(ui):
         QMessageBox.information(ui, REFERENCE_PRESET_LABEL, f"No {REFERENCE_PRESET_LABEL.lower()} captured yet.")
         return
@@ -945,6 +955,8 @@ def on_restore_baseline(ui) -> None:
 
 
 def on_capture_factory(ui) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
     if ui._baseline_busy:
         return
     if factory_preset_locked(ui):
@@ -983,6 +995,8 @@ def on_capture_factory(ui) -> None:
 
 
 def on_import_factory(ui) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
     if ui._baseline_busy:
         return
     if factory_preset_locked(ui):
@@ -1054,6 +1068,8 @@ def on_import_factory(ui) -> None:
 
 
 def on_export_factory(ui) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
     if ui._baseline_busy:
         return
     if not factory_available(ui):
@@ -1077,6 +1093,8 @@ def on_export_factory(ui) -> None:
 
 
 def on_restore_factory(ui) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
     if not factory_available(ui):
         QMessageBox.information(ui, FACTORY_PRESET_LABEL, f"No {FACTORY_PRESET_LABEL.lower()} captured yet.")
         return
@@ -1248,6 +1266,8 @@ def on_recheck_state(ui) -> None:
 
 def refresh_statuses(ui) -> None:
     """Fetch current status of all knobs (async)."""
+    from audioknob_gui.gui.actions import QueueTaskWorker
+
     if ui._status_busy:
         return
     ui._status_busy = True
@@ -1610,6 +1630,8 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
     kind = knob.impl.kind if knob.impl else ""
     params = dict(knob.impl.params) if knob.impl else {}
     try:
+        from audioknob_gui.gui.knobs.registry import apply_info_param_overrides
+
         apply_info_param_overrides(ui, knob, params)
     except Exception:
         pass
@@ -2513,6 +2535,12 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
 
 
 def show_cli_status(ui, knob_id: str) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout
+    from shiboken6 import isValid
+
+    from audioknob_gui.gui.actions import QueueTaskWorker
+
     k = next((k for k in ui.registry if k.id == knob_id), None)
     if not k:
         return
