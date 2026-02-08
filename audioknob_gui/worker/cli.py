@@ -478,6 +478,10 @@ def _kernel_cmdline_override(state: dict, knob_id: str) -> str | None:
         audio_set: set[int] = set()
         if isinstance(audio_raw, list) and all(isinstance(x, int) for x in audio_raw):
             audio_set = {int(x) for x in audio_raw}
+        if not audio_set:
+            # Auto housekeeping needs an explicit audio-core set; otherwise we'd
+            # compute "all CPUs" which is effectively the system default.
+            return None
         from audioknob_gui.core.irq import cpu_list_from_cores, read_cpu_present
 
         housekeeping = read_cpu_present() - audio_set
