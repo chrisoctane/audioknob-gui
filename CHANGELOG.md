@@ -4,6 +4,20 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.8] - 2026-02-08
+
+### Added
+- Preset match indicators now use visible color dots (blue for Reference, green for Factory) in the status cell and Presets menu.
+- Header now includes a **Technical columns** toggle to show/hide Req/Risk/CLI columns (off by default).
+- Tx History now includes expanded detail columns for Knob IDs plus richer Files/Effects summaries.
+
+### Changed
+- Preset workflows now use musician-first language and operational status stays primary (`Applied`, `Not applied`, `Partial`, `Reboot`, `Unknown`, `N/A`).
+- Factory preset capture/import actions now remain visible with explicit `(Locked)` labeling when factory preset immutability is active.
+
+### Fixed
+- Factory preset capture/import menu options no longer appear inert when locked; selecting them now surfaces a clear lock explanation.
+
 ## [0.6.7] - 2026-02-03
 
 ### Added
