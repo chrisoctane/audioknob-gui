@@ -4,6 +4,12 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.9] - 2026-02-08
+
+### Fixed
+- CI now runs unit tests in headless environments by avoiding Qt imports at module import-time (lazy imports in status helpers).
+- IRQ housekeeping `irqaffinity` auto-override no longer generates an implicit "all CPUs" value when audio cores are unset.
+
 ## [0.6.8] - 2026-02-08
 
 ### Added

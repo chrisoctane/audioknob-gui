@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.6.8
+- **Release version**: 0.6.9
 - **45 knobs defined** (ALL 45 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -75,6 +75,7 @@
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup, nosmt
 - **Kernel isolation status fallback** - isolation cmdline knobs (`isolcpus`/`nohz_full`/`rcu_nocbs`) report applied/not_applied by key presence even before per-core config is set, avoiding false unknown on default installs.
+- **IRQ housekeeping override safety** - kernel `irqaffinity` auto housekeeping override is only generated when audio cores are explicitly configured (no implicit "all CPUs" override on unset state).
 - **TSC pre-flight warning** - TSC knobs warn before apply when safety checks look risky.
 - **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
 
