@@ -149,6 +149,7 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 - Auto-set updates core selections and queues Apply for affected knobs, so the global Apply button can be used.
 - **IRQ Overview** shows a core map (housekeeping vs audio cores) and a live list of IRQ affinity assignments.
 - Use **Tools → Presets** to manage **Reference Preset** and **Factory Preset** snapshots.
+- **Technical columns** toggle in the header shows/hides Req/Risk/CLI; default is off for a simpler musician-first view.
 
 ### Logs (what the app did and where it failed)
 
@@ -330,16 +331,16 @@ In `gui/app.py` → `_populate()`:
 | Read-only test | — | "Test"/"Scan" button | "i" button |
 | Group join knob | — | "Join/Leave" button (immediate) | "i" button |
 
-**Columns**: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
+**Columns**: Info | Knob | Action | Config | Status | Category (+ optional Req./Risk/CLI via Technical columns)
 
 **Advanced mode**: Single table; advanced knobs are gated by the "Advanced knobs" checkbox.
 
-**Sorting**: Click any column header to sort. Category/Req./Status/Risk sorts show grouped headers; other columns sort as a flat list.
+**Sorting**: Click any column header to sort. Category/Status sorts show grouped headers; Req./Risk grouping is available when Technical columns are shown.
 
-**Req. column**: Shows A/R/D markers for Advanced/Reboot/Depends-on; tooltip includes the key and any group/dependency details when present.
+**Req. column** (Technical columns on): Shows A/R/D markers for Advanced/Reboot/Depends-on; tooltip includes the key and any group/dependency details when present.
 **Dependency gating**: If a knob depends on another, it stays locked until the dependency is applied; tooltip shows the required knob name(s).
 
-**CLI column**: Shows the target command/file/parameter shorthand for each knob.
+**CLI column** (Technical columns on): Shows the target command/file/parameter shorthand for each knob.
 
 **Header row**: Font size control on the left, queue status + Conflicts indicator + Apply/Apply & Reboot + Re-check State + Logs on the right
 

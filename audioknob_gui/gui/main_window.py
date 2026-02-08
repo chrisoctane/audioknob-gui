@@ -168,6 +168,11 @@ class MainWindow(TableMixin, QMainWindow):
         self.advanced_toggle.setToolTip("Unlock advanced knobs that can impact system performance")
         self.advanced_toggle.toggled.connect(self._on_advanced_mode_toggle)
         top.addWidget(self.advanced_toggle)
+        self.technical_columns_toggle = QCheckBox("Technical columns")
+        self.technical_columns_toggle.setChecked(bool(self.state.get("show_technical_columns", False)))
+        self.technical_columns_toggle.setToolTip("Show or hide Req/Risk/CLI columns")
+        self.technical_columns_toggle.toggled.connect(self._on_technical_columns_toggle)
+        top.addWidget(self.technical_columns_toggle)
 
         top.addStretch(1)
 
@@ -326,6 +331,7 @@ class MainWindow(TableMixin, QMainWindow):
         header.sectionResized.connect(self._on_section_resized)
         self._min_column_widths: dict[int, int] = {}
         self._apply_default_column_widths()
+        self._apply_technical_column_visibility()
         root.addWidget(self.table)
 
         self._knob_statuses: dict[str, str] = {}
@@ -1795,6 +1801,7 @@ class MainWindow(TableMixin, QMainWindow):
             self.font_spinner.setFont(font)
             self.reboot_toggle.setFont(font)
             self.advanced_toggle.setFont(font)
+            self.technical_columns_toggle.setFont(font)
             for r in range(self.table.rowCount()):
                 for c in range(self.table.columnCount()):
                     it = self.table.item(r, c)
@@ -2935,6 +2942,16 @@ class MainWindow(TableMixin, QMainWindow):
             if action.isSeparator():
                 continue
             action.setIcon(factory_icon)
+
+    def _apply_technical_column_visibility(self) -> None:
+        show = bool(self.state.get("show_technical_columns", False))
+        for col in (4, 7, 8):
+            self.table.setColumnHidden(col, not show)
+
+    def _on_technical_columns_toggle(self, enabled: bool) -> None:
+        self.state["show_technical_columns"] = bool(enabled)
+        save_state(self.state)
+        self._apply_technical_column_visibility()
 
     def _on_advanced_mode_toggle(self, enabled: bool) -> None:
         self.state["advanced_mode_enabled"] = bool(enabled)

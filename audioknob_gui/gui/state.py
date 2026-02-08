@@ -38,6 +38,7 @@ def load_state() -> dict:
         "audio_core_plan_expanded": True,  # bool
         "view_tab": "all",  # str
         "advanced_mode_enabled": False,  # bool
+        "show_technical_columns": False,  # bool (Req/Risk/CLI)
         "pipewire_quantum": None,  # int (32..1024) or None
         "pipewire_sample_rate": None,  # int (44100/48000/88200/96000/192000) or None
         "pipewire_clock_allowed_rates": None,  # list[int] | None
@@ -122,6 +123,8 @@ def load_state() -> dict:
             data["view_tab"] = "all"
         if "advanced_mode_enabled" not in data:
             data["advanced_mode_enabled"] = bool(data.get("audio_session_enabled", False))
+        if "show_technical_columns" not in data:
+            data["show_technical_columns"] = False
         data.pop("audio_session_enabled", None)
         data.pop("audio_session_knobs", None)
         if "pipewire_quantum" not in data:
@@ -277,6 +280,10 @@ def load_state() -> dict:
                     data[key] = None
         if data.get("advanced_mode_enabled") is not None and not isinstance(data.get("advanced_mode_enabled"), bool):
             data["advanced_mode_enabled"] = False
+        if data.get("show_technical_columns") is not None and not isinstance(
+            data.get("show_technical_columns"), bool
+        ):
+            data["show_technical_columns"] = False
         if data.get("irq_housekeeping_auto") is not None and not isinstance(data.get("irq_housekeeping_auto"), bool):
             data["irq_housekeeping_auto"] = True
         if data.get("system_profile") is not None and not isinstance(data.get("system_profile"), dict):

@@ -52,6 +52,7 @@
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
 - **Presets workflow** - Tools → Presets exposes Reference Preset and Factory Preset actions without adding new table columns.
+- **Technical columns toggle** - header toggle shows/hides Req/Risk/CLI columns; default is hidden for simpler workflow.
 - **Tx History detail columns** - Tx History table includes Knob IDs and expanded Files/Effects summaries for quicker row-level audits.
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
@@ -84,6 +85,7 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
+- Req./Risk/CLI are technical columns hidden by default; enable them with the **Technical columns** toggle.
 - Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Preset actions live in Tools → Presets.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
@@ -93,7 +95,7 @@ Notes:
 - PipeWire config knobs (clock constraints, memory lock, RT module, data loops) show a locked Apply action until configured; Configure stays available.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
-- Sorting by Category/Req./Status/Risk keeps grouped headers; other columns sort flat.
+- Sorting by Category/Status keeps grouped headers by default; Req./Risk grouping is available when technical columns are shown.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
 - IRQ pinning uses the Config column to select devices and CPU cores; PCI devices map directly to IRQs, USB maps to host controllers. Apply also sweeps non-audio IRQs off the selected audio cores (using IRQ Housekeeping cores if set, otherwise all cores minus audio cores) and enables `audioknob-irq-pinning.service` so pinning persists across reboots. IRQ Housekeeping supports an Auto mode that inverts selected audio cores.
 - Header row includes the queued changes label, a Conflicts indicator (when present), and Apply/Apply & Reboot button that executes queued changes.
@@ -1066,7 +1068,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Req., Status, Category, Risk, CLI). Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
+**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Req., Status, Category, Risk, CLI). Req./Risk/CLI are hidden by default behind the **Technical columns** toggle. Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
 
 **Detection needed:**
 ```python
