@@ -41,6 +41,8 @@ from audioknob_gui.gui.worker_api import (
 
 REFERENCE_PRESET_LABEL = "Reference Preset"
 FACTORY_PRESET_LABEL = "Factory Preset"
+REFERENCE_PRESET_DOT_COLOR = "#4a90e2"
+FACTORY_PRESET_DOT_COLOR = "#2fbf71"
 
 
 def _status_for_preset_compare(value: object) -> str | None:
@@ -225,16 +227,28 @@ def set_baseline_buttons_enabled(ui, enabled: bool) -> None:
         action = getattr(ui, name, None)
         if action is not None:
             action.setEnabled(enabled)
-    factory_locked = factory_preset_locked(ui)
-    for name in ("act_factory_capture", "act_factory_import"):
-        action = getattr(ui, name, None)
-        if action is not None:
-            action.setEnabled(enabled and not factory_locked)
-            action.setToolTip(_factory_lock_message(ui) if factory_locked else "")
-    for name in ("act_factory_export", "act_factory_restore", "act_factory_reset"):
+    factory_text = {
+        "act_factory_capture": f"Capture {FACTORY_PRESET_LABEL}...",
+        "act_factory_import": f"Import {FACTORY_PRESET_LABEL}...",
+        "act_factory_export": f"Export {FACTORY_PRESET_LABEL}...",
+        "act_factory_restore": f"Queue Restore {FACTORY_PRESET_LABEL}...",
+        "act_factory_reset": f"{FACTORY_PRESET_LABEL} (Reset All)...",
+    }
+    for name, text in factory_text.items():
         action = getattr(ui, name, None)
         if action is not None:
             action.setEnabled(enabled)
+            action.setText(text)
+            action.setToolTip("")
+    if factory_preset_locked(ui):
+        lock_tip = _factory_lock_message(ui)
+        for name in ("act_factory_capture", "act_factory_import"):
+            action = getattr(ui, name, None)
+            if action is None:
+                continue
+            action.setEnabled(enabled)
+            action.setToolTip(lock_tip)
+            action.setText(f"{factory_text[name]} (Locked)")
 
 
 def set_baseline_state(
@@ -1361,6 +1375,7 @@ def apply_baseline_statuses(ui) -> None:
     baseline_map = baseline if isinstance(baseline, dict) else {}
     factory_map = factory if isinstance(factory, dict) else {}
     matches: dict[str, str] = {}
+    flags: dict[str, dict[str, bool]] = {}
     for knob in ui.registry:
         current = _status_for_preset_compare(ui._knob_statuses.get(knob.id))
         if current is None:
@@ -1380,7 +1395,9 @@ def apply_baseline_statuses(ui) -> None:
 
         if ref_match or factory_match:
             matches[knob.id] = _preset_match_summary(ref_match, factory_match)
+            flags[knob.id] = {"reference": ref_match, "factory": factory_match}
     ui._knob_preset_matches = matches
+    ui._knob_preset_flags = flags
 
 
 def rt_limits_active(ui) -> bool:
@@ -1576,6 +1593,12 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
         match = preset_matches.get(knob.id)
         if isinstance(match, str) and match:
             lines.append(f"preset_match: {match}")
+    preset_flags = getattr(ui, "_knob_preset_flags", {})
+    if isinstance(preset_flags, dict):
+        flag_item = preset_flags.get(knob.id)
+        if isinstance(flag_item, dict):
+            lines.append(f"reference_preset_match: {'yes' if flag_item.get('reference') else 'no'}")
+            lines.append(f"factory_preset_match: {'yes' if flag_item.get('factory') else 'no'}")
     baseline_statuses = ui.state.get("baseline_statuses")
     if isinstance(baseline_statuses, dict) and knob.id in baseline_statuses:
         lines.append(f"reference_preset_status: {baseline_statuses.get(knob.id)}")

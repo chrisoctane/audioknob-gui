@@ -175,6 +175,8 @@ is removed, the schema changes, or the distro/boot system changes, the scan runs
 profile scan on demand, view the resolved paths/commands, and optionally save
 the JSON snapshot to a file. This does not change system settings.
 **Tools menu:** Also includes **Presets** actions (Reference Preset + Factory Preset capture/import/export/restore), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
+Tx History includes expanded columns (Knobs, Knob IDs, Files, Effects) for quicker audit detail without opening each row.
+Preset menus/actions include color-dot markers (**blue = Reference**, **green = Factory**) for quick visual identification.
 
 ### Presets (first run)
 
@@ -194,6 +196,7 @@ Use **Tools → Presets → Reference Preset** to manage reference snapshots:
 
 Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - **Factory Preset** is immutable once set (initial capture, manual capture, or import); capture/import are blocked after that.
+- Factory capture/import actions remain visible and show **(Locked)** with an explanation dialog when clicked.
 - **Export/Queue Restore Factory Preset...** remain available.
 - **Factory Preset (Reset All)...** performs a full “leave no trace” reset of all Audioknob changes.
 - Factory preset snapshots are date-stamped (`factory_captured_at`) and include profile metadata.
@@ -203,7 +206,8 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - **Info** uses a simple tag format: `[i]` summary, `[r]` requirements, `[+]` benefits, `[-]` tradeoffs.
 - **Status/Check** shows live technical details (service states, group gaps, sysctl/sysfs values, PipeWire runtime settings, etc.); when status is **partial**, it includes a short reason line and raw checks below.
 - Partial reasons are explicit for mixed states (for example: masked/unmasked user services, partial group membership activation, sysfs match counts, and WirePlumber/PipeWire config drift).
-- Status column is operational only (`Applied`, `Not applied`, `Partial`, `Reboot`, `Unknown`, `N/A`), with preset-match hints shown as secondary tooltip metadata.
+- Status column is operational only (`Applied`, `Not applied`, `Partial`, `Reboot`, `Unknown`, `N/A`).
+- Preset matches are shown as color dots beside the status button (**blue = matches Reference Preset**, **green = matches Factory Preset**).
 
 ### Conflicts and blockers
 

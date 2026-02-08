@@ -419,14 +419,29 @@ class TableMixin:
         self._wrap_cell_widget(row, 5, widget)
 
 
-    def _preset_match_tip(self, knob_id: str) -> str:
-        matches = getattr(self, "_knob_preset_matches", {})
-        if not isinstance(matches, dict):
-            return ""
-        text = matches.get(knob_id)
-        if not isinstance(text, str) or not text.strip():
-            return ""
-        return f"Preset: {text.strip()}"
+    def _preset_match_flags(self, knob_id: str) -> tuple[bool, bool]:
+        flags = getattr(self, "_knob_preset_flags", {})
+        if not isinstance(flags, dict):
+            return False, False
+        row = flags.get(knob_id)
+        if not isinstance(row, dict):
+            return False, False
+        return bool(row.get("reference")), bool(row.get("factory"))
+
+
+    def _preset_dot_widget(self, color: str, tooltip: str) -> QWidget:
+        dot = QWidget()
+        dot.setFixedSize(10, 10)
+        dot.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        dot.setToolTip(tooltip)
+        dot.setStyleSheet(
+            "QWidget {"
+            f" background-color: {color};"
+            " border: 1px solid #1f1f1f;"
+            " border-radius: 5px;"
+            "}"
+        )
+        return dot
 
 
     def _status_display(self, status: str) -> tuple[str, str]:
@@ -875,9 +890,6 @@ class TableMixin:
                     status_tip = "Test result."
                 else:
                     status_tip = tooltip_map.get(display_status, "")
-                preset_tip = self._preset_match_tip(k.id)
-                if preset_tip:
-                    status_tip = preset_tip if not status_tip else f"{status_tip}\n{preset_tip}"
                 if conflict_ids:
                     status_tip = lock_reason if not status_tip else f"{status_tip}\n{lock_reason}"
             status_item = QTableWidgetItem("")
@@ -920,7 +932,25 @@ class TableMixin:
                 status_btn.setToolTip("Not applicable for read-only tests")
             else:
                 status_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
-            self._set_status_cell(r, status_btn)
+            reference_match, factory_match = self._preset_match_flags(k.id)
+            if reference_match or factory_match:
+                status_wrap = QWidget()
+                status_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                wrap_layout = QHBoxLayout(status_wrap)
+                wrap_layout.setContentsMargins(0, 0, 0, 0)
+                wrap_layout.setSpacing(5)
+                wrap_layout.addWidget(status_btn, 1)
+                if reference_match:
+                    wrap_layout.addWidget(
+                        self._preset_dot_widget("#4a90e2", "Matches Reference Preset")
+                    )
+                if factory_match:
+                    wrap_layout.addWidget(
+                        self._preset_dot_widget("#2fbf71", "Matches Factory Preset")
+                    )
+                self._set_status_cell(r, status_wrap)
+            else:
+                self._set_status_cell(r, status_btn)
 
             # Column 6: Category
             cat_item = QTableWidgetItem(self._category_label(str(k.category)))

@@ -61,7 +61,7 @@ from audioknob_gui.platform.packages import which_command
 from audioknob_gui.registry import load_registry
 
 from PySide6.QtCore import Qt, QThread
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -102,6 +102,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.state = load_state()
         self.registry = load_registry(_registry_path())
         self._knob_preset_matches: dict[str, str] = {}
+        self._knob_preset_flags: dict[str, dict[str, bool]] = {}
         build_dep = getattr(self, "_build_dependency_index", None)
         if callable(build_dep):
             self._dependency_index = build_dep()
@@ -241,6 +242,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.act_factory_export.triggered.connect(self._on_export_factory)
         self.act_factory_restore.triggered.connect(self._on_restore_factory)
         self.act_factory_reset.triggered.connect(self.on_reset_defaults)
+        self._apply_preset_menu_icons(baseline_menu, factory_menu)
         self.act_tx_history = tools_menu.addAction("Tx History...")
         self.act_tx_history.triggered.connect(self._on_show_tx_history)
         self._ensure_menu_width(tools_menu)
@@ -1275,9 +1277,9 @@ class MainWindow(TableMixin, QMainWindow):
         )
         layout.addWidget(factory_label)
 
-        table = QTableWidget(0, 7)
+        table = QTableWidget(0, 8)
         table.setHorizontalHeaderLabels(
-            ["TxID", "Scope", "When", "Knobs", "Files", "Effects", "Restore"]
+            ["TxID", "Scope", "When", "Knobs", "Knob IDs", "Files", "Effects", "Restore"]
         )
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -1317,17 +1319,39 @@ class MainWindow(TableMixin, QMainWindow):
                     if isinstance(kid, str)
                 ]
                 knobs_text = ", ".join(applied_names) if applied_names else "-"
+                knob_ids = [
+                    kid
+                    for kid in applied
+                    if isinstance(kid, str)
+                ]
+                knob_ids_text = ", ".join(knob_ids) if knob_ids else "-"
 
                 backups = item.get("backups") or []
-                file_paths = {
+                file_paths = sorted({
                     meta.get("path")
                     for meta in backups
                     if isinstance(meta, dict) and isinstance(meta.get("path"), str)
-                }
-                files_text = str(len(file_paths)) if file_paths else "-"
+                })
+                files_text = "-"
+                if file_paths:
+                    sample = file_paths[:2]
+                    files_text = ", ".join(sample)
+                    if len(file_paths) > 2:
+                        files_text += f" (+{len(file_paths) - 2} more)"
 
                 effects = item.get("effects") or []
-                effects_text = str(len(effects)) if isinstance(effects, list) and effects else "-"
+                effects_text = "-"
+                if isinstance(effects, list) and effects:
+                    summaries = [
+                        self._summarize_effect(effect)
+                        for effect in effects
+                        if isinstance(effect, dict)
+                    ]
+                    if summaries:
+                        sample = summaries[:2]
+                        effects_text = "; ".join(sample)
+                        if len(summaries) > 2:
+                            effects_text += f" (+{len(summaries) - 2} more)"
 
                 preview = self._format_tx_preview(item, titles)
 
@@ -1344,12 +1368,15 @@ class MainWindow(TableMixin, QMainWindow):
                 knobs_item = QTableWidgetItem(knobs_text)
                 knobs_item.setToolTip(preview)
                 table.setItem(row, 3, knobs_item)
+                knob_ids_item = QTableWidgetItem(knob_ids_text)
+                knob_ids_item.setToolTip(preview)
+                table.setItem(row, 4, knob_ids_item)
                 files_item = QTableWidgetItem(files_text)
                 files_item.setToolTip(preview)
-                table.setItem(row, 4, files_item)
+                table.setItem(row, 5, files_item)
                 effects_item = QTableWidgetItem(effects_text)
                 effects_item.setToolTip(preview)
-                table.setItem(row, 5, effects_item)
+                table.setItem(row, 6, effects_item)
 
                 restore_btn = QPushButton("Restore")
                 restore_btn.setToolTip(preview)
@@ -1390,7 +1417,7 @@ class MainWindow(TableMixin, QMainWindow):
                     worker.start()
 
                 restore_btn.clicked.connect(_restore)
-                table.setCellWidget(row, 6, restore_btn)
+                table.setCellWidget(row, 7, restore_btn)
 
             table.resizeColumnsToContents()
 
@@ -2883,6 +2910,31 @@ class MainWindow(TableMixin, QMainWindow):
             width = max(width, fm.horizontalAdvance(text))
         if width:
             menu.setMinimumWidth(width + 48)
+
+    def _preset_dot_icon(self, color: str) -> QIcon:
+        pixmap = QPixmap(12, 12)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QColor("#1f1f1f"))
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(1, 1, 9, 9)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _apply_preset_menu_icons(self, baseline_menu: QMenu, factory_menu: QMenu) -> None:
+        ref_icon = self._preset_dot_icon(status.REFERENCE_PRESET_DOT_COLOR)
+        factory_icon = self._preset_dot_icon(status.FACTORY_PRESET_DOT_COLOR)
+        baseline_menu.menuAction().setIcon(ref_icon)
+        factory_menu.menuAction().setIcon(factory_icon)
+        for action in baseline_menu.actions():
+            if action.isSeparator():
+                continue
+            action.setIcon(ref_icon)
+        for action in factory_menu.actions():
+            if action.isSeparator():
+                continue
+            action.setIcon(factory_icon)
 
     def _on_advanced_mode_toggle(self, enabled: bool) -> None:
         self.state["advanced_mode_enabled"] = bool(enabled)
