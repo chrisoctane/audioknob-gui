@@ -10,7 +10,7 @@
 
 ### What Works
 - **Release version**: 0.6.9
-- **45 knobs defined** (ALL 45 IMPLEMENTED, including Dev tab)
+- **47 knobs defined** (ALL 47 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Sortable table** - click column headers to sort
