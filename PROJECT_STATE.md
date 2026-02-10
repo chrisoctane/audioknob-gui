@@ -185,6 +185,7 @@ Next phases (planned, incremental):
 - Kernel cmdline apply can prompt to run the bootloader update command via pkexec.
 - Reboot-required knobs are gated behind a header toggle; group-required knobs stay locked while group changes are pending reboot.
 - Reboot-required toggle preserves scroll position instead of jumping the table.
+- Table refreshes now preserve scroll position (config changes no longer jump the view).
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
 - "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 - Resetting a knob that others depend on now prompts and cascades dependent resets when accepted.

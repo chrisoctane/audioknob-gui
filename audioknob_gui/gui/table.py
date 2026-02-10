@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -468,6 +468,22 @@ class TableMixin:
 
 
     def _populate(self) -> None:
+        # Repopulating the table rebuilds all rows/cell widgets, which can reset the
+        # scroll position (and even force a scroll-to-current-item). Preserve the
+        # user's view so config tweaks don't jump the UI away from where they're
+        # working.
+        v_scroll = None
+        h_scroll = None
+        try:
+            v_scroll = self.table.verticalScrollBar().value()
+            h_scroll = self.table.horizontalScrollBar().value()
+            self.table.clearSelection()
+            self.table.setCurrentCell(-1, -1)
+            self._clear_dim_hover()
+        except Exception:
+            v_scroll = None
+            h_scroll = None
+
         # Disable sorting during population to avoid issues
         self.table.setSortingEnabled(False)
         self.table.clearSpans()
@@ -1146,6 +1162,23 @@ class TableMixin:
             pass
         if hasattr(self, "_update_conflict_indicator"):
             self._update_conflict_indicator()
+
+        if v_scroll is not None or h_scroll is not None:
+            # Restore on the next tick so Qt's internal scroll adjustments (caused by
+            # rebuilding the model/widgets) don't override our intended position.
+            def _restore() -> None:
+                try:
+                    if v_scroll is not None:
+                        self.table.verticalScrollBar().setValue(v_scroll)
+                    if h_scroll is not None:
+                        self.table.horizontalScrollBar().setValue(h_scroll)
+                except Exception:
+                    pass
+
+            try:
+                QTimer.singleShot(0, _restore)
+            except Exception:
+                _restore()
 
 
     def _apply_default_column_widths(self) -> None:
