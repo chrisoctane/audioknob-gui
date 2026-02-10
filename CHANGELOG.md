@@ -4,6 +4,12 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.6.10] - 2026-02-10
+
+### Fixed
+- PipeWire RT Setup Safe RT preset now restores all setup dialog fields back to the preset/default values.
+- Table refreshes now preserve scroll position when changing configs (no more jumping away from the current view).
+
 ## [0.6.9] - 2026-02-08
 
 ### Fixed
