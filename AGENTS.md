@@ -16,7 +16,7 @@ It is for agent control only and does not change public docs.
 - `docs/KNOB_INTERACTIONS.md` before any IRQ/kernel/RT/power/CPU isolation changes.
 - `docs/knobs.md` before adding or implementing new knobs.
 - `CHANGELOG.md` for release work (must be updated per release).
-- `overseer.md` only when acting in an overseer/audit role.
+- `docs/internal/archive/overseer.md` only when acting in an overseer/audit role.
 
 If any doc is stale or conflicts with code, update it before proceeding.
 
