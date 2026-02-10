@@ -166,6 +166,7 @@ Next phases (planned, incremental):
 - QjackCtl info popup now reports the active preset explicitly and suppresses default/preserved preset noise when none are active.
 - Root worker reads GUI state from the invoking user when run via pkexec, so root knobs with per-user config (IRQ pinning) apply correctly.
 - RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
+- PipeWire RT Setup Safe RT preset now resets all fields in the setup dialog back to the preset/default values.
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - RTIRQ knob now writes an audioknob config block (name/high lists + priorities) and enables the rtirq service.
 - KDE Indexer status now handles balooctl output from stderr (balooctl6 on Tumbleweed).

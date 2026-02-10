@@ -315,6 +315,9 @@ class PipeWireRtSetupDialog(QDialog):
         self.resize(560, 460)
         limits_current = limits_current or {}
         module_current = module_current or {}
+        # Used by the Safe RT preset to restore text fields/combos after edits.
+        self._limits_defaults = dict(limits_current)
+        self._module_defaults = dict(module_current)
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Configure PipeWire realtime limits and module-rt behavior."))
@@ -410,6 +413,20 @@ class PipeWireRtSetupDialog(QDialog):
     def _apply_safe_rt_preset(self) -> None:
         self.limits_enabled.setChecked(False)
         self._on_limits_toggle()
+        group = self._limits_defaults.get("group")
+        if group:
+            idx = self.group.findData(group)
+            self.group.setCurrentIndex(idx if idx >= 0 else 0)
+        else:
+            self.group.setCurrentIndex(0)
+        self.rtprio.setText(str(self._limits_defaults.get("rtprio") or ""))
+        self.nice.setText(str(self._limits_defaults.get("nice") or ""))
+        self.memlock.setText(str(self._limits_defaults.get("memlock") or ""))
+
+        self.rt_prio.setText(str(self._module_defaults.get("rt_prio") or ""))
+        self.rt_soft.setText(str(self._module_defaults.get("rt_time_soft") or ""))
+        self.rt_hard.setText(str(self._module_defaults.get("rt_time_hard") or ""))
+        self.nice_level.setText(str(self._module_defaults.get("nice_level") or ""))
         self.rlimits_enabled.setCheckState(Qt.Unchecked)
         self.rtkit_enabled.setCheckState(Qt.Checked)
         self.rtportal_enabled.setCheckState(Qt.Checked)
