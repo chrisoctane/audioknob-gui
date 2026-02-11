@@ -100,6 +100,48 @@ python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 ```
 
+## v0.7.0 plan: Simple AudioKnob mode (draft)
+
+This section is a **design plan** for v0.7.0. It is not yet implemented.
+
+### Goal
+
+- Add a simple, musician-first home page with one large dial (**THE AudioKnob**) that composes an apply queue.
+- Keep the current full app and advanced workflows available.
+
+### User workflow (planned)
+
+1. App opens in **Simple mode** by default.
+2. User turns the dial to a number from **1 to 11**.
+3. That dial value builds a visible apply queue (no hidden changes).
+4. User clicks **Apply** (same existing queue/apply engine).
+5. User can switch to the existing full UI from **Tools**.
+
+### Safety model (planned)
+
+- The dial only manages knobs marked `simple_mode_eligible=true`.
+- **Dev-tab knobs are excluded** from dial control.
+- **Expert IRQ/core isolation knobs are excluded** from dial control.
+- Dial movement never auto-applies and never auto-queues resets.
+- Existing conflict checks and prompts still run at Apply time.
+
+### Preset behavior (planned)
+
+- Turning the dial does **not** modify Reference/Factory snapshots.
+- Reference/Factory restore workflows remain separate under **Tools → Presets**.
+- Dial behavior is queue-only; it does not infer or display an “achieved level” in v0.7.0.
+
+### Full app access (planned)
+
+- Tools menu adds a mode switch:
+  - **Switch to Full App**
+  - **Switch to Simple Knob**
+- Full app remains the authoritative view for advanced tuning.
+- Planned full-view tab naming cleanup:
+  - `Basics`
+  - `Cores/IRQ`
+  - `Dev`
+
 ### QjackCtl RT behavior
 
 - Applying **QjackCtl RT** updates the QjackCtl config (active preset if set, plus unscoped mirror), sets **Realtime=true** and **Priority=90**, preserves existing presets, disables **ServerConfig**, and configures a **PostStartupScript** so JACK is re-pinned on each start. It also attempts to pin any running `jackd` process immediately. If JACK is not running, the CPU pinning takes effect the next time you start it.

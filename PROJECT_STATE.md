@@ -233,6 +233,67 @@ Next phases (planned, incremental):
 4. Validate Dev tab PipeWire/WirePlumber knobs on Tumbleweed + Ubuntu (wpctl, pw-top, drop-ins)
 5. Confirm RTKit tuning paths/args from official distro docs before enabling apply
 
+### v0.7.0 Design Contract (planned, not implemented)
+
+This section defines the intended contract for the v0.7.0 “Simple AudioKnob” release.
+
+#### Product intent
+
+- Keep existing backend/apply/reset architecture intact.
+- Add a default **Simple mode** home page with a large dial (1..11) that composes queue entries.
+- Keep the existing table-based app as **Full mode** (user-switchable from Tools).
+
+#### Queue semantics
+
+- Dial movement is **queue composition only**.
+- Dial movement never auto-applies and never auto-queues resets.
+- Dial updates apply actions for simple-eligible knobs only, then user explicitly clicks Apply.
+- Existing apply pipeline stays authoritative:
+  - requirement checks
+  - conflict prompts
+  - root/user split apply
+  - transaction/audit logging
+
+#### Registry/schema additions (planned)
+
+- Add `risk_score` per knob: integer range `1..11`.
+- Add `simple_mode_eligible` per knob: boolean.
+- Keep existing `risk_level` (`low|medium|high`) for current table grouping/sorting compatibility.
+
+#### Safety cap and exclusions
+
+- Knobs with `simple_mode_eligible=false` are never dial-managed.
+- Default exclusions for v0.7.0:
+  - all Dev-tab knobs
+  - expert IRQ/core/isolation knobs (for example: IRQ pinning and kernel isolation family)
+- Simple mode must not expose hidden expert actions.
+
+#### UI mode model (planned)
+
+- Persist `ui_mode` in state (`simple` or `full`), default `simple`.
+- Tools menu provides explicit mode switch actions.
+- Full mode keeps all existing capabilities.
+- Planned full-mode tab clarity update: `Basics`, `Cores/IRQ`, `Dev`.
+
+#### Preset interaction contract
+
+- Dial changes do not mutate Reference/Factory snapshots.
+- Preset capture/import/export/restore flows remain unchanged.
+- Preset restores continue to use existing queue/restore machinery.
+
+#### Status model for simple mode
+
+- v0.7.0 simple mode is queue-first and does not compute an inferred “achieved level”.
+- If future releases add achieved-level semantics, they must define conservative rules for unknown/partial states first.
+
+#### Test requirements for v0.7.0
+
+- Deterministic dial queue composition for levels 1..11.
+- Assert excluded knobs never enter simple queue.
+- Assert Dev knobs never enter simple queue.
+- Assert existing conflict/apply pipeline behavior is unchanged when queue originates from dial.
+- Assert preset workflows remain functionally unchanged.
+
 ### Logs
 - GUI: `~/.local/state/audioknob-gui/logs/gui.log`
 - Worker (user scope): `~/.local/state/audioknob-gui/logs/worker.log`
