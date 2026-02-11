@@ -110,6 +110,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior i
 - Keep the current full app and advanced workflows available.
 - Dial includes a non-occluding center graphic slot (brand/art image).
 - Dial visual rotation is decoupled from queue recomposition so turning remains smooth while the setting list catches up.
+- Dial pointer is an extra-wide square-ended radial rectangle (no outline) that starts inside the center cap and extends just beyond knob edge for clear level reading.
 
 ### User workflow (planned)
 

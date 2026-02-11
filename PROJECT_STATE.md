@@ -21,6 +21,7 @@
 - **Simple dial center graphic slot** - dial supports an optional center image (no forced fallback art)
 - **Smooth simple dial rotation** - knob animation is decoupled from queue rebuild/populate work; dial motion stays responsive while queue updates are debounced
 - **Simple off detent** - dial extends below `1` to a `0` position that clears the simple-mode queue while preserving `1..11` marker placements
+- **Simple dial pointer bar** - indicator is an extra-wide, square-ended radial rectangle with no outline; it starts inside the center cap and runs just past the knob skirt
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages

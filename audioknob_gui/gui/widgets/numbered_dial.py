@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import Property, QPoint, QPointF, QEasingCurve, Qt, QPropertyAnimation
+from PySide6.QtCore import Property, QPoint, QPointF, QRectF, QEasingCurve, Qt, QPropertyAnimation
 from PySide6.QtGui import QColor, QPainterPath, QPen, QPainter, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QDial
 
@@ -232,18 +232,24 @@ class NumberedDial(QDial):
         painter.setBrush(top_grad)
         painter.drawEllipse(QPointF(0.0, 0.0), top_radius, top_radius)
 
-        # White indicator tab on the skirt (top-left in zero position).
+        # White indicator bar from inside the center cap to slightly beyond the knob skirt.
         painter.save()
         # Phase-align pointer with the minimum ring label.
         # One step on a 270° ring is 270/ring_span degrees (27° for 1..11).
         pointer_phase = -28.0 + (270.0 / float(ring_span))
         painter.rotate(pointer_phase)
-        marker_pen = QPen(QColor("#f6f6f6"), max(4.0, knob_outer_radius * 0.11), Qt.SolidLine, Qt.RoundCap)
-        painter.setPen(marker_pen)
-        painter.drawLine(
-            QPointF(0.0, -(knob_outer_radius - 11.0)),
-            QPointF(0.0, -(knob_outer_radius - 3.0)),
+        marker_width = max(10.0, knob_outer_radius * 0.16)
+        marker_inner = top_radius * 0.72
+        marker_outer = knob_outer_radius + 5.0
+        marker_rect = QRectF(
+            -(marker_width * 0.5),
+            -marker_outer,
+            marker_width,
+            marker_outer - marker_inner,
         )
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#f2f2f2"))
+        painter.drawRect(marker_rect)
         painter.restore()
 
         # Optional center art.
