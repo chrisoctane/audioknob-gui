@@ -749,6 +749,15 @@ class TableMixin:
             missing_deps = self._missing_dependencies(k)
             dependency_lock = bool(missing_deps) and status not in ("applied", "pending_reboot")
             locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock or advanced_gate_lock or dependency_lock
+            simple_owned_reason = ""
+            lock_fn = getattr(self, "_simple_owned_lock_reason", None)
+            if callable(lock_fn):
+                try:
+                    simple_owned_reason = str(lock_fn(k.id, status) or "")
+                except Exception:
+                    simple_owned_reason = ""
+            if simple_owned_reason:
+                locked = True
             requires_config = False
             if (
                 k.impl is not None
@@ -806,7 +815,9 @@ class TableMixin:
             
             # Determine lock reason
             lock_reason = ""
-            if group_pending_lock:
+            if simple_owned_reason:
+                lock_reason = simple_owned_reason
+            elif group_pending_lock:
                 lock_reason = f"Groups pending reboot: {', '.join(k.requires_groups)}"
             elif reboot_dep_lock:
                 lock_reason = f"Requires groups: {', '.join(k.requires_groups)} (Turn on Reboot-required changes)"
@@ -1118,10 +1129,11 @@ class TableMixin:
             # Column 3: Config widgets
             config_builder = get_config_widget_builder(k.id)
             config_widget = None
+            allow_config_row_dim = allow_config_when_row_dim(k.id, ctx) and not bool(simple_owned_reason)
             if config_builder:
                 config_widget = config_builder(self, k, ctx)
             if config_widget is not None:
-                if locked and isinstance(config_widget, QPushButton) and not allow_config_when_row_dim(k.id, ctx):
+                if locked and isinstance(config_widget, QPushButton) and not allow_config_row_dim:
                     config_widget.setEnabled(False)
                     config_widget.setStyleSheet(locked_style)
                 self._set_config_cell(r, config_widget)
@@ -1130,7 +1142,7 @@ class TableMixin:
             self._ensure_widget_cell_bg(r, 3)
 
             if row_dim:
-                allow_config = allow_config_when_row_dim(k.id, ctx)
+                allow_config = allow_config_row_dim
                 for col in range(self.table.columnCount()):
                     cell_widget = self.table.cellWidget(r, col)
                     if cell_widget is None:

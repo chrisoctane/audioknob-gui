@@ -13,6 +13,14 @@
 - **47 knobs defined** (ALL 47 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
+- **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
+- **Simple AudioKnob mode (v0.7 work-in-progress)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible apply queue
+- **Simple mode title** - home view heading is `AudioKnob`
+- **Mode switch in Tools** - single `Toggle View` action switches between Simple and Full UI
+- **Simple ownership locks** - knobs applied from simple mode are locked in full view as `Managed by AudioKnob` until explicitly released from Tools
+- **Simple dial center graphic slot** - dial supports an optional center image (no forced fallback art)
+- **Smooth simple dial rotation** - knob animation is decoupled from queue rebuild/populate work; dial motion stays responsive while queue updates are debounced
+- **Simple off detent** - dial extends below `1` to a `0` position that clears the simple-mode queue while preserving `1..11` marker placements
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
@@ -53,6 +61,7 @@
 - **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
 - **Presets workflow** - Tools → Presets exposes Reference Preset and Factory Preset actions without adding new table columns.
 - **Technical columns toggle** - header toggle shows/hides Req/Risk/CLI columns; default is hidden for simpler workflow.
+- **Universal font scaling** - font size selector now force-propagates to existing widgets in both Simple and Full views.
 - **Tx History detail columns** - Tx History table includes Knob IDs and expanded Files/Effects summaries for quicker row-level audits.
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
@@ -66,6 +75,7 @@
 - **Conflict prompt clarity** - conflict dialogs include per-knob active/queued state labels so the reason for each conflict pair is explicit.
 - **Conflict gating** - conflicting knobs show a red Conflict action that queues a reset for that knob.
 - **Conflict coverage** - power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches surface as warnings.
+- **Simple conflict gate** - simple queue composition skips CPU governor when power-profile backend resolves to tuned
 - **Combo wheel safety** - combo-box settings ignore mouse-wheel input unless their dropdown menu is open, preventing accidental changes while scrolling.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
@@ -86,6 +96,9 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
          (0)  (1)    (2)      (3)      (4)           (5)     (6)       (7)    (8)
 
 Notes:
+- App has two UI modes:
+  - **Simple mode**: large dial queue composer (default), with one plain-text **Apply queue** list on the left and knob on the right
+  - **Full mode**: existing tabbed table UI
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
 - Req./Risk/CLI are technical columns hidden by default; enable them with the **Technical columns** toggle.
 - Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Preset actions live in Tools → Presets.
@@ -233,20 +246,22 @@ Next phases (planned, incremental):
 4. Validate Dev tab PipeWire/WirePlumber knobs on Tumbleweed + Ubuntu (wpctl, pw-top, drop-ins)
 5. Confirm RTKit tuning paths/args from official distro docs before enabling apply
 
-### v0.7.0 Design Contract (planned, not implemented)
+### v0.7.0 Design Contract (planned; partially implemented)
 
-This section defines the intended contract for the v0.7.0 “Simple AudioKnob” release.
+This section defines the target contract for the v0.7.0 “Simple AudioKnob” release.
+Implemented pieces are reflected in "What Works"; remaining items below stay planned until completed.
 
 #### Product intent
 
 - Keep existing backend/apply/reset architecture intact.
-- Add a default **Simple mode** home page with a large dial (1..11) that composes queue entries.
+- Add a default **Simple mode** home page with a large dial (`0` off + `1..11`) that composes queue entries.
 - Keep the existing table-based app as **Full mode** (user-switchable from Tools).
 
 #### Queue semantics
 
 - Dial movement is **queue composition only**.
 - Dial movement never auto-applies and never auto-queues resets.
+- Dial level `0` is an explicit off state that composes an empty apply queue.
 - Dial updates apply actions for simple-eligible knobs only, then user explicitly clicks Apply.
 - Existing apply pipeline stays authoritative:
   - requirement checks
@@ -259,13 +274,157 @@ This section defines the intended contract for the v0.7.0 “Simple AudioKnob”
 - Add `risk_score` per knob: integer range `1..11`.
 - Add `simple_mode_eligible` per knob: boolean.
 - Keep existing `risk_level` (`low|medium|high`) for current table grouping/sorting compatibility.
+- Keep `draft_risk_score` as a design-time doc value only until score compression is finalized.
+
+#### Risk ranking contract (draft)
+
+- Ranking is evidence-based; every score must be defensible from knob behavior, not category name alone.
+- Ranking pool is **actionable knobs only** (settings that apply/reset state).
+- Excluded from ranking pool:
+  - `pipewire_xrun_monitor`, `stack_detect`, `scheduler_jitter_test`, `blocker_check` (testing/read-only diagnostics)
+  - `rtkit_daemon_tuning` (on-hold placeholder; not an active tuning path yet)
+- For initial simple mode scope, knobs that require per-knob config input (combos/dialogs/device/core selectors) are excluded from dial eligibility unless they have an explicit fixed simple preset contract.
+- Draft scoring is intentionally granular during design:
+  - `draft_risk_score`: open integer scale (lower is safer)
+  - `risk_score`: final release score compressed to `1..11` for dial behavior
+- Ordering rule:
+  - first: sort by `draft_risk_score` ascending
+  - tie-break: if technical risk is equal, **lower payoff ranks as higher risk** (small payoff does not justify side-effect cost)
+
+Scoring dimensions:
+- blast radius (app/session vs system runtime vs boot path)
+- persistence and reboot/logout requirements
+- rollback certainty (how deterministic reset is)
+- conflict pressure (from `docs/KNOB_INTERACTIONS.md`)
+- side-effect burden (power/thermal/security/diagnostic impact)
+- payoff (latency/stability benefit in common audio workflows)
+
+Tie-break implementation (draft policy):
+- start from technical risk band
+- for equal technical risk, apply payoff adjustment:
+  - high payoff: lower `draft_risk_score`
+  - medium payoff: no change
+  - low payoff: raise `draft_risk_score`
+
+#### Ranked actionable knobs (draft, ordered by risk)
+
+| Rank | Knob ID | draft_risk_score | Payoff | simple_mode_eligible | Evidence summary |
+|---:|---|---:|:---:|:---:|---|
+| 1 | `pipewire_quantum` | 10 | High | false | user-scope runtime setting, but excluded from simple mode (requires user-chosen value) |
+| 2 | `pipewire_sample_rate` | 11 | High | false | user-scope runtime setting, but excluded from simple mode (requires user-chosen value) |
+| 3 | `audio_group_membership` | 12 | High | true | prerequisite for RT workflows; root+session activation but predictable |
+| 4 | `inotify_max_watches` | 14 | Medium | true | bounded sysctl capacity change; low conflict and low side-effect surface |
+| 5 | `swappiness` | 16 | Medium | true | reversible sysctl tuning with modest workload-dependent impact |
+| 6 | `dirty_bytes` | 17 | Medium | true | reversible VM writeback tuning; moderate IO behavior tradeoff |
+| 7 | `disable_tracker` | 18 | Medium | false | excluded from simple mode; desktop search/indexing loss has non-audio usability impact |
+| 8 | `disable_baloo` | 19 | Medium | false | excluded from simple mode; desktop search/indexing loss has non-audio usability impact |
+| 9 | `usb_autosuspend_disable` | 20 | High | true | common USB audio stability gain; side effect is primarily power draw |
+| 10 | `cpu_dma_latency_udev` | 21 | Medium | true | deterministic udev policy; power tradeoff but low conflict risk |
+| 11 | `power_profile_performance` | 24 | High | true | broad performance gain; simple mode uses fixed backend `auto` preset |
+| 12 | `rt_limits_audio_group` | 25 | High | true | common RT requirement; root/session boundary adds operational cost |
+| 13 | `cpu_governor_performance_persistent` | 27 | Medium | true | persistent system policy with thermal/power impact and tuned conflicts |
+| 14 | `pipewire_pro_audio_profile` | 29 | Medium | false | can change node topology/channel layout; moderate payoff and app compatibility risk |
+| 15 | `thp_mode_madvise` | 31 | Low | false | kernel cmdline + reboot path for workload-specific gain; lower general payoff |
+| 16 | `qjackctl_server_prefix_rt` | 33 | Medium | false | app-specific workflow dependency; requires QjackCtl lifecycle discipline |
+| 17 | `pipewire_rt_setup` | 36 | Medium | true | composite root/user RT tuning; simple mode uses fixed Safe RT preset bundle |
+| 18 | `wireplumber_alsa_usb_tuning` | 37 | Medium | false | can fight newer auto-tuning behavior; device-specific troubleshooting burden |
+| 19 | `pipewire_mlock_policy` | 39 | Medium | true | dev-tab knob included only via fixed preset and bundled RT dependency chain |
+| 20 | `pipewire_rt_limits_group` | 40 | Medium | false | hidden sub-knob with root/session constraints; not suitable for simple dial |
+| 21 | `pipewire_rt_module_tuning` | 42 | Low | false | advanced module-level tuning with lower broad payoff |
+| 22 | `pipewire_clock_constraints` | 43 | Medium | false | conflict pressure with quantum/sample-rate boundaries |
+| 23 | `pipewire_data_loop_affinity` | 45 | Medium | false | affinity changes must align with CPU/IRQ isolation to avoid regressions |
+| 24 | `irqbalance_disable` | 50 | Medium | false | global IRQ distribution behavior change; conflict with pinning workflows |
+| 25 | `rtirq_enable` | 53 | Medium | false | depends on threaded IRQ context; partial/ineffective states are common |
+| 26 | `kernel_threadirqs` | 56 | Medium | true | boot-time IRQ threading policy; included in simple mode at higher risk tiers |
+| 27 | `kernel_cstate_limit` | 59 | Medium | false | kernel power-state cap; heat/suspend side effects |
+| 28 | `kernel_intel_idle_cstate_limit` | 60 | Medium | false | Intel-specific power-state cap; same thermal/suspend tradeoffs |
+| 29 | `kernel_nosmt` | 64 | Medium | false | topology/performance tradeoff; can invalidate core/IRQ plans |
+| 30 | `irq_pinning` | 67 | Medium | false | complex per-device affinity + housekeeping with kernel-managed IRQ exceptions |
+| 31 | `kernel_irqaffinity` | 69 | Medium | false | boot-level IRQ housekeeping policy across the system |
+| 32 | `kernel_rt_throttling_off` | 71 | High | false | can starve non-RT workloads and interfere with suspend safety |
+| 33 | `kernel_isolcpus` | 75 | Medium | false | expert isolation knob; high interaction pressure with other core knobs |
+| 34 | `kernel_nohz_full` | 76 | Medium | false | expert scheduler-tick isolation; sensitive to core-set consistency |
+| 35 | `kernel_rcu_nocbs` | 77 | Medium | false | expert RCU callback offload; tightly coupled with isolation strategy |
+| 36 | `kernel_nmi_watchdog_off` | 81 | Low | false | disables watchdog diagnostics; low direct payoff for most users |
+| 37 | `kernel_nosoftlockup` | 82 | Low | false | removes lockup diagnostics; low general payoff versus visibility loss |
+| 38 | `kernel_audit_off` | 84 | Low | false | reduces audit visibility/security telemetry; limited audio-specific gain |
+| 39 | `kernel_clocksource_tsc` | 87 | Medium | false | hardware-specific timing behavior; known instability risk on some systems |
+| 40 | `kernel_tsc_reliable` | 88 | Low | false | forces timing trust assumptions with low universal payoff |
+| 41 | `kernel_preempt_full` | 90 | Low | false | aggressive kernel behavior change; dev/validation burden remains high |
+| 42 | `kernel_mitigations_off` | 94 | Low | false | security hardening reduction with high downside and low general payoff |
+
+#### Compression to dial scale (planned)
+
+- Before v0.7 implementation freeze, convert `draft_risk_score` to `risk_score (1..11)`.
+- Compression must preserve relative ordering and documented exclusions.
+- If compression changes a knob’s dial eligibility threshold, update both this file and `PLAN.md` in the same change.
+
+#### Simple dependency bundles (planned)
+
+- Simple queue composition must auto-include hard dependencies (`depends_on`) for selected knobs.
+- Bundle rule for `rt_limits_audio_group`:
+  - always queue `audio_group_membership` with apply
+- Bundle rule for simple `pipewire_rt_setup`:
+  - queue `audio_group_membership`
+  - queue `pipewire_rt_limits_group` with fixed group `audio`
+  - queue `pipewire_rt_module_tuning` with one conservative RT-module preset
+  - queue `pipewire_mlock_policy` with one fixed mlock preset
+- Hidden/internal knobs in a bundle are not shown as separate simple controls.
+
+#### Simple conflict gate (planned)
+
+- Current simple-inclusion conflict review against `audioknob_gui/gui/conflicts.py`:
+  - `power_profile_performance` <-> `cpu_governor_performance_persistent`
+- Queue rule for this pair:
+  - if simple preset backend resolution is `tuned`, queue `power_profile_performance` and skip `cpu_governor_performance_persistent`
+  - if backend resolution is not `tuned`, queue both
+- No other pairwise conflicts exist in the current simple inclusion set.
+
+#### Simple ownership locks (planned)
+
+- After a successful simple apply, record `simple_owned_knobs` for knobs set by the dial (including bundle members).
+- In Full mode, rows for `simple_owned_knobs` in active states (`applied`, `pending_reboot`, `partial`) are locked:
+  - Action disabled
+  - Config disabled
+  - lock reason shown: "Managed by AudioKnob"
+- Status/Info remains available while locked.
+- Ownership is released when:
+  - the knob is reset by a simple-mode operation, or
+  - user explicitly selects **Tools -> Release AudioKnob Locks** (confirmation required; metadata-only action).
+
+#### Config-bearing knobs excluded from simple mode (planned)
+
+Config-driven knobs stay out of simple mode unless they have an approved fixed
+preset extraction.
+
+| Knob ID | Current config surface | Candidate on/off extraction (future, not implemented) |
+|---|---|---|
+| `power_profile_performance` | backend selector (auto/powerprofilesctl/tuned) | Approved: On => force backend `auto` and apply performance profile |
+| `pipewire_rt_setup` | multi-field RT setup dialog | Approved: On => fixed Safe RT preset bundle |
+| `pipewire_rt_limits_group` | group selection dialog | Internal bundle member: fixed group `audio` |
+| `pipewire_rt_module_tuning` | RT module fields dialog | Internal bundle member: one conservative RT-module preset |
+| `pipewire_mlock_policy` | memory lock policy dialog | Approved Dev inclusion: On => fixed mlock policy preset |
+| `pipewire_clock_constraints` | min/max/rate constraints dialog | Deferred: full app only (no simple preset in v0.7) |
+| `pipewire_data_loop_affinity` | data-loop affinity dialog | Deferred: full app only (coupled to core/IRQ strategy) |
+| `kernel_isolcpus` | CPU core selector dialog | Deferred: full app only (core isolation family) |
+| `kernel_nohz_full` | CPU core selector dialog | Deferred: full app only (core isolation family) |
+| `kernel_rcu_nocbs` | CPU core selector dialog | Deferred: full app only (core isolation family) |
+| `kernel_irqaffinity` | CPU core selector dialog (+auto mode) | Deferred: full app only (core isolation family) |
+| `pipewire_quantum` | buffer-size combo / dialog value | Deferred: full app only for v0.7 (user-variable target) |
+| `pipewire_sample_rate` | sample-rate combo / dialog value | Deferred: full app only for v0.7 (user-variable target) |
+| `qjackctl_server_prefix_rt` | CPU core selector dialog | Deferred: full app only (workflow-specific and core-coupled) |
+| `wireplumber_alsa_usb_tuning` | ALSA tuning dialog fields | Deferred: full app only (device-specific tuning) |
+| `pipewire_pro_audio_profile` | device selection dialog | Deferred: full app only (device/profile topology changes) |
+| `irq_pinning` | device + CPU core selector dialog | Deferred: full app only (advanced IRQ/core workflow) |
 
 #### Safety cap and exclusions
 
 - Knobs with `simple_mode_eligible=false` are never dial-managed.
 - Default exclusions for v0.7.0:
-  - all Dev-tab knobs
+  - Dev-tab knobs by default; only explicitly whitelisted fixed-preset entries may be included
   - expert IRQ/core/isolation knobs (for example: IRQ pinning and kernel isolation family)
+  - config-bearing knobs without an approved simple preset contract
+  - desktop indexer disable knobs (`disable_tracker`, `disable_baloo`) due non-audio usability impact
 - Simple mode must not expose hidden expert actions.
 
 #### UI mode model (planned)
@@ -288,7 +447,7 @@ This section defines the intended contract for the v0.7.0 “Simple AudioKnob”
 
 #### Test requirements for v0.7.0
 
-- Deterministic dial queue composition for levels 1..11.
+- Deterministic dial queue composition for levels 0..11.
 - Assert excluded knobs never enter simple queue.
 - Assert Dev knobs never enter simple queue.
 - Assert existing conflict/apply pipeline behavior is unchanged when queue originates from dial.

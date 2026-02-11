@@ -102,28 +102,63 @@ pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 
 ## v0.7.0 plan: Simple AudioKnob mode (draft)
 
-This section is a **design plan** for v0.7.0. It is not yet implemented.
+This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior is implemented; risk-score compression and final polish remain in progress.
 
 ### Goal
 
-- Add a simple, musician-first home page with one large dial (**THE AudioKnob**) that composes an apply queue.
+- Add a simple, musician-first home page with one large dial (**AudioKnob**) that composes an apply queue.
 - Keep the current full app and advanced workflows available.
+- Dial includes a non-occluding center graphic slot (brand/art image).
+- Dial visual rotation is decoupled from queue recomposition so turning remains smooth while the setting list catches up.
 
 ### User workflow (planned)
 
 1. App opens in **Simple mode** by default.
-2. User turns the dial to a number from **1 to 11**.
+2. User turns the dial to a level from **0 to 11** (`0` = Off, `1..11` = risk tiers).
 3. That dial value builds a visible apply queue (no hidden changes).
 4. User clicks **Apply** (same existing queue/apply engine).
 5. User can switch to the existing full UI from **Tools**.
 
+### Current simple inclusion set
+
+- `audio_group_membership`
+- `inotify_max_watches`
+- `swappiness`
+- `dirty_bytes`
+- `usb_autosuspend_disable`
+- `cpu_dma_latency_udev`
+- `power_profile_performance` (fixed preset: backend `auto`)
+- `rt_limits_audio_group`
+- `cpu_governor_performance_persistent` (skipped when power backend resolves to tuned)
+- `pipewire_rt_setup` (fixed Safe RT bundle)
+- `pipewire_mlock_policy` (fixed preset)
+- `kernel_threadirqs`
+
 ### Safety model (planned)
 
 - The dial only manages knobs marked `simple_mode_eligible=true`.
-- **Dev-tab knobs are excluded** from dial control.
+- Config-driven knobs (those needing per-knob values from combos/dialogs/selectors) are excluded unless they have a fixed simple preset contract.
+- Dev-tab knobs are excluded by default; only explicitly whitelisted fixed-preset entries may be included.
 - **Expert IRQ/core isolation knobs are excluded** from dial control.
+- `disable_tracker` and `disable_baloo` are excluded from simple mode due non-audio desktop usability impact.
+- Simple mode auto-queues dependency bundles (for example RT setup also queues its required RT limits/module pieces).
+- If a knob was applied by AudioKnob, the same knob row in Full mode is locked as **Managed by AudioKnob** to prevent mixed-workflow edits.
+- Full mode can release these locks only via an explicit Tools action (**Release AudioKnob Locks**).
 - Dial movement never auto-applies and never auto-queues resets.
+- Dial level `0` is an explicit off position that clears the simple-mode apply queue.
+- Dial input is debounced for queue recomposition to keep rotation smooth under heavier queue/status redraw paths.
 - Existing conflict checks and prompts still run at Apply time.
+
+### Risk levels (planned)
+
+- Ranking is evidence-based (blast radius, rollback certainty, conflict pressure, side effects, and payoff).
+- Testing/read-only knobs are excluded from dial ranking.
+- Config-driven knobs are excluded until they have a fixed simple-safe on/off preset path (current approved presets are documented in `PROJECT_STATE.md`).
+- During planning we keep a granular draft score; before release it is compressed to dial `risk_score` (`1..11`).
+- Simple mode uses an extra `0` detent as Off (outside risk ranking).
+- Included knobs are ordered by risk; when technical risk is equal, lower payoff ranks as higher risk.
+- The simple dial queues eligible knobs with `risk_score <= dial_value` after compression.
+- Full per-knob evidence and ordering live in `PROJECT_STATE.md` (v0.7.0 design contract).
 
 ### Preset behavior (planned)
 
@@ -133,9 +168,8 @@ This section is a **design plan** for v0.7.0. It is not yet implemented.
 
 ### Full app access (planned)
 
-- Tools menu adds a mode switch:
-  - **Switch to Full App**
-  - **Switch to Simple Knob**
+- Tools menu provides a single mode action: **Toggle View** (switches between Simple and Full).
+- Tools menu includes **Clear Queue** to remove all queued Apply/Reset actions before execution.
 - Full app remains the authoritative view for advanced tuning.
 - Planned full-view tab naming cleanup:
   - `Basics`
@@ -217,7 +251,7 @@ is removed, the schema changes, or the distro/boot system changes, the scan runs
 **Manual discovery:** Use **Tools → Scan System Profile...** to re-run the system
 profile scan on demand, view the resolved paths/commands, and optionally save
 the JSON snapshot to a file. This does not change system settings.
-**Tools menu:** Also includes **Presets** actions (Reference Preset + Factory Preset capture/import/export/restore), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
+**Tools menu:** Also includes **Clear Queue**, **Presets** actions (Reference Preset + Factory Preset capture/import/export/restore), **Tx History**, plus quick access to **Jitter Monitor**, **Jitter Test Snapshot**, and terminal launchers for **Latencytop** and **Cyclictest**.
 Tx History includes expanded columns (Knobs, Knob IDs, Files, Effects) for quicker audit detail without opening each row.
 Preset menus/actions include color-dot markers (**blue = Reference**, **green = Factory**) for quick visual identification.
 
@@ -265,7 +299,10 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - Conflict indicator counts only active/queued knobs (applied/pending/running/partial or queued apply), so idle defaults do not appear as conflicts.
 - The row-level **Conflict** button uses the same active/queued rules as the header counter, so row badges and header counts stay consistent.
 - Conflict warnings cover power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
+- In simple mode, when power profile resolves to `tuned`, the queue skips CPU governor to avoid the tuned/governor conflict path.
 - Combo-box settings ignore mouse-wheel changes unless the dropdown menu is open, preventing accidental value flips while scrolling.
+- Simple mode shows one plain-text list on the left: **Apply queue** (no pane, no separate selected-settings list).
+- The font size selector applies universally across existing widgets so simple/full text tracks the selected size.
 
 ---
 

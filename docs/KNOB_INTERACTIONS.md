@@ -18,6 +18,7 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
   - CPU C-States / Intel C-States limiters
 - powerprofilesctl can be changed by desktop UI (KDE taskbar / GNOME power).
 - If tuned is active, it should be treated as the authoritative power manager.
+- In Simple AudioKnob mode, queue composition skips CPU Performance when backend resolution is tuned.
 
 ### CPU Performance (persistent governor)
 - Conflicts with tuned profiles that manage CPU governor.
@@ -76,6 +77,12 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - RT module tuning depends on RT limits and/or RTKit/portal behavior.
 - PW RT Setup combines RT limits + RT module tuning; if module fields are left blank, only limits are applied.
 - Data loop affinity should align with CPU isolation/pinning choices to avoid jitter.
+- Simple AudioKnob uses a fixed Safe RT preset bundle (group `audio`, conservative RT-module fields, fixed mlock policy).
+
+### Simple AudioKnob mode
+- Dial movement composes queue entries only; it never auto-applies and never auto-queues resets.
+- Knobs applied from simple mode are treated as managed in Full mode to avoid mixed-workflow edits.
+- Full-mode managed locks are released only by explicit user action (Tools -> Release AudioKnob Locks).
 
 ### WirePlumber ALSA USB Tuning
 - Manual ALSA period settings can fight PipeWire's auto-tuning (0.3.43+).

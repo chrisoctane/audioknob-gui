@@ -17,6 +17,7 @@ from audioknob_gui.gui import status as status
 from audioknob_gui.gui.actions import QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger, _log_gui_audit
 from audioknob_gui.gui.state import _state_path, load_state, save_state
+from audioknob_gui.gui import simple_mode
 from audioknob_gui.gui.system_info import (
     _kernel_cmdline_tokens,
     _kernel_is_rt,
@@ -57,11 +58,12 @@ from audioknob_gui.gui.knobs.registry import (
     build_info_extra_html,
     handle_configure_knob,
 )
+from audioknob_gui.gui.widgets.numbered_dial import NumberedDial
 from audioknob_gui.gui.widgets.no_wheel_combo import ComboWheelGuard
 from audioknob_gui.platform.packages import which_command
 from audioknob_gui.registry import load_registry
 
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -95,7 +97,6 @@ from shiboken6 import isValid
 class MainWindow(TableMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        from PySide6.QtCore import QTimer
         self.setWindowTitle(_app_title())
         self.resize(980, 640)
 
@@ -125,6 +126,11 @@ class MainWindow(TableMixin, QMainWindow):
         self._queue_busy = False
         self._queue_needs_reboot = False
         self._queue_inflight: list[tuple[str, str]] = []
+        self._queue_origin = "full"
+        self._ui_mode = str(self.state.get("ui_mode", "simple"))
+        if self._ui_mode not in ("simple", "full"):
+            self._ui_mode = "simple"
+        self.state["ui_mode"] = self._ui_mode
         
         # Apply saved font size
         self._apply_font_size(self.state.get("font_size", 11))
@@ -215,6 +221,13 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_tools_menu = QPushButton("Tools")
         self.btn_tools_menu.setToolTip("Diagnostics, presets, and history")
         tools_menu = QMenu(self.btn_tools_menu)
+        self.act_toggle_view = tools_menu.addAction("Toggle View")
+        self.act_toggle_view.triggered.connect(self._on_toggle_view)
+        self.act_release_simple_locks = tools_menu.addAction("Release AudioKnob Locks")
+        self.act_release_simple_locks.triggered.connect(self._on_release_simple_locks)
+        self.act_clear_queue = tools_menu.addAction("Clear Queue")
+        self.act_clear_queue.triggered.connect(self._on_clear_queue)
+        tools_menu.addSeparator()
         self.act_discover_system = tools_menu.addAction("Scan System Profile...")
         self.act_discover_system.triggered.connect(self._on_discover_system)
         self.act_jitter_monitor = tools_menu.addAction("Jitter Monitor...")
@@ -271,10 +284,14 @@ class MainWindow(TableMixin, QMainWindow):
         root.addLayout(top)
         root.addWidget(self.reboot_banner)
 
+        self.simple_panel = self._build_simple_panel()
+        root.addWidget(self.simple_panel)
+
         advanced_note = QLabel(
             "Advanced settings can reduce performance in other intensive workloads. "
             "Use the Advanced knobs toggle to make changes; reboot may be required."
         )
+        self.advanced_note = advanced_note
         advanced_note.setWordWrap(True)
         root.addWidget(advanced_note)
 
@@ -345,6 +362,7 @@ class MainWindow(TableMixin, QMainWindow):
         self._refresh_user_groups()
         self._refresh_statuses()
         self._populate()
+        self._sync_ui_mode(initial=True)
         QTimer.singleShot(0, self._apply_window_constraints)
 
         self.table.cellEntered.connect(self._on_row_hover)
@@ -803,6 +821,242 @@ class MainWindow(TableMixin, QMainWindow):
             return [k for k in self.registry if k.id in dev_ids and k.id not in hidden_ids]
         return [k for k in self.registry if k.id not in core_ids and k.id not in dev_ids and k.id not in hidden_ids]
 
+    def _build_simple_panel(self) -> QWidget:
+        panel = QWidget()
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(0, 4, 0, 4)
+        root.setSpacing(10)
+
+        self.simple_title_label = QLabel("AudioKnob")
+        self.simple_title_label.setAlignment(Qt.AlignCenter)
+        self.simple_title_label.setStyleSheet("font-weight: 700;")
+        root.addWidget(self.simple_title_label)
+
+        hint = QLabel(
+            "Turn the dial to build the queue. Apply runs the existing pipeline with checks and prompts."
+        )
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        content_row = QHBoxLayout()
+        content_row.setSpacing(24)
+        content_row.setContentsMargins(0, 2, 0, 0)
+
+        self.simple_list_label = QLabel("")
+        self.simple_list_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.simple_list_label.setWordWrap(True)
+        self.simple_list_label.setTextFormat(Qt.RichText)
+        self.simple_list_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.simple_list_label.setMinimumWidth(280)
+        content_row.addWidget(self.simple_list_label, 3)
+
+        dial_col = QVBoxLayout()
+        dial_col.setSpacing(6)
+        self.simple_dial = NumberedDial()
+        self.simple_dial.setRange(simple_mode.MIN_LEVEL, simple_mode.MAX_LEVEL)
+        self.simple_dial.setValue(simple_mode.clamp_level(self.state.get("simple_level", 1)))
+        self._load_simple_dial_center_graphic()
+        self.simple_dial.valueChanged.connect(self._on_simple_level_changed)
+        self.simple_dial.sliderReleased.connect(self._commit_pending_simple_level)
+        dial_col.addWidget(self.simple_dial, alignment=Qt.AlignCenter)
+
+        self._simple_level_pending = simple_mode.clamp_level(self.state.get("simple_level", 1))
+        self._simple_level_commit_timer = QTimer(self)
+        self._simple_level_commit_timer.setSingleShot(True)
+        self._simple_level_commit_timer.setInterval(110)
+        self._simple_level_commit_timer.timeout.connect(self._commit_pending_simple_level)
+
+        self.simple_level_label = QLabel("")
+        self.simple_level_label.setAlignment(Qt.AlignCenter)
+        dial_col.addWidget(self.simple_level_label)
+
+        self.simple_summary_label = QLabel("")
+        self.simple_summary_label.setAlignment(Qt.AlignCenter)
+        self.simple_summary_label.setWordWrap(True)
+        dial_col.addWidget(self.simple_summary_label)
+        dial_col.addStretch(1)
+
+        content_row.addLayout(dial_col, 2)
+        root.addLayout(content_row)
+
+        return panel
+
+    def _load_simple_dial_center_graphic(self) -> None:
+        if not hasattr(self, "simple_dial"):
+            return
+        configured = str(self.state.get("simple_knob_center_image") or "").strip()
+        if configured and self.simple_dial.set_center_image(configured):
+            return
+        self.simple_dial.clear_center_image()
+
+    def _current_simple_level(self) -> int:
+        return simple_mode.clamp_level(self.state.get("simple_level", simple_mode.MIN_LEVEL))
+
+    def _on_simple_level_changed(self, value: int) -> None:
+        level = simple_mode.clamp_level(value)
+        self._simple_level_pending = level
+        if level == 0:
+            self.simple_level_label.setText(f"Risk level: 0/{simple_mode.MAX_LEVEL} (Off)")
+        else:
+            self.simple_level_label.setText(f"Risk level: {level}/{simple_mode.MAX_LEVEL}")
+        self.simple_summary_label.setText("Updating queue...")
+        if hasattr(self, "_simple_level_commit_timer"):
+            self._simple_level_commit_timer.start()
+        else:
+            self._apply_simple_level(level)
+
+    def _commit_pending_simple_level(self) -> None:
+        level = simple_mode.clamp_level(getattr(self, "_simple_level_pending", self._current_simple_level()))
+        if hasattr(self, "_simple_level_commit_timer") and self._simple_level_commit_timer.isActive():
+            self._simple_level_commit_timer.stop()
+        self._apply_simple_level(level)
+
+    def _apply_simple_level(self, level: int) -> None:
+        level = simple_mode.clamp_level(level)
+        self._simple_level_pending = level
+        if hasattr(self, "_simple_level_commit_timer") and self._simple_level_commit_timer.isActive():
+            self._simple_level_commit_timer.stop()
+        if hasattr(self, "simple_dial"):
+            self.simple_dial.blockSignals(True)
+            self.simple_dial.setValue(level)
+            self.simple_dial.blockSignals(False)
+        self.state["simple_level"] = level
+        simple_mode.apply_fixed_presets(self.state, level=level)
+        backend_is_tuned = self._power_profile_backend_is_tuned()
+        queue_ids = simple_mode.compose_queue_ids(level, backend_is_tuned=backend_is_tuned)
+        self._queued_actions = {kid: "apply" for kid in queue_ids}
+        self._save_queue()
+        save_state(self.state)
+        self._update_queue_ui()
+        self._populate()
+        self._refresh_simple_summary(level, queue_ids)
+
+    def _refresh_simple_summary(self, level: int, queue_ids: list[str]) -> None:
+        by_id = {k.id: k.title for k in self.registry}
+        queued_titles = [by_id.get(kid, kid) for kid in queue_ids]
+        if level == 0:
+            self.simple_level_label.setText(f"Risk level: 0/{simple_mode.MAX_LEVEL} (Off)")
+        else:
+            self.simple_level_label.setText(f"Risk level: {level}/{simple_mode.MAX_LEVEL}")
+        self.simple_summary_label.setText(f"Queued apply knobs: {len(queue_ids)}")
+        if queued_titles:
+            lines = ["<b>Apply queue</b>"]
+            for title in queued_titles:
+                lines.append(f"• {html_lib.escape(title)}")
+            self.simple_list_label.setText("<br>".join(lines))
+        else:
+            self.simple_list_label.setText("No settings queued.")
+
+    def _on_toggle_view(self) -> None:
+        next_mode = "full" if self._ui_mode == "simple" else "simple"
+        self._set_ui_mode(next_mode)
+
+    def _set_ui_mode(self, mode: str) -> None:
+        mode = str(mode).strip().lower()
+        if mode not in ("simple", "full"):
+            mode = "simple"
+        if mode == self._ui_mode:
+            return
+        if self._ui_mode == "simple" and mode == "full":
+            self._commit_pending_simple_level()
+        self._ui_mode = mode
+        self.state["ui_mode"] = mode
+        save_state(self.state)
+        self._sync_ui_mode(initial=False)
+
+    def _sync_ui_mode(self, *, initial: bool) -> None:
+        simple = self._ui_mode == "simple"
+        if hasattr(self, "simple_panel"):
+            self.simple_panel.setVisible(simple)
+        if hasattr(self, "advanced_note"):
+            self.advanced_note.setVisible(not simple)
+        if hasattr(self, "view_tabs"):
+            self.view_tabs.setVisible(not simple)
+        if hasattr(self, "table"):
+            self.table.setVisible(not simple)
+        if hasattr(self, "reboot_toggle"):
+            self.reboot_toggle.setVisible(not simple)
+        if hasattr(self, "advanced_toggle"):
+            self.advanced_toggle.setVisible(not simple)
+        if hasattr(self, "technical_columns_toggle"):
+            self.technical_columns_toggle.setVisible(not simple)
+        if hasattr(self, "cores_panel"):
+            if simple:
+                self.cores_panel.setVisible(False)
+            else:
+                self._update_cores_panel_visibility()
+        if hasattr(self, "act_toggle_view"):
+            self.act_toggle_view.setEnabled(True)
+            self.act_toggle_view.setText("Toggle View")
+        if hasattr(self, "act_release_simple_locks"):
+            self.act_release_simple_locks.setEnabled(bool(self._simple_owned_knob_ids()))
+        if simple:
+            self._apply_simple_level(self._current_simple_level())
+        else:
+            if not initial:
+                self._populate()
+            self._update_queue_ui()
+
+    def _simple_owned_knob_ids(self) -> set[str]:
+        raw = self.state.get("simple_owned_knobs")
+        if not isinstance(raw, list):
+            return set()
+        return {str(x) for x in raw if isinstance(x, (str, int))}
+
+    def _set_simple_owned_knob_ids(self, knob_ids: set[str]) -> None:
+        self.state["simple_owned_knobs"] = sorted({str(x) for x in knob_ids})
+        save_state(self.state)
+        if hasattr(self, "act_release_simple_locks"):
+            self.act_release_simple_locks.setEnabled(bool(knob_ids))
+
+    def _simple_owned_lock_reason(self, knob_id: str, status: str) -> str:
+        if self._ui_mode != "full":
+            return ""
+        if knob_id not in self._simple_owned_knob_ids():
+            return ""
+        if status not in ("applied", "pending_reboot", "partial"):
+            return ""
+        return "Managed by AudioKnob. Use Tools -> Release AudioKnob Locks."
+
+    def _on_release_simple_locks(self) -> None:
+        owned = self._simple_owned_knob_ids()
+        if not owned:
+            QMessageBox.information(self, "Release AudioKnob Locks", "No AudioKnob locks are active.")
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Release AudioKnob Locks")
+        box.setText("Release managed locks for AudioKnob-applied settings?")
+        box.setInformativeText(
+            "This only clears lock metadata. It does not apply or reset any system settings."
+        )
+        box.setStandardButtons(QMessageBox.Cancel | QMessageBox.Ok)
+        if box.exec() != QMessageBox.Ok:
+            return
+        self._set_simple_owned_knob_ids(set())
+        self._populate()
+
+    def _on_clear_queue(self) -> None:
+        if self._queue_busy:
+            QMessageBox.information(
+                self,
+                "Clear Queue",
+                "Queue is running. Wait for current apply/reset operations to finish.",
+            )
+            return
+        if not self._queued_actions:
+            QMessageBox.information(self, "Clear Queue", "Queue is already empty.")
+            return
+        if QMessageBox.question(self, "Clear Queue", "Clear all queued Apply/Reset actions?") != QMessageBox.Yes:
+            return
+        self._queued_actions = {}
+        if hasattr(self, "_simple_level_commit_timer") and self._simple_level_commit_timer.isActive():
+            self._simple_level_commit_timer.stop()
+        self._save_queue()
+        self._update_queue_ui()
+        self._populate()
+
     def _refresh_user_groups(self) -> None:
         requirements.refresh_user_groups(self)
 
@@ -859,6 +1113,9 @@ class MainWindow(TableMixin, QMainWindow):
         if not self._baseline_ready:
             return False, "Reference preset scan pending"
         status = self._knob_statuses.get(k.id, "unknown")
+        simple_lock_reason = self._simple_owned_lock_reason(k.id, status)
+        if simple_lock_reason:
+            return False, "Managed by AudioKnob"
         if status == "not_applicable":
             return False, "Not available on this system"
         reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
@@ -1715,6 +1972,17 @@ class MainWindow(TableMixin, QMainWindow):
             enabled = False
         self.btn_apply_queue.setEnabled(enabled)
         self.btn_apply_queue_reboot.setEnabled(enabled and self._queue_requires_reboot())
+        if self._ui_mode == "simple" and hasattr(self, "simple_list_label"):
+            ordered_apply = [
+                kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if self._queued_actions.get(kid) == "apply"
+            ]
+            extras = [
+                kid
+                for kid, action in self._queued_actions.items()
+                if action == "apply" and kid not in ordered_apply
+            ]
+            ordered_apply.extend(sorted(extras))
+            self._refresh_simple_summary(self._current_simple_level(), ordered_apply)
 
     def _apply_queue_button_state(
         self, btn: QPushButton, knob_id: str, action: str, *, row_dim: bool = False
@@ -1793,16 +2061,12 @@ class MainWindow(TableMixin, QMainWindow):
         font = QApplication.instance().font()
         font.setPointSize(size)
         QApplication.instance().setFont(font)
-        # Force-propagate the font to key widgets and table contents.
-        # (On some platforms/styles, changing QApplication font doesn't fully repaint existing widgets.)
+        # Force-propagate the font to all existing widgets.
+        # (On some platforms/styles, changing QApplication font alone misses already-built widgets.)
         try:
             self.setFont(font)
-            self.table.setFont(font)
-            self.table.horizontalHeader().setFont(font)
-            self.font_spinner.setFont(font)
-            self.reboot_toggle.setFont(font)
-            self.advanced_toggle.setFont(font)
-            self.technical_columns_toggle.setFont(font)
+            for widget in self.findChildren(QWidget):
+                widget.setFont(font)
             for r in range(self.table.rowCount()):
                 for c in range(self.table.columnCount()):
                     it = self.table.item(r, c)
@@ -3057,6 +3321,12 @@ class MainWindow(TableMixin, QMainWindow):
             return "cancel"
 
     def _on_apply_queue(self, reboot_after: bool) -> bool:
+        if (
+            self._ui_mode == "simple"
+            and hasattr(self, "_simple_level_commit_timer")
+            and self._simple_level_commit_timer.isActive()
+        ):
+            self._commit_pending_simple_level()
         if not self._queued_actions or self._queue_busy:
             return False
         if self._busy_knobs:
@@ -3137,6 +3407,7 @@ class MainWindow(TableMixin, QMainWindow):
             ",".join(f"{kid}:{action}" for kid, action in queued),
         )
 
+        self._queue_origin = self._ui_mode
         self._queue_needs_reboot = reboot_after
         self._queue_busy = True
         self._queue_inflight = list(queued)
@@ -3382,7 +3653,30 @@ class MainWindow(TableMixin, QMainWindow):
             if applied_ids or restored_ids:
                 pass
 
+        if success and self._queue_origin == "simple":
+            owned = self._simple_owned_knob_ids()
+            changed = False
+            for kid in applied_ids:
+                if kid in simple_mode.SIMPLE_MANAGED_KNOB_IDS and kid not in owned:
+                    owned.add(kid)
+                    changed = True
+            if {"pipewire_rt_limits_group", "pipewire_rt_module_tuning", "pipewire_mlock_policy"} & applied_ids:
+                if "pipewire_rt_setup" not in owned:
+                    owned.add("pipewire_rt_setup")
+                    changed = True
+            for kid in restored_ids:
+                if kid in owned:
+                    owned.discard(kid)
+                    changed = True
+            if {"pipewire_rt_limits_group", "pipewire_rt_module_tuning", "pipewire_mlock_policy"} & restored_ids:
+                if "pipewire_rt_setup" in owned:
+                    owned.discard("pipewire_rt_setup")
+                    changed = True
+            if changed:
+                self._set_simple_owned_knob_ids(owned)
+
         queue_reboot = self._queue_needs_reboot
+        self._queue_origin = "full"
         self._queue_needs_reboot = False
         if applied_ids or restored_ids:
             updated = False
