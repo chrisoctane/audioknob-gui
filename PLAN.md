@@ -111,6 +111,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - Dial includes a non-occluding center graphic slot (brand/art image).
 - Dial visual rotation is decoupled from queue recomposition so turning remains smooth while the setting list catches up.
 - Dial pointer is an extra-wide square-ended radial rectangle (no outline) that starts inside the center cap and extends just beyond knob edge for clear level reading.
+- Dial finish is flat (no gradients): grey-black body with a white center cap + matching white pointer.
 
 ### User workflow (planned)
 
@@ -144,7 +145,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - `disable_tracker` and `disable_baloo` are excluded from simple mode due non-audio desktop usability impact.
 - Simple mode auto-queues dependency bundles (for example RT setup also queues its required RT limits/module pieces).
 - If a knob was applied by AudioKnob, the same knob row in Full mode is locked as **Managed by AudioKnob** to prevent mixed-workflow edits.
-- Full mode can release these locks only via an explicit Tools action (**Release AudioKnob Locks**).
+- Full mode can release these locks only via **Tools → Locks → Release AudioKnob Locks**.
 - Dial movement never auto-applies and never auto-queues resets.
 - Dial level `0` is an explicit off position that clears the simple-mode apply queue.
 - Dial input is debounced for queue recomposition to keep rotation smooth under heavier queue/status redraw paths.
@@ -169,12 +170,17 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 
 ### Full app access (planned)
 
-- Tools menu provides a single mode action: **Toggle View** (switches between Simple and Full).
+- Header left now has a dedicated **View** button that toggles Simple/Full instantly from either page.
+- In Full view, **Tools → Locks** contains the three lock toggles:
+  - `Reboot-required changes`
+  - `Advanced knobs`
+  - `Technical columns`
+- `Tools → Locks` also includes `Release AudioKnob Locks` for clearing simple-mode ownership metadata.
 - Tools menu includes **Clear Queue** to remove all queued Apply/Reset actions before execution.
 - Full app remains the authoritative view for advanced tuning.
-- Planned full-view tab naming cleanup:
-  - `Basics`
-  - `Cores/IRQ`
+- Full-view tab labels are:
+  - `Main`
+  - `Cores & IRQ`
   - `Dev`
 
 ### QjackCtl RT behavior
@@ -213,20 +219,21 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - The backend is configurable (Auto / powerprofilesctl / tuned). Auto uses the active backend.
 - tuned can override CPU governor and C-state knobs; the app warns and offers to queue resets for conflicts.
 
-### Main + Advanced views
+### Main + Cores & IRQ views
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
-- Use the **Advanced** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
+- Use the **Cores & IRQ** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
 - The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, kernel RT extras including preempt=full and nosmt, RTKit placeholder). These are optional and may require manual configuration.
 - PipeWire **RT Setup** includes a Safe RT preset (RTKit/portal only) and an RT limits toggle for safer setups.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
-- The **Audio Core Plan** panel is collapsible to save space in the Advanced view.
+- The **Audio Core Plan** panel is collapsible to save space in the Cores & IRQ view.
+- The **IRQ Overview** button sits in the Audio Core Plan header (to the right of the title), so it stays available even when the plan body is collapsed.
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.
 - **Auto housekeeping** inverts the selected audio cores to derive IRQ housekeeping cores; manual mode uses the IRQ housekeeping core selection.
 - Auto-set updates core selections and queues Apply for affected knobs, so the global Apply button can be used.
-- **IRQ Overview** shows a core map (housekeeping vs audio cores) and a live list of IRQ affinity assignments.
+- **IRQ Overview** shows a core map (housekeeping vs audio cores) and an aligned IRQ table with one fixed-width per-core count column (`0..N-1`) plus a separate `Description` column, with horizontal scrolling for wide systems. Rows are compacted for denser scanning, very large per-core counts are truncated in-cell with full values on hover tooltips, a hover crosshair (row + column) can be click-locked/unlocked to trace IRQ-to-core relationships, and a dialog-local font spinner lets users zoom this view only.
 - Use **Tools → Presets** to manage **Reference Preset** and **Factory Preset** snapshots.
-- **Technical columns** toggle in the header shows/hides Req/Risk/CLI; default is off for a simpler musician-first view.
+- **Technical columns** in **Tools → Locks** shows/hides Req/Risk/CLI; default is off for a simpler musician-first view.
 
 ### Logs (what the app did and where it failed)
 
@@ -414,7 +421,7 @@ In `gui/app.py` → `_populate()`:
 
 **Columns**: Info | Knob | Action | Config | Status | Category (+ optional Req./Risk/CLI via Technical columns)
 
-**Advanced mode**: Single table; advanced knobs are gated by the "Advanced knobs" checkbox.
+**Advanced mode**: Single table; advanced knobs are gated by **Tools → Locks → Advanced knobs**.
 
 **Sorting**: Click any column header to sort. Category/Status sorts show grouped headers; Req./Risk grouping is available when Technical columns are shown.
 
@@ -423,7 +430,7 @@ In `gui/app.py` → `_populate()`:
 
 **CLI column** (Technical columns on): Shows the target command/file/parameter shorthand for each knob.
 
-**Header row**: Font size control on the left, queue status + Conflicts indicator + Apply/Apply & Reboot + Re-check State + Logs on the right
+**Header row**: **View** button at far left, then Font size control; queue status + Conflicts indicator + Apply/Apply & Reboot + Re-check State + Logs on the right
 
 ---
 
@@ -445,7 +452,7 @@ Apply/Reset runs in the background; the status column shows “⏳ Updating” a
 Apply and Reset now queue the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot. "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
 Group join/leave actions remain immediate because they require explicit confirmation.
 If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (for both single and queued resets). Force reset is supported where defaults can be inferred or safely removed: `systemd_unit_toggle`, `kernel_cmdline`, `sysfs_glob_kv` (only when sysfs exposes a bracketed default), `pam_limits_audio_group`, `sysctl_conf`, `udev_rule` (only if file matches audioknob content), `pipewire_conf` (only if file has audioknob header), `user_service_mask`, and `baloo_disable`.
-Reboot-required knobs are disabled until the user enables the "Reboot-required changes" toggle.
+Reboot-required knobs are disabled until the user enables **Tools → Locks → Reboot-required changes**.
 Knobs requiring audio groups stay locked while group membership is pending reboot.
 
 ### Read-only info

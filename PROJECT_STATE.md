@@ -9,19 +9,20 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.0
+- **Release version**: 0.7.1
 - **47 knobs defined** (ALL 47 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
 - **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible apply queue
 - **Simple mode title** - home view heading is `AudioKnob`
-- **Mode switch in Tools** - single `Toggle View` action switches between Simple and Full UI
+- **Mode switch in header** - dedicated far-left `View` button switches between Simple and Full UI
 - **Simple ownership locks** - knobs applied from simple mode are locked in full view as `Managed by AudioKnob` until explicitly released from Tools
 - **Simple dial center graphic slot** - dial supports an optional center image (no forced fallback art)
 - **Smooth simple dial rotation** - knob animation is decoupled from queue rebuild/populate work; dial motion stays responsive while queue updates are debounced
 - **Simple off detent** - dial extends below `1` to a `0` position that clears the simple-mode queue while preserving `1..11` marker placements
 - **Simple dial pointer bar** - indicator is an extra-wide, square-ended radial rectangle with no outline; it starts inside the center cap and runs just past the knob skirt
+- **Simple dial flat finish** - knob body uses flat grey-black fills; center cap and pointer share a flat white fill (no gradients)
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
@@ -59,9 +60,10 @@
 - Jitter monitor is modeless, shows a live per-thread table with rolling Act samples (min/median/avg/p95/max), and includes an Always-on-top toggle.
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
-- **Advanced view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), an IRQ Overview popup, plus RT throttling and C-state limiters
+- **Cores & IRQ view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), plus RT throttling and C-state limiters; the IRQ Overview button is in the Audio Core Plan header so it remains available while the plan body is collapsed
+- **IRQ Overview table layout** - IRQ assignments use fixed-width aligned columns (IRQ, Affinity, Mode, per-core count columns `0..N-1`, Description) with horizontal scrolling; per-core counts are separated from description text, core-map cells are fixed-size so larger values do not shift alignment, the IRQ ID column keeps enough width for common 3-4 digit IRQ IDs, IRQ rows use compact heights, very large per-core counts render truncated with tooltip access to full values, header height scales with the overview font so titles do not clip, a hover crosshair guide (click-lock/unlock) helps map IRQ rows to core columns, and a dialog-local font spinner adjusts only this overview
 - **Presets workflow** - Tools → Presets exposes Reference Preset and Factory Preset actions without adding new table columns.
-- **Technical columns toggle** - header toggle shows/hides Req/Risk/CLI columns; default is hidden for simpler workflow.
+- **Technical columns toggle** - `Tools -> Locks -> Technical columns` shows/hides Req/Risk/CLI columns; default is hidden for simpler workflow.
 - **Universal font scaling** - font size selector now force-propagates to existing widgets in both Simple and Full views.
 - **Tx History detail columns** - Tx History table includes Knob IDs and expanded Files/Effects summaries for quicker row-level audits.
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
@@ -100,10 +102,10 @@ Notes:
 - App has two UI modes:
   - **Simple mode**: large dial queue composer (default), with one plain-text **Apply queue** list on the left and knob on the right
   - **Full mode**: existing tabbed table UI
-- Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by an "Advanced knobs" toggle in the header.
-- Req./Risk/CLI are technical columns hidden by default; enable them with the **Technical columns** toggle.
-- Header tabs switch between **Main**, **Advanced**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Advanced view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Preset actions live in Tools → Presets.
-- The Audio Core Plan panel is collapsible to reduce vertical space in the Advanced view.
+- Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by `Tools -> Locks -> Advanced knobs`.
+- Req./Risk/CLI are technical columns hidden by default; enable them with `Tools -> Locks -> Technical columns`.
+- Header tabs switch between **Main**, **Cores & IRQ**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates, the Cores & IRQ view filters to core-related knobs plus RT throttling and C-state limiters and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras, RTKit placeholder). Preset actions live in Tools → Presets.
+- The Audio Core Plan panel is collapsible to reduce vertical space in the Cores & IRQ view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - "Req." shows A/R/D markers for Advanced/Reboot/Depends-on (tooltip shows the key and any group/dependency details).
@@ -198,7 +200,7 @@ Next phases (planned, incremental):
 - QjackCtl RT blocks apply while QjackCtl is running to avoid config overwrite; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
 - Kernel cmdline apply can prompt to run the bootloader update command via pkexec.
-- Reboot-required knobs are gated behind a header toggle; group-required knobs stay locked while group changes are pending reboot.
+- Reboot-required knobs are gated behind `Tools -> Locks -> Reboot-required changes`; group-required knobs stay locked while group changes are pending reboot.
 - Reboot-required toggle preserves scroll position instead of jumping the table.
 - Table refreshes now preserve scroll position (config changes no longer jump the view).
 - Hover highlight remains consistent when moving over in-cell widgets (buttons/combos).
@@ -391,7 +393,7 @@ Tie-break implementation (draft policy):
 - Status/Info remains available while locked.
 - Ownership is released when:
   - the knob is reset by a simple-mode operation, or
-  - user explicitly selects **Tools -> Release AudioKnob Locks** (confirmation required; metadata-only action).
+  - user explicitly selects **Tools -> Locks -> Release AudioKnob Locks** (confirmation required; metadata-only action).
 
 #### Config-bearing knobs excluded from simple mode (planned)
 
@@ -433,7 +435,7 @@ preset extraction.
 - Persist `ui_mode` in state (`simple` or `full`), default `simple`.
 - Tools menu provides explicit mode switch actions.
 - Full mode keeps all existing capabilities.
-- Planned full-mode tab clarity update: `Basics`, `Cores/IRQ`, `Dev`.
+- Full-mode tab labels: `Main`, `Cores & IRQ`, `Dev`.
 
 #### Preset interaction contract
 
@@ -1298,7 +1300,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Req., Status, Category, Risk, CLI). Req./Risk/CLI are hidden by default behind the **Technical columns** toggle. Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
+**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Req., Status, Category, Risk, CLI). Req./Risk/CLI are hidden by default behind `Tools -> Locks -> Technical columns`. Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
 
 **Detection needed:**
 ```python

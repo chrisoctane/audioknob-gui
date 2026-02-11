@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import Property, QPoint, QPointF, QRectF, QEasingCurve, Qt, QPropertyAnimation
-from PySide6.QtGui import QColor, QPainterPath, QPen, QPainter, QPixmap, QRadialGradient
+from PySide6.QtGui import QColor, QPainterPath, QPen, QPainter, QPixmap
 from PySide6.QtWidgets import QDial
 
 
@@ -196,40 +196,17 @@ class NumberedDial(QDial):
         painter.translate(QPointF(cx, cy))
         painter.rotate(angle_deg)
         skirt_path = self._build_scalloped_path(knob_outer_radius, lobes=8)
-        skirt_grad = QRadialGradient(
-            QPointF(-(knob_outer_radius * 0.28), -(knob_outer_radius * 0.34)),
-            knob_outer_radius * 1.45,
-            QPointF(-(knob_outer_radius * 0.35), -(knob_outer_radius * 0.38)),
-        )
-        skirt_grad.setColorAt(0.00, QColor("#51545c"))
-        skirt_grad.setColorAt(0.25, QColor("#373b43"))
-        skirt_grad.setColorAt(0.70, QColor("#1d2026"))
-        skirt_grad.setColorAt(1.00, QColor("#111318"))
         painter.setPen(QPen(QColor("#0f1114"), 1.1))
-        painter.setBrush(skirt_grad)
+        painter.setBrush(QColor("#2e3137"))
         painter.drawPath(skirt_path)
 
-        ring_grad = QRadialGradient(
-            QPointF(-(knob_inner_radius * 0.20), -(knob_inner_radius * 0.22)),
-            knob_inner_radius * 1.2,
-        )
-        ring_grad.setColorAt(0.00, QColor("#2f3238"))
-        ring_grad.setColorAt(0.72, QColor("#1d2026"))
-        ring_grad.setColorAt(1.00, QColor("#15181d"))
         painter.setPen(QPen(QColor("#101217"), 1.0))
-        painter.setBrush(ring_grad)
+        painter.setBrush(QColor("#171a1f"))
         painter.drawEllipse(QPointF(0.0, 0.0), knob_inner_radius, knob_inner_radius)
 
-        top_grad = QRadialGradient(
-            QPointF(-(top_radius * 0.18), -(top_radius * 0.22)),
-            top_radius * 1.15,
-            QPointF(-(top_radius * 0.28), -(top_radius * 0.30)),
-        )
-        top_grad.setColorAt(0.00, QColor("#fafafa"))
-        top_grad.setColorAt(0.46, QColor("#f0f0f0"))
-        top_grad.setColorAt(1.00, QColor("#d6d6d6"))
-        painter.setPen(QPen(QColor("#2a2a2a"), 1.0))
-        painter.setBrush(top_grad)
+        cap_color = QColor("#f2f2f2")
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(cap_color)
         painter.drawEllipse(QPointF(0.0, 0.0), top_radius, top_radius)
 
         # White indicator bar from inside the center cap to slightly beyond the knob skirt.
@@ -248,7 +225,7 @@ class NumberedDial(QDial):
             marker_outer - marker_inner,
         )
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#f2f2f2"))
+        painter.setBrush(cap_color)
         painter.drawRect(marker_rect)
         painter.restore()
 

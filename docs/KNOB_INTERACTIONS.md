@@ -82,7 +82,7 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ### Simple AudioKnob mode
 - Dial movement composes queue entries only; it never auto-applies and never auto-queues resets.
 - Knobs applied from simple mode are treated as managed in Full mode to avoid mixed-workflow edits.
-- Full-mode managed locks are released only by explicit user action (Tools -> Release AudioKnob Locks).
+- Full-mode managed locks are released only by explicit user action (Tools -> Locks -> Release AudioKnob Locks).
 
 ### WirePlumber ALSA USB Tuning
 - Manual ALSA period settings can fight PipeWire's auto-tuning (0.3.43+).

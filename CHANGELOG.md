@@ -4,6 +4,23 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.1] - 2026-02-11
+
+### Added
+- Full-view header now has a dedicated `View` button for fast Basic/Full switching.
+- Tools menu now has a `Locks` submenu that contains reboot/advanced/technical lock toggles plus `Release AudioKnob Locks`.
+- IRQ Overview now includes a dense aligned table (`IRQ`, `Affinity`, `Mode`, per-core counts, `Description`) with horizontal scrolling.
+- IRQ Overview adds a hover crosshair with click lock/unlock and a dialog-local font size control.
+
+### Changed
+- Renamed the full-view `Advanced` tab to `Cores & IRQ` to reduce naming ambiguity.
+- Moved `IRQ Overview` button to the Audio Core Plan header so it remains visible when the plan body is collapsed.
+- Simple dial finish is now flat grey/black with a white cap + pointer (no gradient).
+
+### Fixed
+- IRQ Overview font scaling now resizes columns/header/core-map consistently.
+- IRQ Overview row/header sizing is compact, large per-core counts truncate with tooltip full values, and IRQ ID width avoids clipping for common 3-4 digit IDs.
+
 ## [0.7.0] - 2026-02-11
 
 ### Added

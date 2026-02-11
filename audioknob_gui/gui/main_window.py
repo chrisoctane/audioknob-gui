@@ -64,7 +64,7 @@ from audioknob_gui.platform.packages import which_command
 from audioknob_gui.registry import load_registry
 
 from PySide6.QtCore import Qt, QThread, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -148,6 +148,11 @@ class MainWindow(TableMixin, QMainWindow):
         top = QHBoxLayout()
         self.header_layout = top
         top.setSpacing(6)
+        self.btn_view = QPushButton("View")
+        self.btn_view.setToolTip("Switch between Basic and Full views")
+        self.btn_view.clicked.connect(self._on_toggle_view)
+        top.addWidget(self.btn_view)
+        top.addSpacing(6)
         self.font_label = QLabel("Font:")
         top.addWidget(self.font_label)
         self.font_spinner = QSpinBox()
@@ -163,23 +168,6 @@ class MainWindow(TableMixin, QMainWindow):
         self.reboot_banner.setStyleSheet("color: #f57c00; font-weight: bold;")
         self.reboot_banner.setWordWrap(True)
         self.reboot_banner.setVisible(False)
-
-        self.reboot_toggle = QCheckBox("Reboot-required changes")
-        self.reboot_toggle.setChecked(bool(self.state.get("enable_reboot_knobs", False)))
-        self.reboot_toggle.setToolTip("Unlock knobs that require a reboot/log-out to take effect")
-        self.reboot_toggle.toggled.connect(self._on_reboot_toggle)
-        top.addWidget(self.reboot_toggle)
-
-        self.advanced_toggle = QCheckBox("Advanced knobs")
-        self.advanced_toggle.setChecked(bool(self.state.get("advanced_mode_enabled", False)))
-        self.advanced_toggle.setToolTip("Unlock advanced knobs that can impact system performance")
-        self.advanced_toggle.toggled.connect(self._on_advanced_mode_toggle)
-        top.addWidget(self.advanced_toggle)
-        self.technical_columns_toggle = QCheckBox("Technical columns")
-        self.technical_columns_toggle.setChecked(bool(self.state.get("show_technical_columns", False)))
-        self.technical_columns_toggle.setToolTip("Show or hide Req/Risk/CLI columns")
-        self.technical_columns_toggle.toggled.connect(self._on_technical_columns_toggle)
-        top.addWidget(self.technical_columns_toggle)
 
         top.addStretch(1)
 
@@ -221,10 +209,26 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_tools_menu = QPushButton("Tools")
         self.btn_tools_menu.setToolTip("Diagnostics, presets, and history")
         tools_menu = QMenu(self.btn_tools_menu)
-        self.act_toggle_view = tools_menu.addAction("Toggle View")
-        self.act_toggle_view.triggered.connect(self._on_toggle_view)
-        self.act_release_simple_locks = tools_menu.addAction("Release AudioKnob Locks")
+        self.locks_menu = tools_menu.addMenu("Locks")
+        self.act_lock_reboot = self.locks_menu.addAction("Reboot-required changes")
+        self.act_lock_reboot.setCheckable(True)
+        self.act_lock_reboot.setChecked(bool(self.state.get("enable_reboot_knobs", False)))
+        self.act_lock_reboot.setToolTip("Unlock knobs that require a reboot/log-out to take effect")
+        self.act_lock_reboot.toggled.connect(self._on_reboot_toggle)
+        self.act_lock_advanced = self.locks_menu.addAction("Advanced knobs")
+        self.act_lock_advanced.setCheckable(True)
+        self.act_lock_advanced.setChecked(bool(self.state.get("advanced_mode_enabled", False)))
+        self.act_lock_advanced.setToolTip("Unlock advanced knobs that can impact system performance")
+        self.act_lock_advanced.toggled.connect(self._on_advanced_mode_toggle)
+        self.act_lock_technical = self.locks_menu.addAction("Technical columns")
+        self.act_lock_technical.setCheckable(True)
+        self.act_lock_technical.setChecked(bool(self.state.get("show_technical_columns", False)))
+        self.act_lock_technical.setToolTip("Show or hide Req/Risk/CLI columns")
+        self.act_lock_technical.toggled.connect(self._on_technical_columns_toggle)
+        self.locks_menu.addSeparator()
+        self.act_release_simple_locks = self.locks_menu.addAction("Release AudioKnob Locks")
         self.act_release_simple_locks.triggered.connect(self._on_release_simple_locks)
+        tools_menu.addSeparator()
         self.act_clear_queue = tools_menu.addAction("Clear Queue")
         self.act_clear_queue.triggered.connect(self._on_clear_queue)
         tools_menu.addSeparator()
@@ -265,6 +269,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.act_tx_history = tools_menu.addAction("Tx History...")
         self.act_tx_history.triggered.connect(self._on_show_tx_history)
         self._ensure_menu_width(tools_menu)
+        self._ensure_menu_width(self.locks_menu)
         self._ensure_menu_width(presets_menu)
         self._ensure_menu_width(baseline_menu)
         self._ensure_menu_width(factory_menu)
@@ -289,7 +294,7 @@ class MainWindow(TableMixin, QMainWindow):
 
         advanced_note = QLabel(
             "Advanced settings can reduce performance in other intensive workloads. "
-            "Use the Advanced knobs toggle to make changes; reboot may be required."
+            "Use Tools -> Locks -> Advanced knobs to make changes; reboot may be required."
         )
         self.advanced_note = advanced_note
         advanced_note.setWordWrap(True)
@@ -298,7 +303,7 @@ class MainWindow(TableMixin, QMainWindow):
         self._view_mode = str(self.state.get("view_tab", "all"))
         self.view_tabs = QTabBar()
         self.view_tabs.addTab("Main")
-        self.view_tabs.addTab("Advanced")
+        self.view_tabs.addTab("Cores & IRQ")
         self.view_tabs.addTab("Dev")
         if self._view_mode == "cores":
             self.view_tabs.setCurrentIndex(1)
@@ -479,6 +484,9 @@ class MainWindow(TableMixin, QMainWindow):
         self.core_plan_toggle.setAutoRaise(True)
         self.core_plan_toggle.toggled.connect(self._on_core_plan_toggle)
         header_row.addWidget(self.core_plan_toggle)
+        self.btn_irq_overview = QPushButton("IRQ Overview")
+        self.btn_irq_overview.clicked.connect(self._show_irq_overview)
+        header_row.addWidget(self.btn_irq_overview)
         header_row.addStretch(1)
         root.addLayout(header_row)
 
@@ -513,13 +521,6 @@ class MainWindow(TableMixin, QMainWindow):
         self.core_plan_summary = QLabel("")
         self.core_plan_summary.setWordWrap(True)
         body.addWidget(self.core_plan_summary)
-
-        btn_row = QHBoxLayout()
-        self.btn_irq_overview = QPushButton("IRQ Overview")
-        self.btn_irq_overview.clicked.connect(self._show_irq_overview)
-        btn_row.addWidget(self.btn_irq_overview)
-        btn_row.addStretch(1)
-        body.addLayout(btn_row)
 
         self.core_plan_body.setVisible(expanded)
         root.addWidget(self.core_plan_body)
@@ -739,6 +740,17 @@ class MainWindow(TableMixin, QMainWindow):
         dialog.resize(720, 520)
         layout = QVBoxLayout(dialog)
 
+        overview_font_row = QHBoxLayout()
+        overview_font_label = QLabel("Overview font:")
+        overview_font_spinner = QSpinBox(dialog)
+        overview_font_spinner.setRange(7, 24)
+        overview_font_spinner.setValue(max(7, min(24, dialog.font().pointSize() - 1)))
+        overview_font_spinner.setToolTip("Adjust font size for IRQ Overview only")
+        overview_font_row.addWidget(overview_font_label)
+        overview_font_row.addWidget(overview_font_spinner)
+        overview_font_row.addStretch(1)
+        layout.addLayout(overview_font_row)
+
         audio_text = ",".join(str(c) for c in audio) if audio else "unset"
         hk_text = ",".join(str(c) for c in housekeeping) if housekeeping else "unset"
         mode = "auto" if auto else "manual"
@@ -750,19 +762,29 @@ class MainWindow(TableMixin, QMainWindow):
 
         grid_box = QGroupBox("Core map")
         grid_layout = QGridLayout(grid_box)
+        grid_layout.setHorizontalSpacing(6)
+        grid_layout.setVerticalSpacing(6)
         cols = 8
         base_style = (
             "padding: 4px 6px; border-radius: 3px; background-color: #2b2b2b; color: #e0e0e0;"
         )
+        max_core = max(cores) if cores else 0
+        core_digits = max(2, len(str(max_core)))
+        grid_fm = grid_box.fontMetrics()
+        core_cell_w = grid_fm.horizontalAdvance("0" * core_digits) + 18
+        core_cell_h = grid_fm.height() + 10
+        core_map_labels: list[QLabel] = []
         for idx, core in enumerate(cores):
             label = QLabel(str(core))
             label.setAlignment(Qt.AlignCenter)
+            label.setFixedSize(core_cell_w, core_cell_h)
             style = base_style
             if core in housekeeping:
                 style += " background-color: #1f4f2b;"
             if core in audio:
                 style += " border: 2px solid #4a90e2;"
             label.setStyleSheet(style)
+            core_map_labels.append(label)
             grid_layout.addWidget(label, idx // cols, idx % cols)
         layout.addWidget(grid_box)
 
@@ -771,22 +793,309 @@ class MainWindow(TableMixin, QMainWindow):
         layout.addWidget(legend)
 
         irq_lines = _read_interrupts_map()
-        rows: list[str] = []
+        irq_rows: list[tuple[int, str, str, list[str], str]] = []
+        max_visible_count_digits = 5
+
+        def _split_irq_counts_and_desc(raw_line: str) -> tuple[list[str], str]:
+            text = (raw_line or "").strip()
+            if not text:
+                return (["0"] * len(cores), "")
+            parts = text.split()
+            if not parts:
+                return (["0"] * len(cores), "")
+            count_cols = min(len(parts), len(cores))
+            counts = [str(x) for x in parts[:count_cols]]
+            if len(counts) < len(cores):
+                counts.extend(["0"] * (len(cores) - len(counts)))
+            desc = " ".join(parts[count_cols:]).strip()
+            return counts, desc
+
+        def _compact_count_text(raw_count: str) -> tuple[str, str | None]:
+            text = (raw_count or "0").strip() or "0"
+            if len(text) <= max_visible_count_digits:
+                return text, None
+            return f"{text[:max_visible_count_digits]}…", text
+
         for irq in list_irqs():
             affinity = read_irq_effective_affinity_list(irq)
             if not affinity:
                 affinity = read_irq_affinity_list(irq) or "unknown"
-            ro = "ro" if not is_irq_affinity_writable(irq) else ""
-            desc = irq_lines.get(irq, "")
-            if desc:
-                rows.append(f"IRQ {irq:>4}: {affinity:<12} {ro:<3} {desc}")
-            else:
-                rows.append(f"IRQ {irq:>4}: {affinity:<12} {ro}".rstrip())
+            mode = "RO" if not is_irq_affinity_writable(irq) else "RW"
+            counts, desc = _split_irq_counts_and_desc(irq_lines.get(irq, ""))
+            irq_rows.append((irq, affinity, mode, counts, desc or "—"))
 
-        text = QTextEdit()
-        text.setReadOnly(True)
-        text.setPlainText("\n".join(rows) if rows else "No IRQs found.")
-        layout.addWidget(text)
+        table: QTableWidget | None = None
+        guide_hint: QLabel | None = None
+        desc_col = -1
+        if irq_rows:
+            class _IrqOverviewTable(QTableWidget):
+                def __init__(self, rows: int, cols: int, parent=None) -> None:
+                    super().__init__(rows, cols, parent)
+                    self._guide_locked = False
+                    self._guide_pos: tuple[int, int] | None = None
+                    self.setMouseTracking(True)
+                    self.viewport().setMouseTracking(True)
+                    self._guide_row = QWidget(self.viewport())
+                    self._guide_col = QWidget(self.viewport())
+                    for guide in (self._guide_row, self._guide_col):
+                        guide.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+                        guide.setStyleSheet("background-color: rgba(90, 130, 190, 42);")
+                        guide.hide()
+
+                def _hide_guide(self) -> None:
+                    self._guide_row.hide()
+                    self._guide_col.hide()
+
+                def _refresh_guide(self) -> None:
+                    if self._guide_pos is None:
+                        self._hide_guide()
+                        return
+                    row, col = self._guide_pos
+                    if row < 0 or col < 0 or row >= self.rowCount() or col >= self.columnCount():
+                        self._hide_guide()
+                        return
+                    row_rect = self.visualRect(self.model().index(row, 0))
+                    col_rect = self.visualRect(self.model().index(0, col))
+                    if (
+                        not row_rect.isValid()
+                        or row_rect.height() <= 0
+                        or not col_rect.isValid()
+                        or col_rect.width() <= 0
+                    ):
+                        self._hide_guide()
+                        return
+                    vp = self.viewport().rect()
+                    self._guide_row.setGeometry(0, row_rect.y(), vp.width(), row_rect.height())
+                    self._guide_col.setGeometry(col_rect.x(), 0, col_rect.width(), vp.height())
+                    self._guide_row.show()
+                    self._guide_col.show()
+                    self._guide_row.raise_()
+                    self._guide_col.raise_()
+
+                def mouseMoveEvent(self, event) -> None:
+                    if not self._guide_locked:
+                        idx = self.indexAt(event.pos())
+                        self._guide_pos = (idx.row(), idx.column()) if idx.isValid() else None
+                        self._refresh_guide()
+                    super().mouseMoveEvent(event)
+
+                def leaveEvent(self, event) -> None:
+                    if not self._guide_locked:
+                        self._guide_pos = None
+                        self._hide_guide()
+                    super().leaveEvent(event)
+
+                def mousePressEvent(self, event) -> None:
+                    if event.button() == Qt.LeftButton:
+                        idx = self.indexAt(event.pos())
+                        if self._guide_locked:
+                            self._guide_locked = False
+                            self._guide_pos = (idx.row(), idx.column()) if idx.isValid() else None
+                            self._refresh_guide()
+                            event.accept()
+                            return
+                        if idx.isValid():
+                            self._guide_locked = True
+                            self._guide_pos = (idx.row(), idx.column())
+                            self._refresh_guide()
+                            event.accept()
+                            return
+                    super().mousePressEvent(event)
+
+                def scrollContentsBy(self, dx: int, dy: int) -> None:
+                    super().scrollContentsBy(dx, dy)
+                    self._refresh_guide()
+
+                def resizeEvent(self, event) -> None:
+                    super().resizeEvent(event)
+                    self._refresh_guide()
+
+            core_headers = [str(core) for core in cores]
+            desc_col = 3 + len(core_headers)
+            headers = ["IRQ", "Affinity", "Mode", *core_headers, "Description"]
+            table = _IrqOverviewTable(len(irq_rows), len(headers), dialog)
+            table.setHorizontalHeaderLabels(headers)
+            table.verticalHeader().setVisible(False)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.setSelectionMode(QAbstractItemView.NoSelection)
+            table.setFocusPolicy(Qt.NoFocus)
+            table.setAlternatingRowColors(True)
+            table.setWordWrap(False)
+            table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+            table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+            table.verticalHeader().setMinimumSectionSize(12)
+
+            guide_hint = QLabel("Guide: hover a cell to show a row/column crosshair; click to lock, click again to unlock.")
+            guide_hint.setWordWrap(True)
+            layout.addWidget(guide_hint)
+
+            for row, (irq, affinity, mode, counts, desc) in enumerate(irq_rows):
+                irq_item = QTableWidgetItem(str(irq))
+                irq_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                table.setItem(row, 0, irq_item)
+                table.setItem(row, 1, QTableWidgetItem(affinity))
+                mode_item = QTableWidgetItem(mode)
+                mode_item.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, 2, mode_item)
+                for idx, value in enumerate(counts):
+                    display_value, tooltip_value = _compact_count_text(value)
+                    core_item = QTableWidgetItem(display_value)
+                    core_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    if tooltip_value:
+                        core_item.setToolTip(tooltip_value)
+                    table.setItem(row, 3 + idx, core_item)
+                table.setItem(row, desc_col, QTableWidgetItem(desc))
+
+            layout.addWidget(table)
+        else:
+            empty = QLabel("No IRQs found.")
+            empty.setWordWrap(True)
+            layout.addWidget(empty)
+
+        def _apply_overview_font_size(size: int) -> None:
+            point_size = max(7, min(24, int(size)))
+            overview_font = dialog.font()
+            overview_font.setPointSize(point_size)
+            dialog.setFont(overview_font)
+            summary.setFont(overview_font)
+            grid_box.setFont(overview_font)
+            legend.setFont(overview_font)
+            overview_font_label.setFont(overview_font)
+            overview_font_spinner.setFont(overview_font)
+            if guide_hint is not None:
+                guide_hint.setFont(overview_font)
+
+            max_core_local = max(cores) if cores else 0
+            core_digits_local = max(2, len(str(max_core_local)))
+            fm = QFontMetrics(overview_font)
+            core_w = fm.horizontalAdvance("0" * core_digits_local) + 18
+            core_h = fm.height() + 10
+            for label in core_map_labels:
+                label.setFont(overview_font)
+                label.setFixedSize(core_w, core_h)
+
+            if table is None or desc_col < 0:
+                return
+
+            table.setFont(overview_font)
+            table.horizontalHeader().setFont(overview_font)
+            table_fm = QFontMetrics(overview_font)
+            irq_col_w_local = max(
+                table_fm.horizontalAdvance("0000") + 14,
+                min(
+                    140,
+                    max(
+                        table_fm.horizontalAdvance("IRQ"),
+                        max(
+                            (
+                                table_fm.horizontalAdvance(str(irq))
+                                for irq, _aff, _mode, _counts, _desc in irq_rows
+                            ),
+                            default=0,
+                        ),
+                    )
+                    + 20,
+                ),
+            )
+            aff_col_w_local = max(
+                44,
+                min(
+                    260,
+                    max(
+                        table_fm.horizontalAdvance("Affinity"),
+                        max(
+                            (
+                                table_fm.horizontalAdvance(aff or "")
+                                for _irq, aff, _mode, _counts, _desc in irq_rows
+                            ),
+                            default=0,
+                        ),
+                    )
+                    + 14,
+                ),
+            )
+            mode_col_w_local = max(
+                40,
+                min(
+                    110,
+                    max(
+                        table_fm.horizontalAdvance("Mode"),
+                        max(
+                            (
+                                table_fm.horizontalAdvance(mode or "")
+                                for _irq, _aff, mode, _counts, _desc in irq_rows
+                            ),
+                            default=0,
+                        ),
+                    )
+                    + 14,
+                ),
+            )
+            max_count_width_local = max(
+                (
+                    table_fm.horizontalAdvance(_compact_count_text(value)[0])
+                    for _irq, _aff, _mode, counts, _desc in irq_rows
+                    for value in counts
+                ),
+                default=table_fm.horizontalAdvance("0"),
+            )
+            core_col_w_local = max(
+                20,
+                min(
+                    84,
+                    max(
+                        table_fm.horizontalAdvance("0"),
+                        max_count_width_local,
+                        max((table_fm.horizontalAdvance(str(core)) for core in cores), default=0),
+                    )
+                    + 10,
+                ),
+            )
+            desc_col_w_local = max(
+                100,
+                min(
+                    920,
+                    max(
+                        table_fm.horizontalAdvance("Description"),
+                        max(
+                            (
+                                table_fm.horizontalAdvance(desc or "")
+                                for _irq, _aff, _mode, _counts, desc in irq_rows
+                            ),
+                            default=0,
+                        ),
+                    )
+                    + 18,
+                ),
+            )
+            header_local = table.horizontalHeader()
+            header_local.setMinimumSectionSize(12)
+            header_local.setSectionResizeMode(0, QHeaderView.Fixed)
+            header_local.setSectionResizeMode(1, QHeaderView.Fixed)
+            header_local.setSectionResizeMode(2, QHeaderView.Fixed)
+            for core_col in range(3, desc_col):
+                header_local.setSectionResizeMode(core_col, QHeaderView.Fixed)
+            header_local.setSectionResizeMode(desc_col, QHeaderView.Fixed)
+            table.setColumnWidth(0, irq_col_w_local)
+            table.setColumnWidth(1, aff_col_w_local)
+            table.setColumnWidth(2, mode_col_w_local)
+            for core_col in range(3, desc_col):
+                table.setColumnWidth(core_col, core_col_w_local)
+            table.setColumnWidth(desc_col, desc_col_w_local)
+            row_height_local = max(14, table_fm.height() + 4)
+            for row in range(table.rowCount()):
+                table.setRowHeight(row, row_height_local)
+            # Header sections use stylesheet padding, so include extra height to prevent clipping.
+            table.horizontalHeader().setFixedHeight(max(22, table_fm.height() + 14))
+            table.viewport().update()
+            table.update()
+            refresh_guide = getattr(table, "_refresh_guide", None)
+            if callable(refresh_guide):
+                refresh_guide()
+
+        overview_font_spinner.valueChanged.connect(_apply_overview_font_size)
+        _apply_overview_font_size(int(overview_font_spinner.value()))
 
         btns = QDialogButtonBox(QDialogButtonBox.Close)
         btns.rejected.connect(dialog.reject)
@@ -975,20 +1284,22 @@ class MainWindow(TableMixin, QMainWindow):
             self.view_tabs.setVisible(not simple)
         if hasattr(self, "table"):
             self.table.setVisible(not simple)
-        if hasattr(self, "reboot_toggle"):
-            self.reboot_toggle.setVisible(not simple)
-        if hasattr(self, "advanced_toggle"):
-            self.advanced_toggle.setVisible(not simple)
-        if hasattr(self, "technical_columns_toggle"):
-            self.technical_columns_toggle.setVisible(not simple)
+        if hasattr(self, "btn_view"):
+            self.btn_view.setVisible(True)
+            self.btn_view.setToolTip("Switch to Full view" if simple else "Switch to Basic view")
         if hasattr(self, "cores_panel"):
             if simple:
                 self.cores_panel.setVisible(False)
             else:
                 self._update_cores_panel_visibility()
-        if hasattr(self, "act_toggle_view"):
-            self.act_toggle_view.setEnabled(True)
-            self.act_toggle_view.setText("Toggle View")
+        if hasattr(self, "act_lock_reboot"):
+            self.act_lock_reboot.setVisible(not simple)
+        if hasattr(self, "act_lock_advanced"):
+            self.act_lock_advanced.setVisible(not simple)
+        if hasattr(self, "act_lock_technical"):
+            self.act_lock_technical.setVisible(not simple)
+        if hasattr(self, "locks_menu"):
+            self.locks_menu.menuAction().setVisible(not simple)
         if hasattr(self, "act_release_simple_locks"):
             self.act_release_simple_locks.setEnabled(bool(self._simple_owned_knob_ids()))
         if simple:
@@ -1017,7 +1328,7 @@ class MainWindow(TableMixin, QMainWindow):
             return ""
         if status not in ("applied", "pending_reboot", "partial"):
             return ""
-        return "Managed by AudioKnob. Use Tools -> Release AudioKnob Locks."
+        return "Managed by AudioKnob. Use Tools -> Locks -> Release AudioKnob Locks."
 
     def _on_release_simple_locks(self) -> None:
         owned = self._simple_owned_knob_ids()
@@ -1139,13 +1450,17 @@ class MainWindow(TableMixin, QMainWindow):
         if group_pending:
             return False, f"Groups pending reboot: {', '.join(k.requires_groups)}"
         if reboot_dep_lock:
-            return False, f"Requires groups: {', '.join(k.requires_groups)} (Turn on Reboot-required changes)"
+            return (
+                False,
+                f"Requires groups: {', '.join(k.requires_groups)} "
+                "(Turn on Tools -> Locks -> Reboot-required changes)",
+            )
         if not group_ok:
             return False, f"Join groups: {', '.join(k.requires_groups)}"
         if reboot_gate_lock:
             return False, f"Reboot required: {k.title}"
         if advanced_gate_lock:
-            return False, "Turn on Advanced knobs"
+            return False, "Turn on Tools -> Locks -> Advanced knobs"
         if not commands_ok:
             missing = self._knob_missing_commands(k)
             return False, f"Install: {', '.join(missing)}" if missing else "Missing commands"
