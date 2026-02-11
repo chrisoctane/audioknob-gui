@@ -4,6 +4,24 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.0] - 2026-02-11
+
+### Added
+- Simple-mode `AudioKnob` home view with a large animated dial (`0` Off + `1..11` risk tiers) that composes a visible apply queue.
+- Tools menu actions for `Toggle View` (Simple/Full) and `Clear Queue`.
+- Simple-mode ownership locks in Full view (`Managed by AudioKnob`) with explicit release action.
+- Simple-mode fixed preset composition for included configurable bundles (power-profile backend auto/performance, PipeWire RT safe bundle, mlock preset).
+
+### Changed
+- Simple-mode layout now keeps one plain-text **Apply queue** list on the left of the dial.
+- Dial rendering upgraded to a custom hardware-style knob with smooth rotation decoupled from queue recomposition.
+- Dial pointer bar refined to a wide square-ended white marker integrated with the center cap.
+- Dial input now includes an explicit `0` off detent while preserving `1..11` ring label placements.
+
+### Fixed
+- Combo-box wheel changes are ignored unless the combo popup is open, preventing accidental config changes while scrolling.
+- Simple queue composition skips CPU governor when power profile backend resolves to tuned, avoiding false conflict paths.
+
 ## [0.6.10] - 2026-02-10
 
 ### Fixed

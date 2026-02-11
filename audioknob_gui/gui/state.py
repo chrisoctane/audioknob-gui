@@ -25,6 +25,10 @@ def load_state() -> dict:
         "font_size": 11,
         "queued_knobs": [],
         "queued_actions": {},
+        "ui_mode": "simple",  # simple | full
+        "simple_level": 1,  # int 0..11
+        "simple_owned_knobs": [],  # list[str]
+        "simple_knob_center_image": None,  # str | None
         # Per-knob UI state
         "qjackctl_cpu_cores": None,  # list[int] or None
         "kernel_isolcpus_cores": None,  # list[int] or None
@@ -232,6 +236,14 @@ def load_state() -> dict:
                 }
             else:
                 data["queued_actions"] = {}
+        if "ui_mode" not in data:
+            data["ui_mode"] = "simple"
+        if "simple_level" not in data:
+            data["simple_level"] = 1
+        if "simple_owned_knobs" not in data:
+            data["simple_owned_knobs"] = []
+        if "simple_knob_center_image" not in data:
+            data["simple_knob_center_image"] = None
         if not isinstance(data.get("queued_knobs"), list):
             data["queued_knobs"] = []
         else:
@@ -244,6 +256,25 @@ def load_state() -> dict:
                 if isinstance(k, str) and v in ("apply", "reset"):
                     cleaned[k] = v
             data["queued_actions"] = cleaned
+        if data.get("ui_mode") not in ("simple", "full"):
+            data["ui_mode"] = "simple"
+        try:
+            simple_level = int(data.get("simple_level"))
+        except Exception:
+            simple_level = 1
+        if simple_level < 0:
+            simple_level = 0
+        if simple_level > 11:
+            simple_level = 11
+        data["simple_level"] = simple_level
+        raw_owned = data.get("simple_owned_knobs")
+        if not isinstance(raw_owned, list):
+            data["simple_owned_knobs"] = []
+        else:
+            data["simple_owned_knobs"] = [str(x) for x in raw_owned if isinstance(x, (str, int))]
+        center_image = data.get("simple_knob_center_image")
+        if center_image is not None and not isinstance(center_image, str):
+            data["simple_knob_center_image"] = None
         if data.get("jitter_test_last") is not None and not isinstance(data.get("jitter_test_last"), dict):
             data["jitter_test_last"] = None
         if data.get("irq_pinning_devices") is not None and not isinstance(data.get("irq_pinning_devices"), list):
