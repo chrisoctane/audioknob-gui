@@ -4,6 +4,21 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.2] - 2026-02-11
+
+### Added
+- New simple-mode knob: `realtime_clock_access` (fixed low-latency timer device access preset).
+- New parity/audit planning docs and templates under `docs/KNOB_SYSTEM_AUDIT_MAP.md` and `docs/internal/audit/2026-02-11/`.
+- Refreshed screenshot set in `docs/` (`screenshot1.png` to `screenshot5.png`) and updated README preview images.
+
+### Changed
+- Simple-mode queue composition now keeps apply/reset parity tighter across level transitions.
+- Risk-tier plan/docs now include realtime clock access in simple-mode inclusion guidance.
+
+### Fixed
+- RT scanner expectation text now aligns with realtime clock access handling.
+- Simple-mode queue tests expanded for regression coverage around queue composition behavior.
+
 ## [0.7.1] - 2026-02-11
 
 ### Added

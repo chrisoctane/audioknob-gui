@@ -2,7 +2,13 @@
 
 GUI-first realtime audio tuning tool for Linux.
 
-![audioknob-gui screenshot](docs/screenshot.png)
+## Screenshots
+
+![AudioKnob simple view](docs/screenshot1.png)
+![Full view main table](docs/screenshot2.png)
+![Cores and IRQ view](docs/screenshot3.png)
+![IRQ overview](docs/screenshot4.png)
+![Tools and locks](docs/screenshot5.png)
 
 ## Install
 

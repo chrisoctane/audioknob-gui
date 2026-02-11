@@ -327,6 +327,7 @@ If any agent (including “overseer”) changes behavior, adds a knob, changes p
 - Update `PLAN.md` (user guide) only for user-relevant steps and keep it consistent with the code.
 - Sync `config/registry*.json` → `audioknob_gui/data/registry*.json` when touched.
 - Prefer conservative behavior: if status cannot be proven, show “unknown/not applied” rather than “applied”.
+- For broad parity/code audits, use `docs/KNOB_SYSTEM_AUDIT_MAP.md` as the audit blueprint.
 
 When in doubt, stop and ask rather than inventing new UX/flows not described here.
 

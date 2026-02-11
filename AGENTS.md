@@ -15,6 +15,7 @@ It is for agent control only and does not change public docs.
 - `PROJECT_STATE.md` when touching behavior/architecture or release processes.
 - `docs/KNOB_INTERACTIONS.md` before any IRQ/kernel/RT/power/CPU isolation changes.
 - `docs/knobs.md` before adding or implementing new knobs.
+- `docs/KNOB_SYSTEM_AUDIT_MAP.md` when planning or executing parity/code audits.
 - `CHANGELOG.md` for release work (must be updated per release).
 - `docs/internal/archive/overseer.md` only when acting in an overseer/audit role.
 

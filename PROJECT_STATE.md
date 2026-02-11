@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.1
+- **Release version**: 0.7.2
 - **48 knobs defined** (ALL 48 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -66,6 +66,7 @@
 - **Technical columns toggle** - `Tools -> Locks -> Technical columns` shows/hides Req/Risk/CLI columns; default is hidden for simpler workflow.
 - **Universal font scaling** - font size selector now force-propagates to existing widgets in both Simple and Full views.
 - **Tx History detail columns** - Tx History table includes Knob IDs and expanded Files/Effects summaries for quicker row-level audits.
+- **System parity audit map (draft)** - `docs/KNOB_SYSTEM_AUDIT_MAP.md` defines system-by-system parity rules and audit checklists for errors/conflicts/improvements.
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
 - **PipeWire RT Setup dirty state** - changing RT setup config marks the knob as needing apply so the action shows Apply even if the last status was applied.
