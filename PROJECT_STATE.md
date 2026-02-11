@@ -332,6 +332,11 @@ Use this checklist for every new knob or when extending an existing knob to a ne
 
 Required:
 - `python3 scripts/check_repo_consistency.py`
+  - Enforces registry sync (`config/` ↔ `audioknob_gui/data/`)
+  - Enforces required doc sections
+  - Enforces `PROJECT_STATE.md` release version matches `pyproject.toml`
+  - Enforces `PROJECT_STATE.md` knob-count claim matches `config/registry.json`
+  - Enforces status vocabulary contract (`PLAN.md` operational labels + table status mapping keys)
 - `python3 -m compileall -q audioknob_gui`
 
 Planned / required next:
@@ -1683,9 +1688,13 @@ pkexec /usr/libexec/audioknob-gui-worker restore-knob rt_limits_audio_group
 |------|---------|
 | `config/registry.json` | Knob definitions (**canonical source**) |
 | `audioknob_gui/data/registry.json` | Packaged copy (synced from `config/`) |
-| `audioknob_gui/gui/app.py` | Main GUI |
+| `audioknob_gui/gui/app.py` | GUI entrypoint/bootstrap |
+| `audioknob_gui/gui/main_window.py` | Main window UI flow + queue/apply orchestration |
 | `audioknob_gui/worker/cli.py` | Worker CLI |
 | `audioknob_gui/worker/ops.py` | Preview/status logic |
+| `audioknob_gui/core/transaction.py` | Backup/restore transaction model |
+| `audioknob_gui/platform/detect.py` | Platform/audio stack detection |
+| `~/.local/state/audioknob-gui/state.json` | GUI state + persisted config |
 
 ### Canonical Registry Policy
 
@@ -1712,9 +1721,6 @@ The registry exists in two locations:
 2. `AUDIOKNOB_DEV_REPO` env var + `config/registry.json`
 3. Package data via `importlib.resources`
 4. Fallback: file-relative path (legacy)
-| `audioknob_gui/core/transaction.py` | Backup/restore |
-| `audioknob_gui/platform/detect.py` | Audio stack detection |
-| `~/.local/state/audioknob-gui/state.json` | GUI state |
 
 ### Environment
 
@@ -1728,5 +1734,5 @@ The registry exists in two locations:
 
 ---
 
-*Last updated: 2025-12-20*
+*Last updated: 2026-02-11*
 *This document is the technical source of truth. Any AI continuing this project must read and follow it.*

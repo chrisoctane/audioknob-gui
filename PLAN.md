@@ -83,7 +83,7 @@ sudo apt-get remove -y audioknob-gui
 pip install pre-commit && pre-commit install
 ```
 
-This runs `scripts/check_repo_consistency.py` before each commit to catch registry drift and doc omissions.
+This runs `scripts/check_repo_consistency.py` before each commit to catch registry/doc drift, and to verify release-version, knob-count, and status-label contracts stay aligned with code.
 
 ### Run the worker CLI directly (debugging)
 

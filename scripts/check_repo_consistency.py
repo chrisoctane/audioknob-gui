@@ -12,7 +12,9 @@ Exit codes:
 
 from __future__ import annotations
 
-import os
+import ast
+import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -97,6 +99,169 @@ def check_docs_sections(repo: Path) -> list[str]:
             if section not in state_content:
                 errors.append(f"PROJECT_STATE.md missing required section: '{section}'")
     
+    return errors
+
+
+def _read_pyproject_version(repo: Path) -> str | None:
+    path = repo / "pyproject.toml"
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8")
+    m = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', text, flags=re.MULTILINE)
+    return m.group(1).strip() if m else None
+
+
+def _read_project_state_release_version(repo: Path) -> str | None:
+    path = repo / "PROJECT_STATE.md"
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8")
+    m = re.search(r"^\s*-\s+\*\*Release version\*\*:\s*([^\n]+?)\s*$", text, flags=re.MULTILINE)
+    return m.group(1).strip() if m else None
+
+
+def _read_registry_knob_count(repo: Path) -> int | None:
+    path = repo / "config" / "registry.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    knobs = payload.get("knobs")
+    if not isinstance(knobs, list):
+        return None
+    return len(knobs)
+
+
+def _read_project_state_knob_claim(repo: Path) -> tuple[int, int] | None:
+    path = repo / "PROJECT_STATE.md"
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8")
+    m = re.search(
+        r"^\s*-\s+\*\*(\d+)\s+knobs defined\*\*\s+\(ALL\s+(\d+)\s+IMPLEMENTED",
+        text,
+        flags=re.MULTILINE,
+    )
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _extract_table_status_keys(repo: Path) -> set[str]:
+    table_path = repo / "audioknob_gui" / "gui" / "table.py"
+    if not table_path.exists():
+        return set()
+    try:
+        tree = ast.parse(table_path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name != "TableMixin":
+            continue
+        for item in node.body:
+            if not isinstance(item, ast.FunctionDef) or item.name != "_status_display":
+                continue
+            for sub in ast.walk(item):
+                if not isinstance(sub, ast.Assign):
+                    continue
+                if not any(isinstance(t, ast.Name) and t.id == "mapping" for t in sub.targets):
+                    continue
+                if not isinstance(sub.value, ast.Dict):
+                    continue
+                keys: set[str] = set()
+                for key in sub.value.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        keys.add(key.value)
+                return keys
+    return set()
+
+
+def _read_plan_operational_status_labels(repo: Path) -> list[str] | None:
+    plan_path = repo / "PLAN.md"
+    if not plan_path.exists():
+        return None
+    text = plan_path.read_text(encoding="utf-8")
+    m = re.search(r"^.*Status column is operational only.*$", text, flags=re.MULTILINE)
+    if not m:
+        return None
+    return [part.strip() for part in re.findall(r"`([^`]+)`", m.group(0))]
+
+
+def check_semantic_doc_contracts(repo: Path) -> list[str]:
+    """Check semantic contracts that are prone to silent doc drift."""
+    errors: list[str] = []
+
+    pyproject_version = _read_pyproject_version(repo)
+    project_state_version = _read_project_state_release_version(repo)
+    if not pyproject_version:
+        errors.append("Cannot parse project version from pyproject.toml")
+    if not project_state_version:
+        errors.append("Cannot parse '**Release version**' from PROJECT_STATE.md")
+    if pyproject_version and project_state_version and pyproject_version != project_state_version:
+        errors.append(
+            "Release version mismatch:\n"
+            f"  pyproject.toml: {pyproject_version}\n"
+            f"  PROJECT_STATE.md: {project_state_version}"
+        )
+
+    registry_knob_count = _read_registry_knob_count(repo)
+    project_state_knob_claim = _read_project_state_knob_claim(repo)
+    if registry_knob_count is None:
+        errors.append("Cannot parse knob count from config/registry.json")
+    if project_state_knob_claim is None:
+        errors.append(
+            "Cannot parse knob-count claim from PROJECT_STATE.md "
+            "(expected '**N knobs defined** (ALL N IMPLEMENTED...)')."
+        )
+    if registry_knob_count is not None and project_state_knob_claim is not None:
+        claimed_defined, claimed_implemented = project_state_knob_claim
+        if claimed_defined != registry_knob_count:
+            errors.append(
+                "Knob count mismatch:\n"
+                f"  config/registry.json: {registry_knob_count}\n"
+                f"  PROJECT_STATE.md defined claim: {claimed_defined}"
+            )
+        if claimed_implemented != registry_knob_count:
+            errors.append(
+                "Knob implementation claim mismatch:\n"
+                f"  config/registry.json: {registry_knob_count}\n"
+                f"  PROJECT_STATE.md implemented claim: {claimed_implemented}"
+            )
+
+    # Runtime status vocabulary contract: these are the user-facing operational states.
+    required_status_keys = {
+        "applied",
+        "not_applied",
+        "partial",
+        "pending_reboot",
+        "unknown",
+        "not_applicable",
+    }
+    status_keys = _extract_table_status_keys(repo)
+    missing_status_keys = sorted(required_status_keys - status_keys)
+    if missing_status_keys:
+        errors.append(
+            "Status vocabulary mismatch: table status mapping is missing required keys: "
+            + ", ".join(missing_status_keys)
+        )
+
+    expected_plan_labels = ["Applied", "Not applied", "Partial", "Reboot", "Unknown", "N/A"]
+    plan_labels = _read_plan_operational_status_labels(repo)
+    if plan_labels is None:
+        errors.append(
+            "Cannot parse PLAN.md operational status labels "
+            "(expected 'Status column is operational only (...)')."
+        )
+    elif plan_labels != expected_plan_labels:
+        errors.append(
+            "PLAN.md operational status labels mismatch:\n"
+            f"  expected: {', '.join(expected_plan_labels)}\n"
+            f"  found: {', '.join(plan_labels)}"
+        )
+
     return errors
 
 
@@ -214,6 +379,7 @@ def main() -> int:
         ("Registry sync", check_registry_sync),
         ("Docs exist", check_docs_exist),
         ("Docs sections", check_docs_sections),
+        ("Semantic doc contracts", check_semantic_doc_contracts),
         ("Python compile", check_compile),
         ("Docs updated for code changes", check_docs_updated_for_code_changes),
     ]
