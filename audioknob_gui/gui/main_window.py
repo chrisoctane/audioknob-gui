@@ -57,6 +57,7 @@ from audioknob_gui.gui.knobs.registry import (
     build_info_extra_html,
     handle_configure_knob,
 )
+from audioknob_gui.gui.widgets.no_wheel_combo import ComboWheelGuard
 from audioknob_gui.platform.packages import which_command
 from audioknob_gui.registry import load_registry
 
@@ -3521,6 +3522,9 @@ class MainWindow(TableMixin, QMainWindow):
 
 def run_app() -> int:
     app = QApplication(sys.argv)
+    combo_wheel_guard = ComboWheelGuard(app)
+    app.installEventFilter(combo_wheel_guard)
+    app._combo_wheel_guard = combo_wheel_guard
     icon = QIcon.fromTheme("audioknob-gui")
     if icon.isNull():
         for path in (

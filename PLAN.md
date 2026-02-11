@@ -223,6 +223,7 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - Conflict indicator counts only active/queued knobs (applied/pending/running/partial or queued apply), so idle defaults do not appear as conflicts.
 - The row-level **Conflict** button uses the same active/queued rules as the header counter, so row badges and header counts stay consistent.
 - Conflict warnings cover power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
+- Combo-box settings ignore mouse-wheel changes unless the dropdown menu is open, preventing accidental value flips while scrolling.
 
 ---
 

@@ -66,6 +66,7 @@
 - **Conflict prompt clarity** - conflict dialogs include per-knob active/queued state labels so the reason for each conflict pair is explicit.
 - **Conflict gating** - conflicting knobs show a red Conflict action that queues a reset for that knob.
 - **Conflict coverage** - power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches surface as warnings.
+- **Combo wheel safety** - combo-box settings ignore mouse-wheel input unless their dropdown menu is open, preventing accidental changes while scrolling.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
 - **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
