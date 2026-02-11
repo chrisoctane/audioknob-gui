@@ -9,12 +9,12 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.6.10
+- **Release version**: 0.7.0
 - **47 knobs defined** (ALL 47 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
-- **Simple AudioKnob mode (v0.7 work-in-progress)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible apply queue
+- **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible apply queue
 - **Simple mode title** - home view heading is `AudioKnob`
 - **Mode switch in Tools** - single `Toggle View` action switches between Simple and Full UI
 - **Simple ownership locks** - knobs applied from simple mode are locked in full view as `Managed by AudioKnob` until explicitly released from Tools

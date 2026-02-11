@@ -100,9 +100,9 @@ python3 -m audioknob_gui.worker.cli reset-defaults --scope user
 pkexec /usr/libexec/audioknob-gui-worker reset-defaults --scope root
 ```
 
-## v0.7.0 plan: Simple AudioKnob mode (draft)
+## v0.7.0 plan: Simple AudioKnob mode
 
-This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior is implemented; risk-score compression and final polish remain in progress.
+This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior are implemented as the release baseline; further ranking/polish refinements remain iterative.
 
 ### Goal
 
