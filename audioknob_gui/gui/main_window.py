@@ -1233,29 +1233,64 @@ class MainWindow(TableMixin, QMainWindow):
         self.state["simple_level"] = level
         simple_mode.apply_fixed_presets(self.state, level=level)
         backend_is_tuned = self._power_profile_backend_is_tuned()
-        queue_ids = simple_mode.compose_queue_ids(level, backend_is_tuned=backend_is_tuned)
-        self._queued_actions = {kid: "apply" for kid in queue_ids}
+        self._queued_actions = simple_mode.compose_queue_actions(
+            level,
+            backend_is_tuned=backend_is_tuned,
+            managed_knob_ids=self._simple_owned_knob_ids(),
+        )
         self._save_queue()
         save_state(self.state)
         self._update_queue_ui()
         self._populate()
-        self._refresh_simple_summary(level, queue_ids)
 
-    def _refresh_simple_summary(self, level: int, queue_ids: list[str]) -> None:
+    def _refresh_simple_summary(
+        self,
+        level: int,
+        apply_queue_ids: list[str],
+        reset_queue_ids: list[str] | None = None,
+    ) -> None:
         by_id = {k.id: k.title for k in self.registry}
-        queued_titles = [by_id.get(kid, kid) for kid in queue_ids]
+        reset_queue_ids = list(reset_queue_ids or [])
+        apply_titles = [by_id.get(kid, kid) for kid in apply_queue_ids]
+        reset_titles = [by_id.get(kid, kid) for kid in reset_queue_ids]
         if level == 0:
             self.simple_level_label.setText(f"Risk level: 0/{simple_mode.MAX_LEVEL} (Off)")
         else:
             self.simple_level_label.setText(f"Risk level: {level}/{simple_mode.MAX_LEVEL}")
-        self.simple_summary_label.setText(f"Queued apply knobs: {len(queue_ids)}")
-        if queued_titles:
-            lines = ["<b>Apply queue</b>"]
-            for title in queued_titles:
-                lines.append(f"• {html_lib.escape(title)}")
+        apply_count = len(apply_queue_ids)
+        reset_count = len(reset_queue_ids)
+        total = apply_count + reset_count
+        if reset_count:
+            self.simple_summary_label.setText(
+                f"Queued actions: {total} ({apply_count} apply, {reset_count} reset)"
+            )
+        else:
+            self.simple_summary_label.setText(f"Queued apply knobs: {apply_count}")
+        if apply_titles or reset_titles:
+            lines: list[str] = []
+            if apply_titles:
+                lines.append("<b>Apply queue</b>")
+                for title in apply_titles:
+                    lines.append(f"• {html_lib.escape(title)}")
+            if reset_titles:
+                if lines:
+                    lines.append("")
+                lines.append("<b>Reset queue</b>")
+                for title in reset_titles:
+                    lines.append(f"• {html_lib.escape(title)}")
             self.simple_list_label.setText("<br>".join(lines))
         else:
             self.simple_list_label.setText("No settings queued.")
+
+    def _ordered_queue_ids_for_action(self, action: str) -> list[str]:
+        ordered = [kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if self._queued_actions.get(kid) == action]
+        extras = [
+            kid
+            for kid, queued_action in self._queued_actions.items()
+            if queued_action == action and kid not in ordered
+        ]
+        ordered.extend(sorted(extras))
+        return ordered
 
     def _on_toggle_view(self) -> None:
         next_mode = "full" if self._ui_mode == "simple" else "simple"
@@ -2288,16 +2323,9 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_apply_queue.setEnabled(enabled)
         self.btn_apply_queue_reboot.setEnabled(enabled and self._queue_requires_reboot())
         if self._ui_mode == "simple" and hasattr(self, "simple_list_label"):
-            ordered_apply = [
-                kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if self._queued_actions.get(kid) == "apply"
-            ]
-            extras = [
-                kid
-                for kid, action in self._queued_actions.items()
-                if action == "apply" and kid not in ordered_apply
-            ]
-            ordered_apply.extend(sorted(extras))
-            self._refresh_simple_summary(self._current_simple_level(), ordered_apply)
+            ordered_apply = self._ordered_queue_ids_for_action("apply")
+            ordered_reset = self._ordered_queue_ids_for_action("reset")
+            self._refresh_simple_summary(self._current_simple_level(), ordered_apply, ordered_reset)
 
     def _apply_queue_button_state(
         self, btn: QPushButton, knob_id: str, action: str, *, row_dim: bool = False

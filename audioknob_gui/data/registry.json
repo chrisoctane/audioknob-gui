@@ -200,6 +200,29 @@
         "read": true,
         "restore": true
       },
+      "category": "permissions",
+      "description": "[i] grants non-root read access to realtime clock devices (/dev/rtc*, /dev/hpet) via udev.\n[+] satisfies common low-latency checks that require readable clock devices.\n[-] requires udev reload or replug/session refresh; broadens read access to timing devices.",
+      "id": "realtime_clock_access",
+      "impl": {
+        "kind": "udev_rule",
+        "params": {
+          "content": "SUBSYSTEM==\"rtc\", KERNEL==\"rtc*\", MODE=\"0644\"\nKERNEL==\"hpet\", MODE=\"0644\"",
+          "path": "/etc/udev/rules.d/99-audioknob-realtime-clock.rules"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "Realtime Clock Access"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "vm",
       "description": "[i] sets vm.swappiness=10.\n[+] reduces swapping that can cause dropouts under memory pressure.\n[-] uses more RAM and less swap.",
       "id": "swappiness",

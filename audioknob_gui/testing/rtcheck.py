@@ -289,7 +289,8 @@ def check_hpet() -> CheckResult:
             name="HPET access",
             status=CheckStatus.WARN,
             message="HPET device not found",
-            detail="/dev/hpet doesn't exist"
+            detail="/dev/hpet doesn't exist",
+            fix_knob="realtime_clock_access"
         )
     
     if os.access(hpet, os.R_OK):
@@ -304,7 +305,8 @@ def check_hpet() -> CheckResult:
         name="HPET access",
         status=CheckStatus.WARN,
         message="HPET not readable",
-        detail="Some apps may need read access to /dev/hpet"
+        detail="Some apps may need read access to /dev/hpet",
+        fix_knob="realtime_clock_access"
     )
 
 
@@ -319,7 +321,8 @@ def check_rtc() -> CheckResult:
             id="rtc",
             name="RTC access",
             status=CheckStatus.WARN,
-            message="RTC device not found"
+            message="RTC device not found",
+            fix_knob="realtime_clock_access"
         )
     
     if os.access(rtc, os.R_OK):
@@ -333,7 +336,8 @@ def check_rtc() -> CheckResult:
         id="rtc",
         name="RTC access",
         status=CheckStatus.WARN,
-        message="RTC not readable"
+        message="RTC not readable",
+        fix_knob="realtime_clock_access"
     )
 
 

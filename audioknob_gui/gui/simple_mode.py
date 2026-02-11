@@ -23,7 +23,7 @@ SIMPLE_SETTINGS: tuple[SimpleSetting, ...] = (
     SimpleSetting("usb_autosuspend_disable", "USB Power", 5, ("usb_autosuspend_disable",)),
     SimpleSetting("cpu_dma_latency_udev", "DMA Latency", 6, ("cpu_dma_latency_udev",)),
     SimpleSetting("power_profile_performance", "Power Profile", 7, ("power_profile_performance",)),
-    SimpleSetting("rt_limits_audio_group", "RT Limits", 8, ("rt_limits_audio_group",)),
+    SimpleSetting("realtime_clock_access", "Realtime Clock Access", 8, ("realtime_clock_access",)),
     SimpleSetting(
         "cpu_governor_performance_persistent",
         "CPU Performance (persistent)",
@@ -32,16 +32,25 @@ SIMPLE_SETTINGS: tuple[SimpleSetting, ...] = (
     ),
     SimpleSetting(
         "pipewire_rt_setup",
-        "PipeWire RT Setup (Safe)",
+        "Safety Latch: Safe RT Stack",
         10,
         (
+            "rt_limits_audio_group",
             "pipewire_rt_limits_group",
             "pipewire_rt_module_tuning",
             "pipewire_mlock_policy",
         ),
     ),
-    SimpleSetting("pipewire_mlock_policy", "PipeWire Memory Lock", 10, ("pipewire_mlock_policy",)),
-    SimpleSetting("kernel_threadirqs", "Threaded IRQs", 11, ("kernel_threadirqs",)),
+    SimpleSetting(
+        "safe_irq_stack",
+        "Safety Latch: Safe IRQ Stack",
+        11,
+        (
+            "kernel_threadirqs",
+            "irqbalance_disable",
+            "rtirq_enable",
+        ),
+    ),
 )
 
 # Stable ordering for queue rendering and deterministic serialization.
@@ -53,12 +62,15 @@ ORDERED_QUEUE_KNOBS: tuple[str, ...] = (
     "usb_autosuspend_disable",
     "cpu_dma_latency_udev",
     "power_profile_performance",
-    "rt_limits_audio_group",
+    "realtime_clock_access",
     "cpu_governor_performance_persistent",
+    "rt_limits_audio_group",
     "pipewire_rt_limits_group",
     "pipewire_rt_module_tuning",
     "pipewire_mlock_policy",
     "kernel_threadirqs",
+    "irqbalance_disable",
+    "rtirq_enable",
 )
 
 SIMPLE_MANAGED_KNOB_IDS = frozenset(
@@ -108,6 +120,22 @@ def compose_queue_ids(level: int, *, backend_is_tuned: bool) -> list[str]:
 
     ordered = [kid for kid in ORDERED_QUEUE_KNOBS if kid in queue_ids]
     return ordered
+
+
+def compose_queue_actions(
+    level: int,
+    *,
+    backend_is_tuned: bool,
+    managed_knob_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> dict[str, str]:
+    apply_ids = compose_queue_ids(level, backend_is_tuned=backend_is_tuned)
+    actions: dict[str, str] = {kid: "apply" for kid in apply_ids}
+
+    managed = {str(kid) for kid in (managed_knob_ids or ())}
+    for kid in ORDERED_QUEUE_KNOBS:
+        if kid in managed and kid not in actions:
+            actions[kid] = "reset"
+    return actions
 
 
 def apply_fixed_presets(state: dict, *, level: int) -> None:

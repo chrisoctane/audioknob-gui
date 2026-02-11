@@ -106,7 +106,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 
 ### Goal
 
-- Add a simple, musician-first home page with one large dial (**AudioKnob**) that composes an apply queue.
+- Add a simple, musician-first home page with one large dial (**AudioKnob**) that composes an action queue (apply/reset).
 - Keep the current full app and advanced workflows available.
 - Dial includes a non-occluding center graphic slot (brand/art image).
 - Dial visual rotation is decoupled from queue recomposition so turning remains smooth while the setting list catches up.
@@ -117,7 +117,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 
 1. App opens in **Simple mode** by default.
 2. User turns the dial to a level from **0 to 11** (`0` = Off, `1..11` = risk tiers).
-3. That dial value builds a visible apply queue (no hidden changes).
+3. That dial value builds a visible action queue (no hidden changes).
 4. User clicks **Apply** (same existing queue/apply engine).
 5. User can switch to the existing full UI from **Tools**.
 
@@ -129,12 +129,16 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - `dirty_bytes`
 - `usb_autosuspend_disable`
 - `cpu_dma_latency_udev`
+- `realtime_clock_access` (fixed preset: readable `/dev/rtc*` + `/dev/hpet` via udev rule)
 - `power_profile_performance` (fixed preset: backend `auto`)
-- `rt_limits_audio_group`
 - `cpu_governor_performance_persistent` (skipped when power backend resolves to tuned)
-- `pipewire_rt_setup` (fixed Safe RT bundle)
-- `pipewire_mlock_policy` (fixed preset)
-- `kernel_threadirqs`
+- `Safety Latch: Safe RT` at level `10`:
+  - `rt_limits_audio_group`
+  - `pipewire_rt_setup` (fixed Safe RT bundle)
+- `Safety Latch: Safe IRQ` at level `11`:
+  - `kernel_threadirqs`
+  - `irqbalance_disable`
+  - `rtirq_enable`
 
 ### Safety model (planned)
 
@@ -146,8 +150,9 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - Simple mode auto-queues dependency bundles (for example RT setup also queues its required RT limits/module pieces).
 - If a knob was applied by AudioKnob, the same knob row in Full mode is locked as **Managed by AudioKnob** to prevent mixed-workflow edits.
 - Full mode can release these locks only via **Tools → Locks → Release AudioKnob Locks**.
-- Dial movement never auto-applies and never auto-queues resets.
-- Dial level `0` is an explicit off position that clears the simple-mode apply queue.
+- Dial movement never auto-applies.
+- Dial up composes apply actions; dial down composes reset actions for AudioKnob-managed knobs that are no longer in scope.
+- Dial level `0` is an explicit off position that composes resets for all AudioKnob-managed knobs.
 - Dial input is debounced for queue recomposition to keep rotation smooth under heavier queue/status redraw paths.
 - Existing conflict checks and prompts still run at Apply time.
 
@@ -309,7 +314,7 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - Conflict warnings cover power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
 - In simple mode, when power profile resolves to `tuned`, the queue skips CPU governor to avoid the tuned/governor conflict path.
 - Combo-box settings ignore mouse-wheel changes unless the dropdown menu is open, preventing accidental value flips while scrolling.
-- Simple mode shows one plain-text list on the left: **Apply queue** (no pane, no separate selected-settings list).
+- Simple mode shows one plain-text list on the left with **Apply queue** and **Reset queue** sections (no pane, no separate selected-settings list).
 - The font size selector applies universally across existing widgets so simple/full text tracks the selected size.
 
 ---
@@ -706,6 +711,7 @@ Only after non-root testing is stable:
 - Structured output for GUI
 - Links to fix knobs
 - More checks (USB, THP, memlock)
+- RTC/HPET checks now link to `realtime_clock_access`
 
 See `audioknob_gui/testing/rtcheck.py`
 

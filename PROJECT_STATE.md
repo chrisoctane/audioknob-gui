@@ -10,11 +10,11 @@
 
 ### What Works
 - **Release version**: 0.7.1
-- **47 knobs defined** (ALL 47 IMPLEMENTED, including Dev tab)
+- **48 knobs defined** (ALL 48 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
-- **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible apply queue
+- **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible action queue (apply/reset)
 - **Simple mode title** - home view heading is `AudioKnob`
 - **Mode switch in header** - dedicated far-left `View` button switches between Simple and Full UI
 - **Simple ownership locks** - knobs applied from simple mode are locked in full view as `Managed by AudioKnob` until explicitly released from Tools
@@ -100,7 +100,7 @@ Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
 
 Notes:
 - App has two UI modes:
-  - **Simple mode**: large dial queue composer (default), with one plain-text **Apply queue** list on the left and knob on the right
+  - **Simple mode**: large dial queue composer (default), with one plain-text action list on the left (**Apply queue** + **Reset queue**) and knob on the right
   - **Full mode**: existing tabbed table UI
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by `Tools -> Locks -> Advanced knobs`.
 - Req./Risk/CLI are technical columns hidden by default; enable them with `Tools -> Locks -> Technical columns`.
@@ -263,9 +263,10 @@ Implemented pieces are reflected in "What Works"; remaining items below stay pla
 #### Queue semantics
 
 - Dial movement is **queue composition only**.
-- Dial movement never auto-applies and never auto-queues resets.
-- Dial level `0` is an explicit off state that composes an empty apply queue.
-- Dial updates apply actions for simple-eligible knobs only, then user explicitly clicks Apply.
+- Dial movement never auto-applies.
+- Dial up composes apply actions; dial down composes reset actions for AudioKnob-managed knobs that are no longer in scope.
+- Dial level `0` is an explicit off state that composes resets for all AudioKnob-managed knobs.
+- Dial updates apply/reset actions for simple-eligible knobs only, then user explicitly clicks Apply.
 - Existing apply pipeline stays authoritative:
   - requirement checks
   - conflict prompts
@@ -323,38 +324,39 @@ Tie-break implementation (draft policy):
 | 8 | `disable_baloo` | 19 | Medium | false | excluded from simple mode; desktop search/indexing loss has non-audio usability impact |
 | 9 | `usb_autosuspend_disable` | 20 | High | true | common USB audio stability gain; side effect is primarily power draw |
 | 10 | `cpu_dma_latency_udev` | 21 | Medium | true | deterministic udev policy; power tradeoff but low conflict risk |
-| 11 | `power_profile_performance` | 24 | High | true | broad performance gain; simple mode uses fixed backend `auto` preset |
-| 12 | `rt_limits_audio_group` | 25 | High | true | common RT requirement; root/session boundary adds operational cost |
-| 13 | `cpu_governor_performance_persistent` | 27 | Medium | true | persistent system policy with thermal/power impact and tuned conflicts |
-| 14 | `pipewire_pro_audio_profile` | 29 | Medium | false | can change node topology/channel layout; moderate payoff and app compatibility risk |
-| 15 | `thp_mode_madvise` | 31 | Low | false | kernel cmdline + reboot path for workload-specific gain; lower general payoff |
-| 16 | `qjackctl_server_prefix_rt` | 33 | Medium | false | app-specific workflow dependency; requires QjackCtl lifecycle discipline |
-| 17 | `pipewire_rt_setup` | 36 | Medium | true | composite root/user RT tuning; simple mode uses fixed Safe RT preset bundle |
-| 18 | `wireplumber_alsa_usb_tuning` | 37 | Medium | false | can fight newer auto-tuning behavior; device-specific troubleshooting burden |
-| 19 | `pipewire_mlock_policy` | 39 | Medium | true | dev-tab knob included only via fixed preset and bundled RT dependency chain |
-| 20 | `pipewire_rt_limits_group` | 40 | Medium | false | hidden sub-knob with root/session constraints; not suitable for simple dial |
-| 21 | `pipewire_rt_module_tuning` | 42 | Low | false | advanced module-level tuning with lower broad payoff |
-| 22 | `pipewire_clock_constraints` | 43 | Medium | false | conflict pressure with quantum/sample-rate boundaries |
-| 23 | `pipewire_data_loop_affinity` | 45 | Medium | false | affinity changes must align with CPU/IRQ isolation to avoid regressions |
-| 24 | `irqbalance_disable` | 50 | Medium | false | global IRQ distribution behavior change; conflict with pinning workflows |
-| 25 | `rtirq_enable` | 53 | Medium | false | depends on threaded IRQ context; partial/ineffective states are common |
-| 26 | `kernel_threadirqs` | 56 | Medium | true | boot-time IRQ threading policy; included in simple mode at higher risk tiers |
-| 27 | `kernel_cstate_limit` | 59 | Medium | false | kernel power-state cap; heat/suspend side effects |
-| 28 | `kernel_intel_idle_cstate_limit` | 60 | Medium | false | Intel-specific power-state cap; same thermal/suspend tradeoffs |
-| 29 | `kernel_nosmt` | 64 | Medium | false | topology/performance tradeoff; can invalidate core/IRQ plans |
-| 30 | `irq_pinning` | 67 | Medium | false | complex per-device affinity + housekeeping with kernel-managed IRQ exceptions |
-| 31 | `kernel_irqaffinity` | 69 | Medium | false | boot-level IRQ housekeeping policy across the system |
-| 32 | `kernel_rt_throttling_off` | 71 | High | false | can starve non-RT workloads and interfere with suspend safety |
-| 33 | `kernel_isolcpus` | 75 | Medium | false | expert isolation knob; high interaction pressure with other core knobs |
-| 34 | `kernel_nohz_full` | 76 | Medium | false | expert scheduler-tick isolation; sensitive to core-set consistency |
-| 35 | `kernel_rcu_nocbs` | 77 | Medium | false | expert RCU callback offload; tightly coupled with isolation strategy |
-| 36 | `kernel_nmi_watchdog_off` | 81 | Low | false | disables watchdog diagnostics; low direct payoff for most users |
-| 37 | `kernel_nosoftlockup` | 82 | Low | false | removes lockup diagnostics; low general payoff versus visibility loss |
-| 38 | `kernel_audit_off` | 84 | Low | false | reduces audit visibility/security telemetry; limited audio-specific gain |
-| 39 | `kernel_clocksource_tsc` | 87 | Medium | false | hardware-specific timing behavior; known instability risk on some systems |
-| 40 | `kernel_tsc_reliable` | 88 | Low | false | forces timing trust assumptions with low universal payoff |
-| 41 | `kernel_preempt_full` | 90 | Low | false | aggressive kernel behavior change; dev/validation burden remains high |
-| 42 | `kernel_mitigations_off` | 94 | Low | false | security hardening reduction with high downside and low general payoff |
+| 11 | `realtime_clock_access` | 22 | Medium | true | deterministic udev permission policy for `/dev/rtc*` + `/dev/hpet`; low blast radius and reversible |
+| 12 | `power_profile_performance` | 24 | High | true | broad performance gain; simple mode uses fixed backend `auto` preset |
+| 13 | `rt_limits_audio_group` | 25 | High | true | common RT requirement; root/session boundary adds operational cost |
+| 14 | `cpu_governor_performance_persistent` | 27 | Medium | true | persistent system policy with thermal/power impact and tuned conflicts |
+| 15 | `pipewire_pro_audio_profile` | 29 | Medium | false | can change node topology/channel layout; moderate payoff and app compatibility risk |
+| 16 | `thp_mode_madvise` | 31 | Low | false | kernel cmdline + reboot path for workload-specific gain; lower general payoff |
+| 17 | `qjackctl_server_prefix_rt` | 33 | Medium | false | app-specific workflow dependency; requires QjackCtl lifecycle discipline |
+| 18 | `pipewire_rt_setup` | 36 | Medium | true | composite root/user RT tuning; simple mode uses fixed Safe RT preset bundle |
+| 19 | `wireplumber_alsa_usb_tuning` | 37 | Medium | false | can fight newer auto-tuning behavior; device-specific troubleshooting burden |
+| 20 | `pipewire_mlock_policy` | 39 | Medium | true | dev-tab knob included only via fixed preset and bundled RT dependency chain |
+| 21 | `pipewire_rt_limits_group` | 40 | Medium | false | hidden sub-knob with root/session constraints; not suitable for simple dial |
+| 22 | `pipewire_rt_module_tuning` | 42 | Low | false | advanced module-level tuning with lower broad payoff |
+| 23 | `pipewire_clock_constraints` | 43 | Medium | false | conflict pressure with quantum/sample-rate boundaries |
+| 24 | `pipewire_data_loop_affinity` | 45 | Medium | false | affinity changes must align with CPU/IRQ isolation to avoid regressions |
+| 25 | `irqbalance_disable` | 50 | Medium | true | included only in top safety latch tier with threaded IRQ + RTIRQ |
+| 26 | `rtirq_enable` | 53 | Medium | true | included only in top safety latch tier with threaded IRQ + irqbalance disable |
+| 27 | `kernel_threadirqs` | 56 | Medium | true | boot-time IRQ threading policy; included in simple mode at higher risk tiers |
+| 28 | `kernel_cstate_limit` | 59 | Medium | false | kernel power-state cap; heat/suspend side effects |
+| 29 | `kernel_intel_idle_cstate_limit` | 60 | Medium | false | Intel-specific power-state cap; same thermal/suspend tradeoffs |
+| 30 | `kernel_nosmt` | 64 | Medium | false | topology/performance tradeoff; can invalidate core/IRQ plans |
+| 31 | `irq_pinning` | 67 | Medium | false | complex per-device affinity + housekeeping with kernel-managed IRQ exceptions |
+| 32 | `kernel_irqaffinity` | 69 | Medium | false | boot-level IRQ housekeeping policy across the system |
+| 33 | `kernel_rt_throttling_off` | 71 | High | false | can starve non-RT workloads and interfere with suspend safety |
+| 34 | `kernel_isolcpus` | 75 | Medium | false | expert isolation knob; high interaction pressure with other core knobs |
+| 35 | `kernel_nohz_full` | 76 | Medium | false | expert scheduler-tick isolation; sensitive to core-set consistency |
+| 36 | `kernel_rcu_nocbs` | 77 | Medium | false | expert RCU callback offload; tightly coupled with isolation strategy |
+| 37 | `kernel_nmi_watchdog_off` | 81 | Low | false | disables watchdog diagnostics; low direct payoff for most users |
+| 38 | `kernel_nosoftlockup` | 82 | Low | false | removes lockup diagnostics; low general payoff versus visibility loss |
+| 39 | `kernel_audit_off` | 84 | Low | false | reduces audit visibility/security telemetry; limited audio-specific gain |
+| 40 | `kernel_clocksource_tsc` | 87 | Medium | false | hardware-specific timing behavior; known instability risk on some systems |
+| 41 | `kernel_tsc_reliable` | 88 | Low | false | forces timing trust assumptions with low universal payoff |
+| 42 | `kernel_preempt_full` | 90 | Low | false | aggressive kernel behavior change; dev/validation burden remains high |
+| 43 | `kernel_mitigations_off` | 94 | Low | false | security hardening reduction with high downside and low general payoff |
 
 #### Compression to dial scale (planned)
 
@@ -365,13 +367,16 @@ Tie-break implementation (draft policy):
 #### Simple dependency bundles (planned)
 
 - Simple queue composition must auto-include hard dependencies (`depends_on`) for selected knobs.
-- Bundle rule for `rt_limits_audio_group`:
-  - always queue `audio_group_membership` with apply
-- Bundle rule for simple `pipewire_rt_setup`:
+- Safety latch tier `10` (Safe RT stack):
+  - queue `rt_limits_audio_group`
   - queue `audio_group_membership`
   - queue `pipewire_rt_limits_group` with fixed group `audio`
   - queue `pipewire_rt_module_tuning` with one conservative RT-module preset
   - queue `pipewire_mlock_policy` with one fixed mlock preset
+- Safety latch tier `11` (Safe IRQ stack):
+  - queue `kernel_threadirqs`
+  - queue `irqbalance_disable`
+  - queue `rtirq_enable`
 - Hidden/internal knobs in a bundle are not shown as separate simple controls.
 
 #### Simple conflict gate (planned)
@@ -406,7 +411,7 @@ preset extraction.
 | `pipewire_rt_setup` | multi-field RT setup dialog | Approved: On => fixed Safe RT preset bundle |
 | `pipewire_rt_limits_group` | group selection dialog | Internal bundle member: fixed group `audio` |
 | `pipewire_rt_module_tuning` | RT module fields dialog | Internal bundle member: one conservative RT-module preset |
-| `pipewire_mlock_policy` | memory lock policy dialog | Approved Dev inclusion: On => fixed mlock policy preset |
+| `pipewire_mlock_policy` | memory lock policy dialog | Internal bundle member: fixed mlock policy preset |
 | `pipewire_clock_constraints` | min/max/rate constraints dialog | Deferred: full app only (no simple preset in v0.7) |
 | `pipewire_data_loop_affinity` | data-loop affinity dialog | Deferred: full app only (coupled to core/IRQ strategy) |
 | `kernel_isolcpus` | CPU core selector dialog | Deferred: full app only (core isolation family) |
@@ -632,6 +637,13 @@ test -f /etc/udev/rules.d/99-usb-no-autosuspend.rules && echo present || echo ab
 # Before
 test -f /etc/udev/rules.d/99-cpu-dma-latency.rules && echo present || echo absent
 # Apply/Reset + status checks
+```
+
+**realtime_clock_access:**
+```bash
+# Before
+test -f /etc/udev/rules.d/99-audioknob-realtime-clock.rules && echo present || echo absent
+# Apply/Reset + status checks (/dev/rtc* and /dev/hpet readability)
 ```
 
 #### 4) kernel cmdline knobs (root, requires reboot) — DO LAST
@@ -1338,8 +1350,8 @@ Comprehensive realtime readiness scan inspired by `realtimeconfigquickscan` but 
 | IRQ balance | irqbalance not running | irqbalance_disable |
 | THP | madvise or never mode | thp_mode_madvise |
 | USB autosuspend | Disabled for audio devices | usb_autosuspend_disable |
-| HPET | /dev/hpet readable | — |
-| RTC | /dev/rtc readable | — |
+| HPET | /dev/hpet readable | realtime_clock_access |
+| RTC | /dev/rtc readable | realtime_clock_access |
 | Filesystems | No reiserfs/fuseblk for audio | — |
 | Audio services | Detects PipeWire/JACK/etc | — |
 | cyclictest | Tool available for testing | (install rt-tests) |

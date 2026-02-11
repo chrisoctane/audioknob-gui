@@ -79,8 +79,17 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - Data loop affinity should align with CPU isolation/pinning choices to avoid jitter.
 - Simple AudioKnob uses a fixed Safe RT preset bundle (group `audio`, conservative RT-module fields, fixed mlock policy).
 
+### Realtime clock device access
+- `realtime_clock_access` installs a udev rule to expose read access for `/dev/rtc*` and `/dev/hpet`.
+- This is intended to satisfy scanner-level clock access checks with low operational risk.
+- No known direct conflicts with other knobs; reset removes only the dedicated rule file.
+
 ### Simple AudioKnob mode
-- Dial movement composes queue entries only; it never auto-applies and never auto-queues resets.
+- Dial movement composes queue entries only; it never auto-applies.
+- Dial up composes apply actions, and dial down composes resets for knobs managed by AudioKnob.
+- Top safety latch tiers are:
+  - level 10: Safe RT stack (RT limits + fixed Safe PipeWire RT bundle)
+  - level 11: Safe IRQ stack (threadirqs + irqbalance disable + rtirq)
 - Knobs applied from simple mode are treated as managed in Full mode to avoid mixed-workflow edits.
 - Full-mode managed locks are released only by explicit user action (Tools -> Locks -> Release AudioKnob Locks).
 
