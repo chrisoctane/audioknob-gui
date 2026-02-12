@@ -157,7 +157,7 @@ Implementation approach
   - If not, offer a configurable fallback group (audio/realtime) or prompt.
 - Add only our lines; keep the file additive.
 
-Example lines (values must be confirmed per distro policy)
+Current preset lines (app policy)
 - @pipewire - rtprio 95
 - @pipewire - nice -19
 - @pipewire - memlock 4194304
@@ -176,11 +176,18 @@ Sources
   - https://manpages.ubuntu.com/manpages/resolute/en/man7/libpipewire-module-rt.7.html
 - PipeWire Performance Tuning (user-provided excerpt, 20 Apr 2023)
 
-Open questions / TODO
-- Confirm distro-default values for rtprio/nice/memlock in official packaging.
-- Decide whether to set conservative defaults or require explicit user input.
-- Decide if the knob should offer 95/‑19/4194304 as a preset (matches the
-  PipeWire performance tuning guidance) or ask users to enter values.
+Decision (`AG-003` resolved in `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md`)
+- Keep a conservative fixed preset as the default policy:
+  - `rtprio=95`, `nice=-19`, `memlock=4194304`.
+- Allow explicit override via PipeWire RT Setup config fields when users need
+  different values.
+- Keep dependency rule explicit in docs and UI behavior: RLIMIT RT priority
+  must be at or above `module.rt.args rt.prio`; otherwise PipeWire falls back
+  to RTKit/portal.
+- Keep Safe RT behavior explicit: Safe RT can run with limits disabled and
+  rely on RTKit/portal.
+- Keep group fallback policy deterministic (`pipewire` -> `audio` -> `realtime`)
+  using the worker's existing override path.
 
 -------------------------------------------------------------------------------
 ## PipeWire RT Module Tuning (module.rt.args)
@@ -250,7 +257,8 @@ Apply/Reset
 
 Status
 - Check for our drop-in file and configured properties.
-- If the system uses a different session manager, status is not_applicable.
+- Runtime effect depends on WirePlumber loading this drop-in; status itself is
+  file-content based.
 
 Sources
 - WirePlumber ALSA configuration reference (property semantics)
@@ -262,9 +270,13 @@ Notes (from performance tuning guidance)
   when the device is opened and is based on the graph quantum. Any manual rule
   should avoid fighting the automatic behavior.
 
-Open questions / TODO
-- Confirm WirePlumber config directory layout for 0.5+ across distros.
-- Decide how to scope to USB devices (match rules).
+Decision (`AG-004` resolved in `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md`)
+- Standardize on WirePlumber 0.5+ native config fragments:
+  - `~/.config/wireplumber/wireplumber.conf.d/90-audioknob-alsa.conf`
+- Keep USB-only scope as default contract using explicit match rules:
+  - `device.bus = "usb"` unless a knob-specific override is provided.
+- Keep apply/reset model surgical (own drop-in only); status remains
+  deterministic file-content comparison.
 
 -------------------------------------------------------------------------------
 ## Pro Audio Profile (per-device toggle)
@@ -312,9 +324,19 @@ Sources
 - WirePlumber CLI profile switching (wpctl set-profile):
   https://manpages.ubuntu.com/manpages/resolute/man1/wpctl.1.html
 
-Open questions / TODO
-- Confirm the best way to enumerate device profiles with wpctl (status vs inspect).
-- Verify how profile naming appears across distros ("Pro Audio" vs "pro-audio").
+Decision (`AG-005` resolved in `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md`)
+- Use `wpctl inspect <device-id>` as primary status source.
+- Accept all proven Pro Audio indicators:
+  - `device.profile.pro = true`
+  - active profile names containing either `Pro Audio` or `pro-audio`.
+- If wpctl output omits profile inventory or active profile details, fall back
+  to `pactl list cards` for profile availability/current-profile checks.
+- Status contract is deterministic:
+  - `applied`: Pro Audio active
+  - `not_applied`: Pro Audio available but another profile active
+  - `not_applicable`: no Pro Audio profile available
+  - `unknown`: command/read failure
+- Enforcement tests: `tests/test_wpctl_profile_status.py`.
 
 -------------------------------------------------------------------------------
 ## PipeWire Data Loop Affinity (Advanced)
@@ -342,7 +364,7 @@ Sources
 - PipeWire Performance Tuning (user-provided excerpt, 20 Apr 2023)
 
 -------------------------------------------------------------------------------
-## RTKit Daemon Tuning (On hold / Needs verification)
+## RTKit Daemon Tuning (On hold / De-scoped for apply)
 
 Goal
 - Tune RTKit daemon limits where distros expose configuration hooks.
@@ -352,17 +374,28 @@ Risk
   policy, or be ignored entirely.
 
 Status
-- On hold until distro-specific configuration guidance is confirmed.
+- Remains read-only/on-hold. Apply/reset is intentionally not implemented.
 - PipeWire can still use RTKit via module-rt; this knob only tunes the daemon.
 
-TODO (research gate)
-- Identify authoritative config locations per distro (systemd override or
-  EnvironmentFile, if any).
-- Confirm supported arguments and defaults from official RTKit docs.
+Decision (`AG-006` resolved in `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md`)
+- De-scope RTKit tuning from apply/reset until there is a deterministic,
+  distro-verified contract.
+- Current evidence shows no single portable config location contract:
+  - upstream README describes daemon configuration via command-line parameters
+    (not a canonical config file),
+  - distro units/package templates differ in service wiring details.
+- Keep this as a research/placeholder knob (read-only) so users can still see
+  RTKit-related diagnostics without unsafe writes.
 
-Potential sources to investigate
-- Distro packaging docs for rtkit-daemon
-- systemd unit EnvironmentFile declarations
+Sources
+- RTKit upstream README:
+  - https://github.com/heftig/rtkit/blob/master/README
+- RTKit upstream service template:
+  - https://github.com/heftig/rtkit/blob/master/rtkit-daemon.service.in
+- Debian source templates:
+  - https://sources.debian.org/src/rtkit/
+- Fedora package spec:
+  - https://src.fedoraproject.org/rpms/rtkit
 
 -------------------------------------------------------------------------------
 ## Live XRUN Counter (Monitoring)
@@ -395,4 +428,5 @@ Sources
   https://man.voidlinux.org/pw-top.1
 
 Notes from performance tuning guidance (user-provided)
-- For Red Hat/Arch-style packaging:\n+  - Add a systemd override to inject RTKIT_ARGS and load\n+    /etc/sysconfig/rtkit via EnvironmentFile.\n+  - Replace ExecStart with /usr/libexec/rtkit-daemon $RTKIT_ARGS.\n+- For Debian/Ubuntu-style packaging:\n+  - Use `systemctl edit rtkit-daemon.service` to override ExecStart and load\n+    /etc/dbus-1/system.d/rtkit for RTKIT_ARGS.\n+  - Requires reboot after changes.\n+- Example RTKIT_ARGS (needs confirmation per distro/policy):\n+  --scheduling-policy=FIFO\n+  --our-realtime-priority=89\n+  --max-realtime-priority=88\n+  --min-nice-level=-19\n+  --rttime-usec-max=2000000\n+  --users-max=100\n+  --processes-per-user-max=1000\n+  --threads-per-user-max=10000\n+  --actions-burst-sec=10\n+  --actions-per-burst-max=1000\n+  --canary-cheep-msec=30000\n+  --canary-watchdog-msec=60000
+- Legacy tuning snippets exist but vary by distro/service templates; they are
+  intentionally not part of the active app contract until verified per distro.

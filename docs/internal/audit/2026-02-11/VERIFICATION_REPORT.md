@@ -1,5 +1,9 @@
 # Verification Report
 
+Note:
+- Entries are chronological by execution time and preserve each phase checkpoint state.
+- For current disposition, prefer the latest section and `ALIGNMENT_GAP_TRACKER.md` tracker status.
+
 ## 2026-02-12 - Phase 1 baseline freeze
 
 ### Baseline metadata
@@ -200,3 +204,212 @@
 ### Finding summary
 - New findings added: `0`
 - Existing finding dispositions unchanged.
+
+## 2026-02-12 - Phase 6 pre-close verification (blocked)
+
+### Scope checked
+- Audit-doc drift/error pass across all Phase 0-6 artifacts.
+- `RB-001` implementation precondition check for `AK-AUD-002` closure.
+- Force-reset parity evidence re-check in worker + GUI support paths.
+
+### Commands run
+1. `rg -n "TODO|TBD|FIXME|TEMPLATE|in_progress|\[ \] Phase 6|Current resume point|AK-AUD-|RB-00" docs/internal/audit/2026-02-11 -g'*.md'`
+  - Result: `pass`
+  - Summary: no unresolved placeholders or stale phase markers; findings/batch references are coherent.
+2. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+3. `python3 -m compileall -q audioknob_gui`
+  - Result: `pass`
+4. `nl -ba audioknob_gui/worker/cli.py | sed -n '3390,3488p'`
+  - Result: `pass`
+  - Summary: `cmd_force_reset_knob` still lacks explicit branches for `irq_affinity`, `power_profile`, `qjackctl_server_prefix`, `wpctl_profile`.
+5. `nl -ba audioknob_gui/gui/main_window.py | sed -n '4068,4098p'`
+  - Result: `pass`
+  - Summary: `_force_reset_supported` allowlist omits the same four kinds.
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/KNOB_AUDIT_PLAN.md` (Phase 6 status noted as in-progress/blocked on `RB-001`).
+- `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md` (`AK-AUD-002` evidence expanded with GUI support-path omission; Phase 6 note added).
+- `docs/internal/audit/2026-02-11/REMEDIATION_BATCHES.md` (`RB-001` status clarified as not implemented at pre-close check time).
+
+### Finding summary
+- New findings added: `0`
+- `AK-AUD-002`: remains `Planned` in `RB-001` (open Medium; closeout blocker by batch policy).
+- `AK-AUD-001`: remains `Deferred` in `RB-002` with documented rationale.
+- `AK-AUD-003`: remains `Resolved`.
+
+### Phase-6 disposition
+- Phase 6 closeout criteria: `not_met`
+- Reason: `RB-001` has not been implemented yet, so `AK-AUD-002` cannot be marked resolved.
+
+## 2026-02-12 - Phase 6 final closeout verification
+
+### Scope checked
+- `RB-001` implementation evidence in worker + GUI force-reset support paths.
+- Audit artifact alignment (`KIND_PARITY_MATRIX.md`, `KNOB_WORKSHEET.md`, `FINDINGS_LEDGER.md`, `REMEDIATION_BATCHES.md`, `KNOB_AUDIT_PLAN.md`).
+- Contract alignment in `PLAN.md` and `PROJECT_STATE.md`.
+
+### Commands run
+1. `rg -n "_force_reset_irq_affinity|_force_reset_power_profile|_force_reset_qjackctl_server_prefix|_force_reset_wpctl_profile|kind == \"irq_affinity\"|kind == \"power_profile\"|kind == \"qjackctl_server_prefix\"|kind == \"wpctl_profile\"" audioknob_gui/worker/cli.py`
+  - Result: `pass`
+  - Summary: all four `RB-001` kinds now have explicit force-reset branches.
+2. `rg -n "_force_reset_supported|irq_affinity|power_profile|qjackctl_server_prefix|wpctl_profile" audioknob_gui/gui/main_window.py`
+  - Result: `pass`
+  - Summary: GUI allowlist now includes all `RB-001` kinds.
+3. `python3 -m compileall -q audioknob_gui tests`
+  - Result: `pass`
+4. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+5. `python3 -m pytest -q tests/test_cli_commands.py -k "force_reset or kernel_cmdline_status_param_fallback"`
+  - Result: `not_run`
+  - Summary: `pytest` is not installed in this environment (`No module named pytest`).
+
+### Outputs updated
+- `audioknob_gui/worker/cli.py` (added explicit force-reset handlers for `irq_affinity`, `power_profile`, `qjackctl_server_prefix`, `wpctl_profile`).
+- `audioknob_gui/gui/main_window.py` (expanded `_force_reset_supported` allowlist for `RB-001` kinds).
+- `tests/test_cli_commands.py` (added force-reset dispatch and `wpctl_profile` safe-decline tests).
+- `PLAN.md` and `PROJECT_STATE.md` (force-reset support contract updated).
+- `docs/internal/audit/2026-02-11/*` closeout artifacts updated for `RB-001` completion and finding disposition changes.
+
+### Finding summary
+- New findings added: `0`
+- `AK-AUD-002`: `Resolved` (Phase 6, `RB-001` completed).
+- `AK-AUD-001`: `Deferred` (unchanged, `RB-002`).
+- `AK-AUD-003`: `Resolved` (unchanged).
+
+### Phase-6 disposition
+- Phase 6 closeout criteria: `met`
+- Residual risk note: `wpctl_profile` force reset intentionally uses explicit safe-decline for non-deterministic fallback selection; this is documented behavior, not an open parity defect.
+
+## 2026-02-12 - Post-close alignment extraction sweep
+
+### Scope checked
+- Fresh code/docs/audit comparison after Phase 6 closeout.
+- Force-reset contract parity re-check across worker, GUI allowlist, and docs.
+- Outstanding TODO/open-question extraction into a dedicated tracker document.
+
+### Commands run
+1. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+2. `python3 -m compileall -q audioknob_gui tests`
+  - Result: `pass`
+3. `rg -n "TODO|FIXME|TBD|XXX|HACK|BUG" audioknob_gui docs config scripts tests PLAN.md PROJECT_STATE.md -g'*.py' -g'*.md' -g'*.json' --hidden`
+  - Result: `pass`
+  - Summary: remaining open items were documentation research/backlog items, now centralized in `ALIGNMENT_GAP_TRACKER.md`.
+
+### Outputs updated
+- `audioknob_gui/gui/main_window.py` (`wireplumber_conf` added to `_force_reset_supported`).
+- `PLAN.md` and `PROJECT_STATE.md` (force-reset list includes `wireplumber_conf`; stale `BUGFEAT.md` reference removed from DoD policy text).
+- `docs/knobs.md` (open-question sections now reference centralized tracker IDs).
+- `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md` (new extracted-gap tracker with phased plan).
+
+### Finding summary
+- New audit findings added: `0`
+- Existing audit disposition unchanged:
+  - `AK-AUD-001`: deferred (`RB-002`)
+  - `AK-AUD-002`: resolved (`RB-001`)
+  - `AK-AUD-003`: resolved
+
+## 2026-02-12 - Phase A contract closure verification
+
+### Scope checked
+- Contract hardening for `group_membership` special-case (`RB-002` / `AK-AUD-001`).
+- Disposition alignment across `ALIGNMENT_GAP_TRACKER.md`, `REMEDIATION_BATCHES.md`, and `FINDINGS_LEDGER.md`.
+
+### Commands run
+1. `rg -n "group_membership|AK-AUD-001|RB-002|AG-001" PLAN.md PROJECT_STATE.md docs/internal/audit/2026-02-11/*.md`
+  - Result: `pass`
+  - Summary: special-case contract wording and finding/batch dispositions are now aligned.
+2. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+3. `python3 -m compileall -q audioknob_gui`
+  - Result: `pass`
+
+### Outputs updated
+- `PLAN.md` and `PROJECT_STATE.md` (explicit `group_membership` special-case contract wording).
+- `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md` (`AG-001` closed as `RES-003`).
+- `docs/internal/audit/2026-02-11/REMEDIATION_BATCHES.md` (`RB-002` completed).
+- `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md` (`AK-AUD-001` resolved).
+
+### Finding summary
+- New findings added: `0`
+- Updated dispositions:
+  - `AK-AUD-001`: resolved (`RB-002`)
+  - `AK-AUD-002`: resolved (`RB-001`)
+  - `AK-AUD-003`: resolved
+
+## 2026-02-12 - Phase B verification completion (`AG-002`)
+
+### Scope checked
+- Test execution completeness for the previously open `AG-002` gap.
+- Targeted parity tests referenced in prior Phase 6 notes.
+- Full test suite execution in the active development environment.
+
+### Commands run
+1. `.venv/bin/python -m pytest -q tests/test_cli_commands.py -k "force_reset or kernel_cmdline_status_param_fallback"`
+  - Result: `pass`
+  - Summary: `6 passed` (targeted parity checks executed).
+2. `.venv/bin/python -m pytest -q`
+  - Result: `pass`
+  - Summary: full suite completed successfully (`83/83` collected tests passed), with one warning:
+    - `DeprecationWarning` in `audioknob_gui/gui/status.py:331` (`datetime.utcnow()`).
+3. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+4. `python3 -m compileall -q audioknob_gui`
+  - Result: `pass`
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md` (`AG-002` closed as `RES-004`).
+- `docs/internal/audit/2026-02-11/VERIFICATION_REPORT.md` (this section).
+
+### Gap summary
+- `AG-002`: resolved (pytest execution completed and recorded).
+
+## 2026-02-12 - Phase C knob research closure (`AG-003` to `AG-006`)
+
+### Scope checked
+- Source-backed closure for remaining knob research gaps:
+  - `AG-003` PipeWire RT limits value policy
+  - `AG-004` WirePlumber ALSA USB config portability
+  - `AG-005` Pro Audio profile discovery portability
+  - `AG-006` RTKit tuning research gate
+- Drift check between `docs/knobs.md`, runtime behavior, and extracted-gap tracker.
+
+### Commands run
+1. `rg -n "AG-003|AG-004|AG-005|AG-006|open questions|WirePlumber|Pro Audio|RTKit" docs/knobs.md`
+  - Result: `pass`
+  - Summary: identified all research-open sections for closure and wording updates.
+2. `.venv/bin/python -m pytest -q tests/test_wpctl_profile_status.py tests/test_cli_commands.py -k "wpctl_profile_status or force_reset"`
+  - Result: `pass`
+  - Summary: targeted behavior tests passed (`9 passed`) including Pro Audio status fallback/name handling.
+3. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+4. `python3 -m compileall -q audioknob_gui tests`
+  - Result: `pass`
+
+### Outputs updated
+- `docs/knobs.md`
+  - closed `AG-003..AG-006` with explicit decision blocks,
+  - corrected WirePlumber status wording to match current file-based status behavior,
+  - cleaned malformed legacy RTKit note text.
+- `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md`
+  - added `RES-005`..`RES-008`,
+  - marked `AG-003..AG-006` resolved (`AG-006` resolved by explicit de-scope).
+
+### Gap summary
+- `AG-003`: resolved (default/override RT-limits policy documented).
+- `AG-004`: resolved (WirePlumber layout/scope contract documented and drift corrected).
+- `AG-005`: resolved (deterministic status/fallback contract documented and tested).
+- `AG-006`: resolved (apply/reset formally de-scoped with source-backed rationale).
+
+## 2026-02-12 - Current audit snapshot
+
+### Final status
+- Audit findings:
+  - `AK-AUD-001`: resolved (`RB-002`)
+  - `AK-AUD-002`: resolved (`RB-001`)
+  - `AK-AUD-003`: resolved
+- Alignment gaps:
+  - `AG-001`..`AG-006`: resolved (`AG-006` resolved by explicit de-scope)
+- Tracker:
+  - `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md` is closed.
