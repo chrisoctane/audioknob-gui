@@ -1,4 +1,4 @@
-# Kind Parity Matrix (Template)
+# Kind Parity Matrix
 
 Use this file to track parity status by implementation kind before knob-by-knob review.
 

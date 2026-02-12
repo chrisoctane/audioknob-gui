@@ -45,3 +45,8 @@ Notes:
 - `AK-AUD-002` is assigned to remediation batch `RB-001` (planned implementation batch).
 - `AK-AUD-001` is explicitly deferred as `RB-002` with milestone re-evaluation in `v0.8.x` planning.
 - `REMEDIATION_BATCHES.md` is now populated and every finding has a concrete disposition.
+
+## 2026-02-12 - Audit docs consistency sweep note
+
+- No new findings were identified.
+- Audit-doc wording drift was corrected in `KNOB_WORKSHEET.md` and `KIND_PARITY_MATRIX.md` without changing finding dispositions.

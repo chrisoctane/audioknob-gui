@@ -176,3 +176,27 @@
 
 ### Phase-5 disposition
 - Phase 5 exit criteria: `met`
+
+## 2026-02-12 - Audit docs consistency sweep
+
+### Scope checked
+- `KNOB_WORKSHEET.md` phase-progress header and stale forward-looking note text.
+- `KIND_PARITY_MATRIX.md` title labeling consistency.
+- Cross-file placeholder scan for audit docs.
+
+### Commands run
+1. `rg -n "TODO|TBD|FIXME|in_progress|Current resume point|Phase [0-9]|Slice [A-D]|AK-AUD-" docs/internal/audit/2026-02-11 -g'*.md'`
+  - Result: `pass`
+  - Summary: no unresolved TODO/TBD/FIXME placeholders; phase markers and findings references present.
+2. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+3. `python3 -m compileall -q audioknob_gui`
+  - Result: `pass`
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/KNOB_WORKSHEET.md` (removed stale “Phase 4 next/check later” phrasing; aligned with current finding dispositions).
+- `docs/internal/audit/2026-02-11/KIND_PARITY_MATRIX.md` (removed stale `(Template)` title label).
+
+### Finding summary
+- New findings added: `0`
+- Existing finding dispositions unchanged.

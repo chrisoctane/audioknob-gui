@@ -1,13 +1,13 @@
-# Knob Worksheet (Template)
+# Knob Worksheet
 
 Complete one section per knob. Use severity labels: Blocker/Critical/High/Medium/Low.
 
 ## Phase 3 Progress
 
 - Status: `complete`
-- Active slice: `Phase 4 (cross-system coherence audit)` next
+- Active slice: `closed (Phase 3 complete; see KNOB_AUDIT_PLAN.md for current phase)`
 - Started: `2026-02-12`
-- Notes: Slices A-D fully populated on 2026-02-12 (`permissions`, `vm`, `cpu`, `power`, `stack`, `services`, `irq`, `kernel`, `testing`); open findings remain `AK-AUD-001` and `AK-AUD-002`.
+- Notes: Slices A-D fully populated on 2026-02-12 (`permissions`, `vm`, `cpu`, `power`, `stack`, `services`, `irq`, `kernel`, `testing`); carried findings are `AK-AUD-001` (deferred to `RB-002`) and `AK-AUD-002` (planned in `RB-001`).
 
 ## `cpu_dma_latency_udev` - DMA Latency
 
@@ -39,7 +39,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
 - Impact: No parity gap identified in Slice A scope.
 - Proposed fix class: none
-- Notes: Re-check in Phase 4 for doc/tooltip wording drift.
+- Notes: Reviewed in Phase 4 coherence pass; no additional doc/tooltip drift noted.
 
 ## `cpu_governor_performance_persistent` - CPU Performance (persistent)
 
@@ -263,7 +263,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
 - Impact: No knob-specific parity gap identified in Slice C scope.
 - Proposed fix class: none
-- Notes: Confirm warning copy coherence in Phase 4.
+- Notes: Phase 4 coherence pass found no additional warning-copy drift.
 
 ## `kernel_cstate_limit` - CPU C-States
 
@@ -359,7 +359,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/conflicts.py`
 - Impact: No knob-specific parity gap identified in Slice C scope.
 - Proposed fix class: none
-- Notes: Re-check auto-housekeeping copy coherence in Phase 4.
+- Notes: Phase 4 coherence pass found no additional auto-housekeeping copy drift.
 
 ## `kernel_isolcpus` - CPU Isolation
 
@@ -391,7 +391,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/conflicts.py`
 - Impact: No knob-specific parity gap identified in Slice C scope.
 - Proposed fix class: none
-- Notes: Revisit with cross-system reboot-state checks in Phase 4.
+- Notes: Phase 4 coherence pass found no additional reboot-state contract drift.
 
 ## `kernel_mitigations_off` - CPU Mitigations
 
@@ -487,7 +487,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/conflicts.py`
 - Impact: No knob-specific parity gap identified in Slice C scope.
 - Proposed fix class: none
-- Notes: Revisit with cross-system reboot-state checks in Phase 4.
+- Notes: Phase 4 coherence pass found no additional reboot-state contract drift.
 
 ## `kernel_nosmt` - Disable SMT (nosmt)
 
@@ -615,7 +615,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/conflicts.py`
 - Impact: No knob-specific parity gap identified in Slice C scope.
 - Proposed fix class: none
-- Notes: Revisit with cross-system reboot-state checks in Phase 4.
+- Notes: Phase 4 coherence pass found no additional reboot-state contract drift.
 
 ## `kernel_rt_throttling_off` - RT Throttling
 
@@ -711,7 +711,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
 - Impact: No knob-specific parity gap identified in Slice C scope.
 - Proposed fix class: none
-- Notes: Confirm warning copy coherence in Phase 4.
+- Notes: Phase 4 coherence pass found no additional warning-copy drift.
 
 ## `audio_group_membership` - Audio Groups
 
@@ -935,7 +935,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
 - Impact: No knob-specific parity gap identified in Slice B scope.
 - Proposed fix class: none
-- Notes: Keep command-variant behavior in Phase 4 coherence check.
+- Notes: Retained as a runtime-variant watch item; no contract drift found in Phase 4.
 
 ## `disable_tracker` - GNOME Indexer
 
@@ -999,7 +999,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/knobs/registry.py`
 - Impact: No parity defect; behavior matches “on hold” contract.
 - Proposed fix class: none
-- Notes: Validate wording coherence in Phase 4.
+- Notes: Wording remained coherent in Phase 4 contract checks.
 
 ## `pipewire_clock_constraints` - PipeWire Clock Constraints
 
@@ -1031,7 +1031,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/conflicts.py`, `tests/test_conflicts.py`
 - Impact: No knob-specific parity gap identified in Slice B scope.
 - Proposed fix class: none
-- Notes: Re-check conflict-doc wording coherence in Phase 4.
+- Notes: Conflict-doc wording remained coherent in Phase 4 checks.
 
 ## `pipewire_data_loop_affinity` - PipeWire Data Loops
 
@@ -1063,7 +1063,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/gui/conflicts.py`, `audioknob_gui/worker/ops.py`, `docs/KNOB_INTERACTIONS.md`
 - Impact: No knob-specific parity gap identified in Slice B scope.
 - Proposed fix class: none
-- Notes: Cross-system coherence should verify warning copy against conflict docs.
+- Notes: Phase 4 coherence pass verified warning-copy alignment against conflict docs.
 
 ## `pipewire_mlock_policy` - PipeWire Memory Lock
 
@@ -1095,7 +1095,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/requirements.py`, `docs/KNOB_INTERACTIONS.md`
 - Impact: No knob-specific parity gap identified in Slice B scope.
 - Proposed fix class: none
-- Notes: Dependency lock behavior should be re-checked in Phase 4 UX coherence.
+- Notes: Dependency-lock behavior remained aligned in Phase 4 UX coherence checks.
 
 ## `pipewire_pro_audio_profile` - PipeWire Pro Audio
 
@@ -1223,7 +1223,7 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/knobs/registry.py`, `PLAN.md`
 - Impact: No parity defect; behavior is intentionally orchestration-only.
 - Proposed fix class: none
-- Notes: Keep this special-case explicit in Phase 4 coherence pass.
+- Notes: Special-case remained explicit in Phase 4 coherence pass.
 
 ## `pipewire_sample_rate` - PipeWire Sample Rate
 
@@ -1543,4 +1543,4 @@ Findings
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/status.py`, `tests/test_kernel_cmdline.py`
 - Impact: No knob-specific parity gap identified in Slice A scope.
 - Proposed fix class: none
-- Notes: Bootloader update warning and follow-up command behavior should be coherence-checked in Phase 4.
+- Notes: Phase 4 coherence pass verified bootloader warning/follow-up contract text.
