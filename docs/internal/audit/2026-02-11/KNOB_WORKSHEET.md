@@ -2,6 +2,13 @@
 
 Complete one section per knob. Use severity labels: Blocker/Critical/High/Medium/Low.
 
+## Phase 3 Progress
+
+- Status: `in_progress`
+- Active slice: `Slice A (permissions, vm, cpu, power)`
+- Started: `2026-02-12`
+- Notes: per-knob population pending; Phase 2 kind-level baseline is complete.
+
 ## `cpu_dma_latency_udev` - DMA Latency
 
 - Category: `cpu`
@@ -1537,4 +1544,3 @@ Findings
 - Impact: TODO
 - Proposed fix class: TODO
 - Notes: TODO
-

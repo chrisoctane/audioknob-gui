@@ -1,5 +1,15 @@
 # Inventory Snapshot (2026-02-11)
 
+## Phase 1 Baseline Lock (2026-02-12)
+
+- Locked at UTC: `2026-02-12T17:12:41Z`
+- Branch: `master`
+- Commit (full): `4384eae387dce2a0715dbf7828deb03908a09d13`
+- Commit (short): `4384eae`
+- Pre-existing repo drift at lock time: `none` (clean worktree)
+
+This baseline remains authoritative for the current audit cycle unless a new lock point is explicitly recorded.
+
 - Total knobs: `48`
 - Total categories: `10`
 - Total implementation kinds: `17`
@@ -140,4 +150,3 @@
 | `inotify_max_watches` | Inotify Watches | `sysctl_conf` | `low` | true | false |
 | `swappiness` | Swappiness | `sysctl_conf` | `low` | true | false |
 | `thp_mode_madvise` | Huge Pages | `kernel_cmdline` | `medium` | true | true |
-
