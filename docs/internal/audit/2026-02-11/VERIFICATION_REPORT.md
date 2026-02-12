@@ -56,3 +56,19 @@
 ### Finding summary
 - New findings added in this slice: `0`
 - Existing findings referenced: `AK-AUD-001`, `AK-AUD-002`
+
+## 2026-02-12 - Phase 3 Slice B (stack/services)
+
+### Scope checked
+- Knobs: `disable_baloo`, `disable_tracker`, `rtkit_daemon_tuning`,
+  `pipewire_clock_constraints`, `pipewire_data_loop_affinity`,
+  `pipewire_mlock_policy`, `pipewire_pro_audio_profile`, `pipewire_quantum`,
+  `pipewire_rt_module_tuning`, `pipewire_rt_setup`, `pipewire_sample_rate`,
+  `qjackctl_server_prefix_rt`.
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/KNOB_WORKSHEET.md` (Slice B entries populated)
+
+### Finding summary
+- New findings added in this slice: `0`
+- Existing findings referenced: `AK-AUD-001`, `AK-AUD-002`

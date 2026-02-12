@@ -5,9 +5,9 @@ Complete one section per knob. Use severity labels: Blocker/Critical/High/Medium
 ## Phase 3 Progress
 
 - Status: `in_progress`
-- Active slice: `Slice B (stack, services)` next
+- Active slice: `Slice C (irq, kernel)` next
 - Started: `2026-02-12`
-- Notes: Slice A (`permissions`, `vm`, `cpu`, `power`) populated on 2026-02-12; findings linked to `AK-AUD-001` and `AK-AUD-002`.
+- Notes: Slice A (`permissions`, `vm`, `cpu`, `power`) and Slice B (`stack`, `services`) populated on 2026-02-12; findings linked to `AK-AUD-001` and `AK-AUD-002`.
 
 ## `cpu_dma_latency_udev` - DMA Latency
 
@@ -405,25 +405,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Limited (status text from command output heuristics)
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `baloo_disable` has preview/apply/status/restore and force-reset coverage with explicit user-scope command handling.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: Keep monitoring distro command variants (`balooctl`/`balooctl6`) during Phase 4 coherence pass.
 
 ## `kernel_nmi_watchdog_off` - NMI Watchdog
 
@@ -437,25 +437,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `user_service_mask` kind includes preview/apply/status, transaction restore, and force-reset unmask path.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: Service applicability is correctly reported as `not_applicable` when units are absent.
 
 ## `kernel_nohz_full` - Full Tickless
 
@@ -469,25 +469,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Special-case (read-only by design)
+- Status parity: Pass
+- Partial-reason parity: N/A
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Special-case (no transaction expected)
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `read_only` kind intentionally routes through preview/status only with no apply/reset mutation path.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/knobs/registry.py`
+- Impact: No parity defect; behavior matches contract for on-hold RTKit tuning.
+- Proposed fix class: none
+- Notes: Coherence check in Phase 4 should confirm “on hold” wording remains aligned in docs/UI.
 
 ## `kernel_nosmt` - Disable SMT (nosmt)
 
@@ -1013,25 +1013,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (state override/config dialog path)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (mapped against quantum/sample-rate)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial (conflict tests present; limited knob-specific worker tests)
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `pipewire_conf` parity path is complete and conflict wiring for this knob is present in the GUI map/tests.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/conflicts.py`, `tests/test_conflicts.py`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: Re-check conflict-doc wording coherence in Phase 4.
 
 ## `pipewire_data_loop_affinity` - PipeWire Data Loops
 
@@ -1045,25 +1045,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (state override/config dialog path)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (mapped against isolation/IRQ knobs)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: Implemented through `pipewire_conf` path with explicit conflict-map entries for isolation/IRQ interaction.
+- File references: `config/registry.json`, `audioknob_gui/gui/conflicts.py`, `audioknob_gui/worker/ops.py`, `docs/KNOB_INTERACTIONS.md`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: Cross-system coherence should verify warning copy against conflict docs.
 
 ## `pipewire_mlock_policy` - PipeWire Memory Lock
 
@@ -1077,25 +1077,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (dependency on `pipewire_rt_limits_group`)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `pipewire_conf` full parity plus explicit dependency metadata for RT limits.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/requirements.py`, `docs/KNOB_INTERACTIONS.md`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: Dependency lock behavior should be re-checked in Phase 4 UX coherence.
 
 ## `pipewire_pro_audio_profile` - PipeWire Pro Audio
 
@@ -1109,25 +1109,25 @@ Findings
 - Requires commands: `wpctl`
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Limited (device/runtime-dependent)
+- Config surface parity: Pass (selected device state override)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: Medium
+- Confidence: High
+- Evidence: `wpctl_profile` has full preview/apply/status/transaction restore, but no explicit force-reset branch.
+- File references: `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
+- Impact: Recovery parity depends on transaction availability.
+- Proposed fix class: cross-system parity batch
+- Notes: Linked finding `AK-AUD-002`.
 
 ## `pipewire_quantum` - PipeWire Buffer
 
@@ -1141,25 +1141,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (dialog/state override)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (conflicts with clock constraints mapped)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `pipewire_conf` parity path plus conflict mapping with `pipewire_clock_constraints`.
+- File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/conflicts.py`, `tests/test_conflicts.py`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: None.
 
 ## `pipewire_rt_module_tuning` - PipeWire RT Module
 
@@ -1173,25 +1173,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (state override fields)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: Uses `pipewire_conf` parity branch with explicit state override support in CLI composition.
+- File references: `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/knobs/registry.py`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: Simple-mode bundle behavior already covered in docs.
 
 ## `pipewire_rt_setup` - PipeWire RT Setup
 
@@ -1205,25 +1205,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Special-case (composed read-only coordinator)
+- Status parity: Pass (combined status synthesis)
+- Partial-reason parity: Limited
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Special-case
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: Marked `read_only`, with explicit combined-status synthesis in CLI from underlying RT-limit/module knobs.
+- File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/knobs/registry.py`, `PLAN.md`
+- Impact: No parity defect; behavior is intentionally orchestration-only.
+- Proposed fix class: none
+- Notes: Keep this special-case explicit in Phase 4 coherence pass.
 
 ## `pipewire_sample_rate` - PipeWire Sample Rate
 
@@ -1237,25 +1237,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (dialog/state override)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (conflicts with clock constraints mapped)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `pipewire_conf` parity path and conflict-map/test coverage align with this knob.
+- File references: `config/registry.json`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/conflicts.py`, `tests/test_conflicts.py`
+- Impact: No knob-specific parity gap identified in Slice B scope.
+- Proposed fix class: none
+- Notes: None.
 
 ## `qjackctl_server_prefix_rt` - QjackCtl RT
 
@@ -1269,25 +1269,25 @@ Findings
 - Requires commands: `qjackctl`
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (CPU core state override)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: Medium
+- Confidence: High
+- Evidence: `qjackctl_server_prefix` has preview/apply/status/transaction restore, but no explicit force-reset branch.
+- File references: `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
+- Impact: Recovery parity depends on transaction availability.
+- Proposed fix class: cross-system parity batch
+- Notes: Linked finding `AK-AUD-002`.
 
 ## `blocker_check` - RT Scan
 

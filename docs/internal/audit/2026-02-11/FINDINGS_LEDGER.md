@@ -14,3 +14,8 @@ Notes:
 
 - No additional Slice A-specific findings were added.
 - `AK-AUD-001` and `AK-AUD-002` remain open and are carried forward to remediation planning.
+
+## 2026-02-12 - Phase 3 Slice B note
+
+- No additional Slice B-specific findings were added.
+- `AK-AUD-002` remains the active parity gap for non-uniform force-reset fallback across some full-parity kinds.
