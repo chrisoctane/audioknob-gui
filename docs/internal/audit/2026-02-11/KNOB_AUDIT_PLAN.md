@@ -28,10 +28,10 @@ Out-of-scope:
 - `[x]` Phase 2: Kind-level parity audit
 - `[x]` Phase 3: Knob-level parity audit
 - `[x]` Phase 4: Cross-system coherence audit
-- `[ ]` Phase 5: Remediation batch planning
+- `[x]` Phase 5: Remediation batch planning
 - `[ ]` Phase 6: Post-fix verification and closeout
 
-Current resume point: `Phase 5`
+Current resume point: `Phase 6`
 
 ## Phase details
 
@@ -192,6 +192,8 @@ Exit criteria:
 
 Resume marker to set when done:
 - `Current resume point: Phase 6`
+
+Status: `Complete (2026-02-12)`
 
 ### Phase 6: Post-fix verification and closeout
 Goal:

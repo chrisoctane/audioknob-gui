@@ -4,8 +4,8 @@
 
 | ID | Severity | Confidence | Scope | Finding | Evidence | Proposed fix class | Status |
 |---|---|---|---|---|---|---|---|
-| `AK-AUD-001` | Low | High | `group_membership` kind | `group_membership` is intentionally outside the standard queue preview/apply/reset pipeline; it remains status-only from worker parity perspective. | `audioknob_gui/worker/ops.py` (`check_knob_status` has `group_membership` branch) and `audioknob_gui/worker/ops.py` (`preview` has no `group_membership` handler branch). | contract/docs only | Open |
-| `AK-AUD-002` | Medium | High | force-reset parity | Force-reset coverage is not uniform across full-parity kinds (`irq_affinity`, `power_profile`, `qjackctl_server_prefix`, `wpctl_profile` are transaction-only). | `audioknob_gui/worker/cli.py` (`cmd_force_reset_knob` supported-kind switch omits these kinds). | cross-system parity batch | Open |
+| `AK-AUD-001` | Low | High | `group_membership` kind | `group_membership` is intentionally outside the standard queue preview/apply/reset pipeline; it remains status-only from worker parity perspective. | `audioknob_gui/worker/ops.py` (`check_knob_status` has `group_membership` branch) and `audioknob_gui/worker/ops.py` (`preview` has no `group_membership` handler branch). | contract/docs only | Deferred (`RB-002`, re-evaluate in v0.8.x planning) |
+| `AK-AUD-002` | Medium | High | force-reset parity | Force-reset coverage is not uniform across full-parity kinds (`irq_affinity`, `power_profile`, `qjackctl_server_prefix`, `wpctl_profile` are transaction-only). | `audioknob_gui/worker/cli.py` (`cmd_force_reset_knob` supported-kind switch omits these kinds). | cross-system parity batch | Planned (`RB-001`) |
 | `AK-AUD-003` | Low | High | docs coherence (mode-switch workflow) | User workflow docs referenced Tools-menu mode switching while runtime uses the far-left header `View` button. | `audioknob_gui/gui/main_window.py` (`btn_view` + `_on_toggle_view`/`_set_ui_mode`) compared with stale wording in `PLAN.md` and `PROJECT_STATE.md` before Phase 4 correction. | contract/docs only | Resolved (2026-02-12) |
 
 Notes:
@@ -39,3 +39,9 @@ Notes:
 - Simple-mode queue/ownership-lock behavior matches the documented lock/release contract.
 - `AK-AUD-003` (mode-switch wording drift) was fixed directly in `PLAN.md` and `PROJECT_STATE.md`.
 - `AK-AUD-001` and `AK-AUD-002` remain open for Phase 5 remediation planning.
+
+## 2026-02-12 - Phase 5 planning note
+
+- `AK-AUD-002` is assigned to remediation batch `RB-001` (planned implementation batch).
+- `AK-AUD-001` is explicitly deferred as `RB-002` with milestone re-evaluation in `v0.8.x` planning.
+- `REMEDIATION_BATCHES.md` is now populated and every finding has a concrete disposition.

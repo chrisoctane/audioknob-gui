@@ -151,3 +151,28 @@
 
 ### Phase-4 disposition
 - Phase 4 exit criteria: `met`
+
+## 2026-02-12 - Phase 5 remediation batch planning
+
+### Scope checked
+- Open findings disposition: `AK-AUD-001`, `AK-AUD-002`.
+- Batch contract completion in `docs/internal/audit/2026-02-11/REMEDIATION_BATCHES.md`.
+
+### Commands run
+1. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+2. `python3 -m compileall -q audioknob_gui`
+  - Result: `pass`
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/REMEDIATION_BATCHES.md` (fully populated with `RB-001`/`RB-002`, ordering, and exit criteria).
+- `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md` (finding statuses mapped to planned/deferred/resolved).
+- `docs/internal/audit/2026-02-11/KNOB_AUDIT_PLAN.md` (Phase 5 marked complete; resume moved to Phase 6).
+
+### Finding summary
+- `AK-AUD-002`: `Planned` in `RB-001`.
+- `AK-AUD-001`: `Deferred` in `RB-002` with explicit milestone/rationale.
+- `AK-AUD-003`: remains `Resolved`.
+
+### Phase-5 disposition
+- Phase 5 exit criteria: `met`
