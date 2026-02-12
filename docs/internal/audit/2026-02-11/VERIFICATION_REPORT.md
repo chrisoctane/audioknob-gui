@@ -41,3 +41,18 @@
 ### Phase-2 disposition
 - Phase 2 exit criteria: `met`
 - No Blocker/Critical findings raised.
+
+## 2026-02-12 - Phase 3 Slice A (permissions/vm/cpu/power)
+
+### Scope checked
+- Knobs: `cpu_dma_latency_udev`, `cpu_governor_performance_persistent`,
+  `audio_group_membership`, `pipewire_rt_limits_group`, `realtime_clock_access`,
+  `rt_limits_audio_group`, `power_profile_performance`, `usb_autosuspend_disable`,
+  `dirty_bytes`, `inotify_max_watches`, `swappiness`, `thp_mode_madvise`.
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/KNOB_WORKSHEET.md` (Slice A entries populated)
+
+### Finding summary
+- New findings added in this slice: `0`
+- Existing findings referenced: `AK-AUD-001`, `AK-AUD-002`

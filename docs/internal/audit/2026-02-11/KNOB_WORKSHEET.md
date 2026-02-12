@@ -5,9 +5,9 @@ Complete one section per knob. Use severity labels: Blocker/Critical/High/Medium
 ## Phase 3 Progress
 
 - Status: `in_progress`
-- Active slice: `Slice A (permissions, vm, cpu, power)`
+- Active slice: `Slice B (stack, services)` next
 - Started: `2026-02-12`
-- Notes: per-knob population pending; Phase 2 kind-level baseline is complete.
+- Notes: Slice A (`permissions`, `vm`, `cpu`, `power`) populated on 2026-02-12; findings linked to `AK-AUD-001` and `AK-AUD-002`.
 
 ## `cpu_dma_latency_udev` - DMA Latency
 
@@ -21,25 +21,25 @@ Complete one section per knob. Use severity labels: Blocker/Critical/High/Medium
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Limited (kind-level behavior)
+- Config surface parity: Pass (no additional config required)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (no active conflict-map entries)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial (kind-level coverage; no dedicated knob test)
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `udev_rule` kind has preview/apply/status/restore/force-reset coverage and this knob uses that path directly.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
+- Impact: No parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: Re-check in Phase 4 for doc/tooltip wording drift.
 
 ## `cpu_governor_performance_persistent` - CPU Performance (persistent)
 
@@ -53,25 +53,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (no extra UI config required)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (mapped conflict with power profile)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial (baseline/conflict coverage, limited knob-specific tests)
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `sysfs_glob_kv` preview/apply/status/restore and force-reset paths are implemented, including persistence checks for this knob.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/conflicts.py`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: Cross-kind force-reset finding does not affect this knob (`sysfs_glob_kv` force-reset is present).
 
 ## `wireplumber_alsa_usb_tuning` - WP USB ALSA
 
@@ -85,25 +85,25 @@ Findings
 - Requires commands: `wpctl`
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Special-case (intentional)
+- Apply/reset parity: Special-case (requirement workflow)
+- Status parity: Pass
+- Partial-reason parity: Limited
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (acts as dependency source)
+- Transaction/preset parity: Special-case (not standard knob transaction pipeline)
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: Low
+- Confidence: High
+- Evidence: Worker parity uses status path only for `group_membership`; preview/apply/reset are requirement workflow special-cases.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/requirements.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
+- Impact: Documentation clarity issue only; no immediate functional break.
+- Proposed fix class: contract/docs only
+- Notes: Linked finding `AK-AUD-001`.
 
 ## `irq_pinning` - IRQ Pinning
 
@@ -117,25 +117,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass (state overrides handled)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (depends on `audio_group_membership`)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `pam_limits_audio_group` has full preview/apply/status/restore/force-reset parity and this knob includes dependency + state override handling.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/knobs/registry.py`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: Hidden/internal bundle behavior documented in `PROJECT_STATE.md`.
 
 ## `irqbalance_disable` - IRQ Balance
 
@@ -149,25 +149,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Limited (kind-level behavior)
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (no direct conflicts documented)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: Implemented on the common `udev_rule` path with matching interaction docs for RTC/HPET behavior.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: Included in simple-mode design and scanner guidance docs.
 
 ## `rtirq_enable` - RT IRQ
 
@@ -181,25 +181,25 @@ Findings
 - Requires commands: `rtirq`
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (dependency gate on `audio_group_membership`)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `pam_limits_audio_group` path provides full parity including force-reset line removal and dependency handling.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/requirements.py`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: Safety-latch usage in simple mode remains documented and aligned.
 
 ## `kernel_audit_off` - Kernel Audit
 
@@ -213,25 +213,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Limited (backend/state-specific)
+- Config surface parity: Pass (backend override via state/UI)
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (conflicts with governor/C-states are mapped)
+- Transaction/preset parity: Pass (transaction effects restore path)
+- Test/docs parity: Partial (conflict coverage present; limited knob-specific worker tests)
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: Medium
+- Confidence: High
+- Evidence: `power_profile` kind is full parity for preview/apply/status/transaction restore, but explicit force-reset branch is absent.
+- File references: `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/conflicts.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
+- Impact: Recovery consistency is weaker when transaction data is unavailable.
+- Proposed fix class: cross-system parity batch
+- Notes: Linked finding `AK-AUD-002`.
 
 ## `kernel_clocksource_tsc` - Kernel Clocksource (TSC)
 
@@ -245,25 +245,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Limited (kind-level behavior)
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass (no active conflict-map entries)
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: Uses common `udev_rule` parity path with preview/apply/status/restore and force-reset support.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `docs/KNOB_INTERACTIONS.md`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: Keep monitoring for distro-specific udev reload differences in Phase 4.
 
 ## `kernel_cstate_limit` - CPU C-States
 
@@ -277,25 +277,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `sysctl_conf` path has preview/apply/status/restore and force-reset support; this knob is a direct instance.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: None.
 
 ## `kernel_intel_idle_cstate_limit` - Intel C-States
 
@@ -309,25 +309,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: Same `sysctl_conf` parity pipeline as other VM knobs; no knob-specific divergence found.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: None.
 
 ## `kernel_irqaffinity` - IRQ Housekeeping
 
@@ -341,25 +341,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Pass
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: `sysctl_conf` kind-level parity behavior applies directly with no custom branch divergence.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: None.
 
 ## `kernel_isolcpus` - CPU Isolation
 
@@ -373,25 +373,25 @@ Findings
 - Requires commands: none
 
 Checks
-- Registry/schema parity: TODO
-- Preview parity: TODO
-- Apply/reset parity: TODO
-- Status parity: TODO
-- Partial-reason parity: TODO
-- Config surface parity: TODO
-- Tooltip/info/requirements parity: TODO
-- Conflict/dependency parity: TODO
-- Transaction/preset parity: TODO
-- Test/docs parity: TODO
+- Registry/schema parity: Pass
+- Preview parity: Pass
+- Apply/reset parity: Pass
+- Status parity: Pass
+- Partial-reason parity: Limited (pending-reboot vs active-state model)
+- Config surface parity: Pass
+- Tooltip/info/requirements parity: Pass
+- Conflict/dependency parity: Pass
+- Transaction/preset parity: Pass
+- Test/docs parity: Partial
 
 Findings
-- Severity: TODO
-- Confidence: TODO
-- Evidence: TODO
-- File references: TODO
-- Impact: TODO
-- Proposed fix class: TODO
-- Notes: TODO
+- Severity: None
+- Confidence: High
+- Evidence: Uses full `kernel_cmdline` preview/apply/status/restore/force-reset pipeline; no knob-specific divergence detected.
+- File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`
+- Impact: No knob-specific parity gap identified in Slice A scope.
+- Proposed fix class: none
+- Notes: Revisit with cross-system reboot-state checks in Phase 4.
 
 ## `kernel_mitigations_off` - CPU Mitigations
 
