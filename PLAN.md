@@ -119,7 +119,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 2. User turns the dial to a level from **0 to 11** (`0` = Off, `1..11` = risk tiers).
 3. That dial value builds a visible action queue (no hidden changes).
 4. User clicks **Apply** (same existing queue/apply engine).
-5. User can switch to the existing full UI from **Tools**.
+5. User can switch between simple/basic and full UI via the far-left **View** button.
 
 ### Current simple inclusion set
 

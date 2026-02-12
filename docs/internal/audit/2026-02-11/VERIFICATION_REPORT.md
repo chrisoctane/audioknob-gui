@@ -116,3 +116,38 @@
 
 ### Phase-3 disposition
 - Phase 3 exit criteria: `met`
+
+## 2026-02-12 - Phase 4 cross-system coherence audit
+
+### Scope checked
+- Conflict-map contract coherence: `docs/KNOB_INTERACTIONS.md` vs runtime map/filtering (`audioknob_gui/gui/conflicts.py`, `audioknob_gui/gui/table.py`, `audioknob_gui/gui/main_window.py`).
+- Info/requirements coherence: knob info formatting and requirement synthesis (`audioknob_gui/gui/main_window.py`, `audioknob_gui/gui/table.py`, `audioknob_gui/gui/knobs/registry.py`).
+- Simple-mode queue/lock coherence: queue composition, managed-lock lifecycle, explicit release action (`audioknob_gui/gui/simple_mode.py`, `audioknob_gui/gui/main_window.py`).
+- Workflow contract coherence: mode-switch wording in `PLAN.md` and `PROJECT_STATE.md`.
+
+### Commands/evidence collection
+1. `python3 - <<'PY' ...` (section-map + conflict-map consistency check)
+  - Result: `pass`
+  - Summary: `SECTION_MAP` headings all present in `docs/KNOB_INTERACTIONS.md`; conflict-map links are symmetric.
+2. `python3 - <<'PY' ...` (simple-mode queue composition sanity)
+  - Result: `pass`
+  - Summary: level composition/ordering matched contract; level `0` composes reset actions for previously managed knobs; tuned backend excludes CPU governor at level `9`.
+3. `python3 -m pytest -q tests/test_conflicts.py tests/test_simple_mode.py`
+  - Result: `not_run`
+  - Summary: `pytest` is not installed in this environment (`No module named pytest`).
+4. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+5. `python3 -m compileall -q audioknob_gui`
+  - Result: `pass`
+
+### Outputs updated
+- `PLAN.md` (mode-switch workflow wording corrected to header `View` button).
+- `PROJECT_STATE.md` (UI mode model wording corrected to header `View` button behavior).
+- `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md` (added `AK-AUD-003` as resolved coherence fix).
+
+### Finding summary
+- New findings added in this phase: `1` (`AK-AUD-003`, resolved in-phase).
+- Open carried findings: `AK-AUD-001`, `AK-AUD-002`.
+
+### Phase-4 disposition
+- Phase 4 exit criteria: `met`

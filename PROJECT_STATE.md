@@ -436,10 +436,10 @@ preset extraction.
   - desktop indexer disable knobs (`disable_tracker`, `disable_baloo`) due non-audio usability impact
 - Simple mode must not expose hidden expert actions.
 
-#### UI mode model (planned)
+#### UI mode model
 
 - Persist `ui_mode` in state (`simple` or `full`), default `simple`.
-- Tools menu provides explicit mode switch actions.
+- Far-left header `View` button provides explicit mode switching (`simple` <-> `full`) and stays visible in both views.
 - Full mode keeps all existing capabilities.
 - Full-mode tab labels: `Main`, `Cores & IRQ`, `Dev`.
 
