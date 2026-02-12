@@ -19,3 +19,14 @@ Notes:
 
 - No additional Slice B-specific findings were added.
 - `AK-AUD-002` remains the active parity gap for non-uniform force-reset fallback across some full-parity kinds.
+
+## 2026-02-12 - Phase 3 Slice C note
+
+- No additional Slice C-specific findings were added.
+- `AK-AUD-002` remains open and is now explicitly evidenced by `irq_pinning` (`irq_affinity` kind) in knob-level review.
+
+## 2026-02-12 - Phase 3 Slice D note
+
+- No additional Slice D-specific findings were added.
+- Phase 3 worksheet completion and coherence cleanup did not introduce new parity gaps.
+- `AK-AUD-001` and `AK-AUD-002` remain open and move forward to Phase 4/5 planning.

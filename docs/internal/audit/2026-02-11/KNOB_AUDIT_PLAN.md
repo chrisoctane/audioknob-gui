@@ -26,12 +26,12 @@ Out-of-scope:
 - `[x]` Phase 0: Audit scaffold/bootstrap (docs + templates)
 - `[x]` Phase 1: Baseline freeze and inventory lock
 - `[x]` Phase 2: Kind-level parity audit
-- `[ ]` Phase 3: Knob-level parity audit
+- `[x]` Phase 3: Knob-level parity audit
 - `[ ]` Phase 4: Cross-system coherence audit
 - `[ ]` Phase 5: Remediation batch planning
 - `[ ]` Phase 6: Post-fix verification and closeout
 
-Current resume point: `Phase 3`
+Current resume point: `Phase 4`
 
 ## Phase details
 
@@ -140,6 +140,8 @@ Exit criteria:
 
 Resume marker to set when done:
 - `Current resume point: Phase 4`
+
+Status: `Complete (2026-02-12)`
 
 ### Phase 4: Cross-system coherence audit
 Goal:

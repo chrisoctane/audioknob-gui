@@ -72,3 +72,47 @@
 ### Finding summary
 - New findings added in this slice: `0`
 - Existing findings referenced: `AK-AUD-001`, `AK-AUD-002`
+
+## 2026-02-12 - Phase 3 Slice C (irq/kernel)
+
+### Scope checked
+- Knobs: `irq_pinning`, `irqbalance_disable`, `rtirq_enable`,
+  `kernel_audit_off`, `kernel_clocksource_tsc`, `kernel_cstate_limit`,
+  `kernel_intel_idle_cstate_limit`, `kernel_irqaffinity`, `kernel_isolcpus`,
+  `kernel_mitigations_off`, `kernel_nmi_watchdog_off`, `kernel_nohz_full`,
+  `kernel_nosmt`, `kernel_nosoftlockup`, `kernel_preempt_full`,
+  `kernel_rcu_nocbs`, `kernel_rt_throttling_off`, `kernel_threadirqs`,
+  `kernel_tsc_reliable`.
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/KNOB_WORKSHEET.md` (Slice C entries populated and corrected for knob-specific evidence mapping)
+
+### Finding summary
+- New findings added in this slice: `0`
+- Existing findings referenced: `AK-AUD-002`
+
+## 2026-02-12 - Phase 3 Slice D (testing/read-only + coherence cleanup)
+
+### Scope checked
+- Knobs: `blocker_check`, `pipewire_xrun_monitor`, `scheduler_jitter_test`, `stack_detect`.
+- Worksheet coherence cleanup: completed remaining VM knob parity sections (`dirty_bytes`, `inotify_max_watches`, `swappiness`, `thp_mode_madvise`) and removed all worksheet TODO placeholders.
+
+### Outputs updated
+- `docs/internal/audit/2026-02-11/KNOB_WORKSHEET.md` (Slice D completion + Phase 3 marked complete)
+- `docs/internal/audit/2026-02-11/KNOB_AUDIT_PLAN.md` (Phase 3 marked complete; resume point moved to Phase 4)
+
+### Commands run
+1. `rg -n "TODO" docs/internal/audit/2026-02-11/KNOB_WORKSHEET.md`
+  - Result: `pass`
+  - Summary: no remaining TODO placeholders in worksheet.
+2. `python3 scripts/check_repo_consistency.py`
+  - Result: `pass`
+3. `python3 -m compileall -q audioknob_gui`
+  - Result: `pass`
+
+### Finding summary
+- New findings added in this slice: `0`
+- Existing findings referenced: `AK-AUD-001`, `AK-AUD-002`
+
+### Phase-3 disposition
+- Phase 3 exit criteria: `met`
