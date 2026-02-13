@@ -32,6 +32,19 @@ Status model:
 Exit criteria:
 - All three checks complete.
 
+### G0.5 - Stabilization scope gate (required when `Mode: ON`)
+Source:
+- `docs/internal/audit/STABILIZATION_STATE.md`
+
+Required checks:
+1. Active work stays within `Allowed paths`.
+2. Active work stays within `Max changed files`.
+3. New findings discovered mid-batch are deferred unless they block current exit criteria.
+
+Automation:
+- Enforced by `scripts/check_repo_consistency.py` (`Stabilization constraints` check).
+- Explicit waiver tag is `stabilization-waiver:` and still requires user approval.
+
 ### G1 - Change gate (required for any change)
 Required checks:
 1. `python3 scripts/check_repo_consistency.py`

@@ -533,6 +533,7 @@ This is the enforcement layer. Any agent making changes MUST satisfy this contra
   - preview (`worker/ops.py`)
   - apply (`worker/cli.py`)
   - status (`worker/ops.py`)
+- **Stabilization mode ON?** Stay within `docs/internal/audit/STABILIZATION_STATE.md` allowlist and file-count cap (or use explicit user-approved waiver).
 - **Safety bar**: if status can’t be proven, report `"unknown"` / conservative state.
 
 ### New Knob Robustness Checklist (future-proofing)
@@ -551,7 +552,7 @@ Use this checklist for every new knob or when extending an existing knob to a ne
 
 ### Scope / Non-goals (hard boundaries)
 
-- No background daemons or scheduled auto-tuning
+- No always-on background daemons or scheduled auto-tuning loops
 - No silent system modifications (must be user-initiated and visible in UI)
 - No batch “apply all” UX without an explicit design update in docs
 - No network/cloud features
@@ -569,6 +570,8 @@ Required:
   - Enforces `PROJECT_STATE.md` release version matches `pyproject.toml`
   - Enforces `PROJECT_STATE.md` knob-count claim matches `config/registry.json`
   - Enforces status vocabulary contract (`PLAN.md` operational labels + table status mapping keys)
+  - Enforces stabilization scope constraints when enabled via `docs/internal/audit/STABILIZATION_STATE.md` (allowlist + max changed files)
+  - Enforces `docs/KNOB_INTERACTIONS.md` updates when conflict/knob behavior paths change (`config/registry.json`, worker behavior paths, and conflict/simple queue behavior modules)
   - Enforces privileged command guardrails (direct GUI `pkexec` subprocess calls are blocked outside `worker_api`; fixed worker path contract is enforced)
 - `python3 -m compileall -q audioknob_gui`
 - `python3 scripts/run_quality_gate.py --gate g2 --tests <targeted test selectors>` for parity/system changes
@@ -1394,8 +1397,8 @@ Score: 88% (13 passed, 4 warnings, 0 failed)
 
 When continuing this project, DO NOT:
 
-1. **Add dropdown menus** - We explicitly removed them for simplicity
-2. **Add batch operations** - Each knob acts independently  
+1. **Reintroduce action-dropdown workflows** - Actions remain explicit buttons (queue/apply/reset); config selectors are allowed for knob parameters
+2. **Add hidden or automatic batch operations** - Multi-knob queue composition is allowed, but execution must remain explicit and user-confirmed
 3. **Add Preview step** - We removed it; users click Apply, then Reset if wrong
 4. **Skip status refresh** - Always refresh after any state change
 5. **Assume system services** - PipeWire/WirePlumber are user-scoped

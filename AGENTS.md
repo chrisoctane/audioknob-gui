@@ -14,6 +14,7 @@ It is for agent control only and does not change public docs.
 - `PLAN.md` when touching UX/user workflows.
 - `PROJECT_STATE.md` when touching behavior/architecture or release processes.
 - `docs/internal/audit/QUALITY_GATE.md` when planning or executing implementation, parity, or release work.
+- `docs/internal/audit/STABILIZATION_STATE.md` for active batch scope, cap, and stabilization mode status.
 - `docs/KNOB_INTERACTIONS.md` before any IRQ/kernel/RT/power/CPU isolation changes.
 - `docs/knobs.md` before adding or implementing new knobs.
 - `docs/KNOB_SYSTEM_AUDIT_MAP.md` when planning or executing parity/code audits.
@@ -24,7 +25,7 @@ It is for agent control only and does not change public docs.
 If any doc is stale or conflicts with code, update it before proceeding.
 
 ## Hard guardrails (no exceptions without explicit user approval)
-- No background daemon/service, no auto-apply workflows, no hidden state machines.
+- No always-on background daemon/service or autonomous auto-tuning loop, no auto-apply workflows, no hidden state machines.
 - No silent system changes; every change must be user-initiated and visible in UI.
 - Root knob/system operations must use pkexec via `/usr/libexec/audioknob-gui-worker`.
 - Direct pkexec command execution is allowed only through `audioknob_gui/gui/worker_api.py`
@@ -47,6 +48,12 @@ If any doc is stale or conflicts with code, update it before proceeding.
 3) Locate the relevant code path; do not invent new flows.
 4) Scan for existing helpers before adding new logic.
 5) If you see unexpected local changes, STOP and ask the user.
+
+## Stabilization mode (scope control)
+- `docs/internal/audit/STABILIZATION_STATE.md` is the active batch contract.
+- If `Mode: ON`, stay within the allowlisted paths and `Max changed files` cap.
+- Follow the batch protocol: read-only audit -> approved fix batch -> read-only verification.
+- Do not expand scope mid-batch; log new findings for the next batch unless they block the current one.
 
 ## Change rules (drift prevention)
 - Any behavior or UX change MUST update `PROJECT_STATE.md`.

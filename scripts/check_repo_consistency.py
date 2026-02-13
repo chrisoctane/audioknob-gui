@@ -70,7 +70,11 @@ def check_docs_exist(repo: Path) -> list[str]:
     """Check that required documentation files exist."""
     errors = []
     
-    required = ["PLAN.md", "PROJECT_STATE.md"]
+    required = [
+        "PLAN.md",
+        "PROJECT_STATE.md",
+        "docs/internal/audit/STABILIZATION_STATE.md",
+    ]
     for doc in required:
         if not (repo / doc).exists():
             errors.append(f"Missing required doc: {doc}")
@@ -423,6 +427,28 @@ def _matches_path_prefix(path: str, prefixes: list[str]) -> bool:
     return any(path == p or path.startswith(p) for p in prefixes)
 
 
+def _merge_with_local_diffs(repo: Path, files: list[str]) -> list[str]:
+    """
+    Merge discovered change-set with current local diffs.
+
+    This keeps local/manual runs actionable when git-base heuristics resolve to a
+    branch-range diff, while CI/pre-commit behavior remains strict.
+    """
+    merged: list[str] = list(dict.fromkeys(files))
+    local_cmds = (
+        ("diff", "--name-only"),
+        ("diff", "--cached", "--name-only"),
+    )
+    for cmd in local_cmds:
+        result = _run_git(repo, *cmd)
+        if result.returncode != 0:
+            continue
+        for path in _parse_changed_files(result.stdout):
+            if path not in merged:
+                merged.append(path)
+    return merged
+
+
 def check_docs_updated_for_code_changes(repo: Path) -> list[str]:
     """
     Check that if code paths are modified, docs are also modified.
@@ -456,6 +482,8 @@ def check_docs_updated_for_code_changes(repo: Path) -> list[str]:
         )
         return errors
 
+    changed_files = _merge_with_local_diffs(repo, changed_files)
+
     if not changed_files:
         return []
 
@@ -479,6 +507,168 @@ def check_docs_updated_for_code_changes(repo: Path) -> list[str]:
         "  If this is a pure refactor with no behavior change, add 'docs-not-needed:' to commit message."
         + extra
     )
+    return errors
+
+
+def check_knob_interactions_updated_for_behavior_changes(repo: Path) -> list[str]:
+    """
+    Check that conflict/knob behavior changes update docs/KNOB_INTERACTIONS.md.
+
+    This is a diff-based check for CI and pre-commit workflows.
+    """
+    errors: list[str] = []
+
+    behavior_path_prefixes = [
+        "config/registry.json",
+        "audioknob_gui/worker/",
+        "audioknob_gui/gui/conflicts.py",
+        "audioknob_gui/gui/simple_mode.py",
+        "audioknob_gui/gui/actions.py",
+    ]
+    interactions_doc = "docs/KNOB_INTERACTIONS.md"
+
+    changed_files, source, notes = _resolve_changed_files(repo)
+    if source == "ci-unresolved":
+        detail = "; ".join(notes) if notes else "no diff base could be resolved"
+        errors.append(
+            "Unable to determine changed files in CI; refusing to skip KNOB_INTERACTIONS gate.\n"
+            f"  Diagnostics: {detail}"
+        )
+        return errors
+
+    changed_files = _merge_with_local_diffs(repo, changed_files)
+
+    if not changed_files:
+        return []
+
+    behavior_touched = any(_matches_path_prefix(path, behavior_path_prefixes) for path in changed_files)
+    if not behavior_touched:
+        return []
+
+    if interactions_doc in changed_files:
+        return []
+
+    result = _run_git(repo, "log", "-1", "--format=%B")
+    commit_msg = (result.stdout or "").lower()
+    if "docs-not-needed:" in commit_msg:
+        return []
+
+    extra = f"\n  Diff source: {source}" if source not in ("none", "") else ""
+    errors.append(
+        "Conflict/knob behavior changes detected without docs/KNOB_INTERACTIONS.md update.\n"
+        "  Modified behavior paths require docs/KNOB_INTERACTIONS.md to also be updated.\n"
+        "  If this is a pure refactor with no conflict/dependency/behavior change, add 'docs-not-needed:' to commit message."
+        + extra
+    )
+    return errors
+
+
+def _read_stabilization_state(repo: Path) -> tuple[str | None, int | None, list[str], str | None]:
+    rel_path = "docs/internal/audit/STABILIZATION_STATE.md"
+    path = repo / rel_path
+    if not path.exists():
+        return None, None, [], None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return None, None, [], f"failed reading {rel_path}"
+
+    mode_match = re.search(r"^\s*Mode:\s*(ON|OFF)\s*$", text, flags=re.MULTILINE)
+    mode = mode_match.group(1) if mode_match else None
+    if mode is None:
+        return None, None, [], f"{rel_path} missing required line: 'Mode: ON' or 'Mode: OFF'"
+
+    max_files_match = re.search(r"^\s*Max changed files:\s*(\d+)\s*$", text, flags=re.MULTILINE)
+    max_files = int(max_files_match.group(1)) if max_files_match else None
+
+    allowed: list[str] = []
+    in_allowed = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped == "Allowed paths:":
+            in_allowed = True
+            continue
+        if not in_allowed:
+            continue
+        if stripped.startswith("## "):
+            break
+        if not stripped:
+            continue
+        if not stripped.startswith("- "):
+            continue
+        val = stripped[2:].strip()
+        if val.startswith("`") and val.endswith("`") and len(val) >= 2:
+            val = val[1:-1]
+        if val:
+            allowed.append(val)
+
+    dedup_allowed = list(dict.fromkeys(allowed + [rel_path]))
+    return mode, max_files, dedup_allowed, None
+
+
+def check_stabilization_constraints(repo: Path) -> list[str]:
+    """
+    Enforce stabilization-mode scope constraints when enabled.
+
+    This gate is driven by docs/internal/audit/STABILIZATION_STATE.md.
+    """
+    errors: list[str] = []
+    mode, max_files, allowed_paths, state_error = _read_stabilization_state(repo)
+    if state_error:
+        errors.append(f"Invalid stabilization state: {state_error}")
+        return errors
+    if mode is None:
+        return []
+    if mode != "ON":
+        return []
+
+    changed_files, source, notes = _resolve_changed_files(repo)
+    if source == "ci-unresolved":
+        detail = "; ".join(notes) if notes else "no diff base could be resolved"
+        errors.append(
+            "Unable to determine changed files in CI; refusing to skip stabilization gate.\n"
+            f"  Diagnostics: {detail}"
+        )
+        return errors
+
+    is_ci = os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true"
+    if is_ci:
+        changed_files = _merge_with_local_diffs(repo, changed_files)
+    else:
+        # Local stabilization should enforce the active in-progress batch only,
+        # not historical branch deltas against origin/*.
+        changed_files = _merge_with_local_diffs(repo, [])
+    if not changed_files:
+        return []
+
+    result = _run_git(repo, "log", "-1", "--format=%B")
+    commit_msg = (result.stdout or "").lower()
+    if "stabilization-waiver:" in commit_msg:
+        return []
+
+    if max_files is not None and len(changed_files) > max_files:
+        errors.append(
+            "Stabilization gate exceeded max changed files.\n"
+            f"  Max changed files: {max_files}\n"
+            f"  Found: {len(changed_files)}"
+        )
+
+    if not allowed_paths:
+        errors.append(
+            "Stabilization mode is ON but no allowlist is defined.\n"
+            "  Add entries under 'Allowed paths:' in docs/internal/audit/STABILIZATION_STATE.md."
+        )
+        return errors
+
+    out_of_scope = [p for p in changed_files if not _matches_path_prefix(p, allowed_paths)]
+    if out_of_scope:
+        preview = ", ".join(out_of_scope[:10])
+        extra = "" if len(out_of_scope) <= 10 else f" (+{len(out_of_scope) - 10} more)"
+        errors.append(
+            "Stabilization gate found out-of-scope file changes.\n"
+            "  Update docs/internal/audit/STABILIZATION_STATE.md allowlist or reduce scope.\n"
+            f"  Files: {preview}{extra}"
+        )
     return errors
 
 
@@ -613,6 +803,8 @@ def main() -> int:
         ("Docs exist", check_docs_exist),
         ("Docs sections", check_docs_sections),
         ("Semantic doc contracts", check_semantic_doc_contracts),
+        ("Stabilization constraints", check_stabilization_constraints),
+        ("KNOB_INTERACTIONS docs updates", check_knob_interactions_updated_for_behavior_changes),
         ("Privilege model guards", check_privilege_model_guards),
         ("Python compile", check_compile),
         ("Docs updated for code changes", check_docs_updated_for_code_changes),

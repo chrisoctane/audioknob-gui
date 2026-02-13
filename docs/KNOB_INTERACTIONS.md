@@ -134,4 +134,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ## Maintenance rules
 - Update this file when adding a new knob, changing behavior, or discovering
   new conflicts/blockers.
+- Repository consistency gate enforces updates here when conflict/knob behavior
+  paths change (registry behavior metadata, worker behavior paths, and
+  conflict/simple queue behavior modules), unless explicitly waived with
+  `docs-not-needed:` for pure refactors.
 - Keep warnings in the UI aligned with this map.

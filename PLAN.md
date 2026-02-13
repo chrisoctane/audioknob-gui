@@ -84,7 +84,7 @@ sudo apt-get remove -y audioknob-gui
 pip install pre-commit && pre-commit install
 ```
 
-This runs `scripts/check_repo_consistency.py` before each commit to catch registry/doc drift, and to verify release-version, knob-count, and status-label contracts stay aligned with code.
+This runs `scripts/check_repo_consistency.py` before each commit to catch registry/doc drift, verify release-version/knob-count/status-label contracts, and require `docs/KNOB_INTERACTIONS.md` updates when conflict/knob behavior paths change.
 
 ### Run the worker CLI directly (debugging)
 
@@ -327,6 +327,7 @@ If any agent (including “overseer”) changes behavior, adds a knob, changes p
 - Update `PROJECT_STATE.md` (machine reference) and keep it consistent with the code.
 - Update `PLAN.md` (user guide) only for user-relevant steps and keep it consistent with the code.
 - Sync `config/registry*.json` → `audioknob_gui/data/registry*.json` when touched.
+- If stabilization mode is active, follow `docs/internal/audit/STABILIZATION_STATE.md` (allowlist + file-count cap) and keep work in a bounded batch.
 - Prefer conservative behavior: if status cannot be proven, show “unknown/not applied” rather than “applied”.
 - For broad parity/code audits, use `docs/KNOB_SYSTEM_AUDIT_MAP.md` as the audit blueprint.
 
@@ -635,7 +636,7 @@ diff config/registry.schema.json audioknob_gui/data/registry.schema.json || echo
 1. **Everything undoable** - Transactions with backups
 2. **Distro-aware** - Don't assume one way works everywhere
 3. **User knows best** - Show status, let them choose
-4. **One click actions** - No dropdowns, queue + apply is explicit and user-driven
+4. **Explicit actions** - Queue + apply/reset is explicit and user-driven; config selectors are allowed where knobs require parameter input
 5. **Lock until ready** - Missing groups? 🔒. Missing packages? 📦 Install.
 6. **Docs match code** - `PROJECT_STATE.md` and `PLAN.md` are first-class deliverables
 7. **Privileged channels are explicit** - knob/system changes run through the worker wrapper; GUI maintenance pkexec commands are allowlisted and user-initiated.
@@ -646,7 +647,7 @@ diff config/registry.schema.json audioknob_gui/data/registry.schema.json || echo
 
 We are explicitly NOT doing these unless the docs are updated first:
 
-- A background daemon or always-on service
+- An always-on background daemon/service or scheduled auto-tuning loop
 - Automatic “apply everything” / batch apply workflows without an explicit queue + apply action
 - Auto-modifying system settings without an explicit user click + visible status change
 - Complex multi-step wizards or hidden state machines

@@ -159,3 +159,293 @@ def test_privilege_guard_detects_variable_pkexec_args_outside_worker_api(tmp_pat
 
     errors = consistency.check_privilege_model_guards(tmp_path)
     assert any("Direct pkexec subprocess.run outside worker_api" in e for e in errors)
+
+
+def test_interactions_gate_fails_without_interactions_doc_update(
+    monkeypatch, tmp_path: Path
+) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (["audioknob_gui/worker/ops.py"], "working-tree", []),
+    )
+    monkeypatch.setattr(
+        consistency,
+        "_run_git",
+        lambda repo, *args: subprocess.CompletedProcess(["git", *args], 0, stdout="feat: worker tweak\n"),
+    )
+
+    errors = consistency.check_knob_interactions_updated_for_behavior_changes(tmp_path)
+    assert errors
+    assert "docs/KNOB_INTERACTIONS.md" in errors[0]
+
+
+def test_interactions_gate_passes_when_interactions_doc_is_touched(
+    monkeypatch, tmp_path: Path
+) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (
+            ["audioknob_gui/gui/conflicts.py", "docs/KNOB_INTERACTIONS.md"],
+            "working-tree",
+            [],
+        ),
+    )
+
+    errors = consistency.check_knob_interactions_updated_for_behavior_changes(tmp_path)
+    assert errors == []
+
+
+def test_interactions_gate_honors_docs_not_needed_commit_tag(
+    monkeypatch, tmp_path: Path
+) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (["config/registry.json"], "working-tree", []),
+    )
+    monkeypatch.setattr(
+        consistency,
+        "_run_git",
+        lambda repo, *args: subprocess.CompletedProcess(
+            ["git", *args], 0, stdout="refactor: normalize code\n\ndocs-not-needed: no behavior drift\n"
+        ),
+    )
+
+    errors = consistency.check_knob_interactions_updated_for_behavior_changes(tmp_path)
+    assert errors == []
+
+
+def test_interactions_gate_fails_when_ci_diff_base_unresolved(
+    monkeypatch, tmp_path: Path
+) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: ([], "ci-unresolved", ["base resolution failed"]),
+    )
+
+    errors = consistency.check_knob_interactions_updated_for_behavior_changes(tmp_path)
+    assert errors
+    assert "Unable to determine changed files in CI" in errors[0]
+
+
+def test_stabilization_gate_off_allows_changes(monkeypatch, tmp_path: Path) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    state = tmp_path / "docs" / "internal" / "audit" / "STABILIZATION_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        "Mode: OFF\n"
+        "Max changed files: 2\n"
+        "Allowed paths:\n"
+        "- `scripts/check_repo_consistency.py`\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (["audioknob_gui/worker/ops.py"], "working-tree", []),
+    )
+    monkeypatch.setattr(consistency, "_merge_with_local_diffs", lambda repo, files: files)
+
+    errors = consistency.check_stabilization_constraints(tmp_path)
+    assert errors == []
+
+
+def test_stabilization_gate_enforces_max_changed_files(monkeypatch, tmp_path: Path) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    state = tmp_path / "docs" / "internal" / "audit" / "STABILIZATION_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        "Mode: ON\n"
+        "Max changed files: 1\n"
+        "Allowed paths:\n"
+        "- `scripts/check_repo_consistency.py`\n"
+        "- `tests/test_gate_scripts.py`\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (
+            ["scripts/check_repo_consistency.py", "tests/test_gate_scripts.py"],
+            "working-tree",
+            [],
+        ),
+    )
+    monkeypatch.setattr(consistency, "_merge_with_local_diffs", lambda repo, files: files)
+    monkeypatch.setattr(
+        consistency,
+        "_run_git",
+        lambda repo, *args: subprocess.CompletedProcess(["git", *args], 0, stdout="feat: stabilization\n"),
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    errors = consistency.check_stabilization_constraints(tmp_path)
+    assert errors
+    assert "max changed files" in errors[0].lower()
+
+
+def test_stabilization_gate_enforces_allowlist(monkeypatch, tmp_path: Path) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    state = tmp_path / "docs" / "internal" / "audit" / "STABILIZATION_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        "Mode: ON\n"
+        "Max changed files: 5\n"
+        "Allowed paths:\n"
+        "- `scripts/check_repo_consistency.py`\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (["audioknob_gui/worker/ops.py"], "working-tree", []),
+    )
+    monkeypatch.setattr(consistency, "_merge_with_local_diffs", lambda repo, files: files)
+    monkeypatch.setattr(
+        consistency,
+        "_run_git",
+        lambda repo, *args: subprocess.CompletedProcess(["git", *args], 0, stdout="feat: stabilization\n"),
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    errors = consistency.check_stabilization_constraints(tmp_path)
+    assert errors
+    assert "out-of-scope" in errors[0].lower()
+
+
+def test_stabilization_gate_passes_when_scope_matches(monkeypatch, tmp_path: Path) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    state = tmp_path / "docs" / "internal" / "audit" / "STABILIZATION_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        "Mode: ON\n"
+        "Max changed files: 3\n"
+        "Allowed paths:\n"
+        "- `scripts/check_repo_consistency.py`\n"
+        "- `docs/internal/audit/STABILIZATION_STATE.md`\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (
+            ["scripts/check_repo_consistency.py", "docs/internal/audit/STABILIZATION_STATE.md"],
+            "working-tree",
+            [],
+        ),
+    )
+    monkeypatch.setattr(consistency, "_merge_with_local_diffs", lambda repo, files: files)
+    monkeypatch.setattr(
+        consistency,
+        "_run_git",
+        lambda repo, *args: subprocess.CompletedProcess(["git", *args], 0, stdout="feat: stabilization\n"),
+    )
+
+    errors = consistency.check_stabilization_constraints(tmp_path)
+    assert errors == []
+
+
+def test_stabilization_gate_honors_commit_waiver(monkeypatch, tmp_path: Path) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    state = tmp_path / "docs" / "internal" / "audit" / "STABILIZATION_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        "Mode: ON\n"
+        "Max changed files: 1\n"
+        "Allowed paths:\n"
+        "- `scripts/check_repo_consistency.py`\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (["audioknob_gui/worker/ops.py"], "working-tree", []),
+    )
+    monkeypatch.setattr(consistency, "_merge_with_local_diffs", lambda repo, files: files)
+    monkeypatch.setattr(
+        consistency,
+        "_run_git",
+        lambda repo, *args: subprocess.CompletedProcess(
+            ["git", *args], 0, stdout="refactor: emergency change\n\nstabilization-waiver: approved\n"
+        ),
+    )
+
+    errors = consistency.check_stabilization_constraints(tmp_path)
+    assert errors == []
+
+
+def test_stabilization_gate_fails_on_invalid_state_file(tmp_path: Path) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    state = tmp_path / "docs" / "internal" / "audit" / "STABILIZATION_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        "Max changed files: 5\n"
+        "Allowed paths:\n"
+        "- `scripts/check_repo_consistency.py`\n",
+        encoding="utf-8",
+    )
+
+    errors = consistency.check_stabilization_constraints(tmp_path)
+    assert errors
+    assert "Invalid stabilization state" in errors[0]
+
+
+def test_stabilization_gate_uses_local_diff_scope_outside_ci(
+    monkeypatch, tmp_path: Path
+) -> None:
+    consistency = _load_script("check_repo_consistency")
+
+    state = tmp_path / "docs" / "internal" / "audit" / "STABILIZATION_STATE.md"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        "Mode: ON\n"
+        "Max changed files: 2\n"
+        "Allowed paths:\n"
+        "- `scripts/check_repo_consistency.py`\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        consistency,
+        "_resolve_changed_files",
+        lambda repo: (["audioknob_gui/worker/ops.py"], "triple-dot:origin/master", []),
+    )
+    seen: list[list[str]] = []
+
+    def fake_merge(repo: Path, files: list[str]) -> list[str]:
+        seen.append(list(files))
+        return ["scripts/check_repo_consistency.py"]
+
+    monkeypatch.setattr(consistency, "_merge_with_local_diffs", fake_merge)
+    monkeypatch.setattr(
+        consistency,
+        "_run_git",
+        lambda repo, *args: subprocess.CompletedProcess(["git", *args], 0, stdout="feat: stabilization\n"),
+    )
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    errors = consistency.check_stabilization_constraints(tmp_path)
+    assert errors == []
+    assert seen and seen[0] == []
