@@ -7,7 +7,7 @@ Complete one section per knob. Use severity labels: Blocker/Critical/High/Medium
 - Status: `complete`
 - Active slice: `closed (Phase 3 complete; see KNOB_AUDIT_PLAN.md for current phase)`
 - Started: `2026-02-12`
-- Notes: Slices A-D fully populated on 2026-02-12 (`permissions`, `vm`, `cpu`, `power`, `stack`, `services`, `irq`, `kernel`, `testing`); carried findings are `AK-AUD-001` (deferred to `RB-002`) and `AK-AUD-002` (planned in `RB-001`).
+- Notes: Slices A-D fully populated on 2026-02-12 (`permissions`, `vm`, `cpu`, `power`, `stack`, `services`, `irq`, `kernel`, `testing`); `AK-AUD-001` and `AK-AUD-002` are resolved via `RB-002` and `RB-001`.
 
 ## `cpu_dma_latency_udev` - DMA Latency
 
@@ -129,13 +129,13 @@ Checks
 - Test/docs parity: Partial
 
 Findings
-- Severity: Medium
+- Severity: None
 - Confidence: High
-- Evidence: `irq_affinity` has full preview/apply/status/transaction-restore coverage, but no explicit force-reset branch in `cmd_force_reset_knob`.
+- Evidence: `irq_affinity` now has an explicit force-reset branch (`_force_reset_irq_affinity`) that resets writable IRQ masks to the kernel default and removes audioknob IRQ persistence artifacts.
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/conflicts.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
-- Impact: Recovery fallback depends on transaction availability.
-- Proposed fix class: cross-system parity batch
-- Notes: Linked finding `AK-AUD-002`.
+- Impact: No remaining parity gap for force-reset coverage in this kind.
+- Proposed fix class: none
+- Notes: `AK-AUD-002` resolved in Phase 6 (`RB-001`).
 
 ## `irqbalance_disable` - IRQ Balance
 
@@ -741,7 +741,7 @@ Findings
 - Confidence: High
 - Evidence: Worker parity model treats `group_membership` as status-only kind while apply/reset flows are handled via requirements workflow.
 - File references: `config/registry.json`, `audioknob_gui/worker/ops.py`, `audioknob_gui/gui/requirements.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
-- Impact: Contract clarity issue; behavior is intentional but should stay explicitly documented.
+- Impact: Contract clarity issue was closed by explicit special-case documentation in `PLAN.md` and `PROJECT_STATE.md`.
 - Proposed fix class: contract/docs only
 - Notes: Linked finding `AK-AUD-001`.
 
@@ -865,13 +865,13 @@ Checks
 - Test/docs parity: Partial
 
 Findings
-- Severity: Medium
+- Severity: None
 - Confidence: High
-- Evidence: `power_profile` has preview/apply/status and transaction restore, but no explicit force-reset handler branch.
+- Evidence: `power_profile` now has an explicit force-reset branch (`_force_reset_power_profile`) with backend-aware conservative reset to `balanced` and post-write verification.
 - File references: `audioknob_gui/worker/ops.py`, `audioknob_gui/worker/cli.py`, `audioknob_gui/gui/conflicts.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
-- Impact: Recovery fallback depends on transaction availability.
-- Proposed fix class: cross-system parity batch
-- Notes: Linked finding `AK-AUD-002`.
+- Impact: No remaining parity gap for force-reset coverage in this kind.
+- Proposed fix class: none
+- Notes: `AK-AUD-002` resolved in Phase 6 (`RB-001`).
 
 ## `usb_autosuspend_disable` - USB Power
 
@@ -1121,13 +1121,13 @@ Checks
 - Test/docs parity: Partial
 
 Findings
-- Severity: Medium
+- Severity: None
 - Confidence: High
-- Evidence: `wpctl_profile` has full preview/apply/status/transaction restore, but no explicit force-reset branch.
+- Evidence: `wpctl_profile` now has an explicit force-reset branch (`_force_reset_wpctl_profile`) that performs deterministic safe-decline when fallback profile inference is unsafe, avoiding blind profile selection.
 - File references: `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
-- Impact: Recovery parity depends on transaction availability.
-- Proposed fix class: cross-system parity batch
-- Notes: Linked finding `AK-AUD-002`.
+- Impact: No remaining untracked force-reset parity gap; unsupported cases are explicit and conservative.
+- Proposed fix class: none
+- Notes: `AK-AUD-002` resolved in Phase 6 (`RB-001`).
 
 ## `pipewire_quantum` - PipeWire Buffer
 
@@ -1281,13 +1281,13 @@ Checks
 - Test/docs parity: Partial
 
 Findings
-- Severity: Medium
+- Severity: None
 - Confidence: High
-- Evidence: `qjackctl_server_prefix` has preview/apply/status/transaction restore, but no explicit force-reset branch.
+- Evidence: `qjackctl_server_prefix` now has an explicit force-reset branch (`_force_reset_qjackctl_server_prefix`) that strips RT/taskset settings, clears audioknob post-start hooks, and removes generated post-start scripts when owned.
 - File references: `audioknob_gui/worker/cli.py`, `audioknob_gui/worker/ops.py`, `docs/internal/audit/2026-02-11/FINDINGS_LEDGER.md`
-- Impact: Recovery parity depends on transaction availability.
-- Proposed fix class: cross-system parity batch
-- Notes: Linked finding `AK-AUD-002`.
+- Impact: No remaining parity gap for force-reset coverage in this kind.
+- Proposed fix class: none
+- Notes: `AK-AUD-002` resolved in Phase 6 (`RB-001`).
 
 ## `blocker_check` - RT Scan
 

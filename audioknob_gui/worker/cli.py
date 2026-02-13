@@ -3214,6 +3214,371 @@ def _force_reset_sysfs_glob(glob_spec: str | list[str]) -> tuple[bool, str]:
     return True, f"Reset {updated} sysfs {suffix}"
 
 
+def _list_powerprofilesctl_profiles(cmd: str) -> list[str]:
+    try:
+        res = subprocess.run([cmd, "list"], capture_output=True, text=True)
+    except Exception:
+        return []
+    if res.returncode != 0:
+        return []
+    profiles: list[str] = []
+    for line in res.stdout.splitlines():
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        if line.startswith("*"):
+            line = line[1:].strip()
+        name = line.split(":", 1)[0].strip()
+        if name:
+            profiles.append(name)
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in profiles:
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _list_tuned_profiles(cmd: str) -> list[str]:
+    try:
+        res = subprocess.run([cmd, "list"], capture_output=True, text=True)
+    except Exception:
+        return []
+    if res.returncode != 0:
+        return []
+    profiles: list[str] = []
+    for line in res.stdout.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        low = text.lower()
+        if low.startswith("available profiles") or low.startswith("current active profile"):
+            continue
+        text = text.lstrip("-* ").strip()
+        if not text:
+            continue
+        name = text.split()[0].strip()
+        if name and name not in ("-", "*"):
+            profiles.append(name)
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in profiles:
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _force_reset_power_profile(params: dict[str, Any]) -> tuple[bool, str]:
+    backend = worker_ops.select_power_profile_backend(params)
+    if not backend:
+        return False, "No power profile backend found (powerprofilesctl or tuned-adm)."
+
+    target = "balanced"
+    backend_name = str(backend.get("backend", "")).strip()
+    cmd = str(backend.get("cmd", "")).strip()
+    if not backend_name or not cmd:
+        return False, "Power profile backend metadata is incomplete."
+
+    if backend_name == "powerprofilesctl":
+        available = _list_powerprofilesctl_profiles(cmd)
+        if available and target not in available:
+            return False, (
+                "Cannot safely reset power profile: "
+                f"'{target}' is not available for powerprofilesctl "
+                f"(available: {', '.join(available)})."
+            )
+        result = subprocess.run([cmd, "set", target], capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            return False, f"Failed to set power profile '{target}': {detail}"
+        current = worker_ops.read_power_profile(backend_name, cmd)
+        if current and current != target:
+            return False, f"Power profile verification failed (current: {current}, target: {target})."
+        return True, f"Set power profile to {target} via powerprofilesctl"
+
+    if backend_name == "tuned":
+        available = _list_tuned_profiles(cmd)
+        if available and target not in available:
+            return False, (
+                "Cannot safely reset tuned profile: "
+                f"'{target}' is not available (available: {', '.join(available)})."
+            )
+        result = subprocess.run([cmd, "profile", target], capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            return False, f"Failed to set tuned profile '{target}': {detail}"
+        current = worker_ops.read_power_profile(backend_name, cmd)
+        if current and current != target:
+            return False, f"Tuned profile verification failed (current: {current}, target: {target})."
+        return True, f"Set tuned profile to {target}"
+
+    return False, f"Unsupported power profile backend: {backend_name}"
+
+
+def _normalize_irq_mask(raw: str) -> str:
+    text = str(raw).strip().lower().replace(",", "")
+    text = text.lstrip("0")
+    return text or "0"
+
+
+def _force_reset_irq_affinity(params: dict[str, Any]) -> tuple[bool, str]:
+    from audioknob_gui.core.irq import is_irq_affinity_writable, list_irqs
+
+    default_mask_path = Path("/proc/irq/default_smp_affinity")
+    if not default_mask_path.exists():
+        return False, "Missing /proc/irq/default_smp_affinity"
+    try:
+        default_mask = default_mask_path.read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        return False, f"Failed to read /proc/irq/default_smp_affinity: {exc}"
+    if not default_mask:
+        return False, "Kernel default IRQ affinity mask is empty"
+
+    errors: list[str] = []
+    updated = 0
+    unchanged = 0
+    skipped_read_only = 0
+
+    for irq in list_irqs():
+        if not is_irq_affinity_writable(irq):
+            skipped_read_only += 1
+            continue
+        affinity_path = Path(f"/proc/irq/{irq}/smp_affinity")
+        if not affinity_path.exists():
+            continue
+        try:
+            current = affinity_path.read_text(encoding="utf-8").strip()
+        except Exception as exc:
+            errors.append(f"IRQ {irq}: failed to read smp_affinity ({exc})")
+            continue
+        if _normalize_irq_mask(current) == _normalize_irq_mask(default_mask):
+            unchanged += 1
+            continue
+        try:
+            affinity_path.write_text(default_mask + "\n", encoding="utf-8")
+            updated += 1
+        except Exception as exc:
+            errors.append(f"IRQ {irq}: failed to write default mask ({exc})")
+
+    unit = str(params.get("persist_unit", "")).strip() or "audioknob-irq-pinning.service"
+    unit_disable_note = ""
+    if unit:
+        try:
+            disable_res = subprocess.run(
+                ["systemctl", "disable", "--now", unit],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if disable_res.returncode == 0:
+                unit_disable_note = f"disabled {unit}"
+            else:
+                detail = (disable_res.stderr or disable_res.stdout or "").strip()
+                detail_low = detail.lower()
+                if any(token in detail_low for token in ("not-found", "not found", "not loaded", "no such file")):
+                    unit_disable_note = f"{unit} not found"
+                elif detail:
+                    errors.append(f"Failed to disable {unit}: {detail}")
+                else:
+                    errors.append(f"Failed to disable {unit}")
+        except Exception as exc:
+            errors.append(f"Failed to disable {unit}: {exc}")
+
+    unit_path_raw = str(params.get("persist_unit_path", "")).strip()
+    unit_path = Path(unit_path_raw) if unit_path_raw else Path("/etc/systemd/system") / unit
+    unit_removed = False
+    if unit_path.exists():
+        try:
+            unit_text = unit_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"Failed to read {unit_path}: {exc}")
+            unit_text = ""
+        if unit_text:
+            owned_markers = (
+                "Description=Apply audioknob IRQ pinning",
+                "ExecStart=/usr/libexec/audioknob-gui-worker apply irq_pinning",
+            )
+            if all(marker in unit_text for marker in owned_markers):
+                try:
+                    unit_path.unlink()
+                    unit_removed = True
+                    subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True, text=True)
+                except Exception as exc:
+                    errors.append(f"Failed to remove {unit_path}: {exc}")
+
+    state_path_raw = str(params.get("persist_state_path", "")).strip()
+    state_path = Path(state_path_raw) if state_path_raw else Path(default_paths().var_lib_dir) / "state.json"
+    state_cleared = False
+    if state_path.exists():
+        try:
+            raw = state_path.read_text(encoding="utf-8")
+            data = json.loads(raw) if raw.strip() else {}
+            if not isinstance(data, dict):
+                raise ValueError("state payload is not a JSON object")
+            changed = False
+            for key, value in (
+                ("irq_pinning_devices", []),
+                ("irq_pinning_cpu_cores", None),
+                ("irq_housekeeping_auto", True),
+                ("irq_housekeeping_cores", []),
+            ):
+                if data.get(key) != value:
+                    data[key] = value
+                    changed = True
+            if changed:
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                state_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                state_cleared = True
+        except Exception as exc:
+            errors.append(f"Failed to update IRQ state file {state_path}: {exc}")
+
+    if errors:
+        return False, "; ".join(errors)
+
+    parts = [
+        f"Reset {updated} IRQ affinities to kernel default mask",
+        f"{unchanged} already default",
+        f"{skipped_read_only} read-only skipped",
+    ]
+    if unit_disable_note:
+        parts.append(unit_disable_note)
+    if unit_removed:
+        parts.append(f"removed {unit_path}")
+    if state_cleared:
+        parts.append(f"cleared IRQ pinning state in {state_path}")
+    return True, "; ".join(parts)
+
+
+def _looks_like_audioknob_post_start_script(content: str) -> bool:
+    head = "\n".join(content.splitlines()[:5])
+    return "Generated by audioknob-gui. Do not edit." in head and "taskset -apc" in content
+
+
+def _force_reset_qjackctl_server_prefix(params: dict[str, Any]) -> tuple[bool, str]:
+    from audioknob_gui.core.qjackctl import (
+        default_post_start_script_path,
+        ensure_server_has_flags,
+        ensure_server_prefix,
+        read_config,
+        write_config_with_server_update,
+    )
+
+    path = Path(str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))).expanduser()
+    if not path.exists():
+        return True, f"Missing {path} (already default)"
+
+    try:
+        cfg = read_config(path)
+    except Exception as exc:
+        return False, f"Failed to parse QjackCtl config {path}: {exc}"
+
+    before_cmd = cfg.server_cmd or "jackd"
+    before_prefix = cfg.server_prefix or ""
+    after_cmd = ensure_server_has_flags(
+        before_cmd,
+        ensure_rt=False,
+        ensure_priority=False,
+        cpu_cores="",
+    )
+    after_prefix = ensure_server_prefix(before_prefix, cpu_cores="")
+    preset = cfg.def_preset.strip() if cfg.def_preset else ""
+    target_preset = preset or None
+
+    try:
+        write_config_with_server_update(
+            path,
+            target_preset,
+            after_cmd,
+            server_prefix=after_prefix,
+            realtime=False,
+            priority=0,
+            mirror_unscoped=True,
+            post_startup_enabled=False,
+            post_startup_shell="",
+        )
+    except Exception as exc:
+        return False, f"Failed to write QjackCtl config {path}: {exc}"
+
+    script_path = default_post_start_script_path()
+    script_removed = False
+    if script_path.exists():
+        try:
+            script_text = script_path.read_text(encoding="utf-8")
+            if _looks_like_audioknob_post_start_script(script_text):
+                script_path.unlink()
+                script_removed = True
+        except Exception as exc:
+            return False, f"Failed to update QjackCtl post-start script {script_path}: {exc}"
+
+    changes: list[str] = []
+    if before_cmd != after_cmd:
+        changes.append("server command")
+    if before_prefix != after_prefix:
+        changes.append("server prefix")
+    if cfg.realtime is True:
+        changes.append("realtime flag")
+    if cfg.priority not in (None, 0):
+        changes.append("priority")
+    if cfg.post_startup_enabled or (cfg.post_startup_shell or "").strip():
+        changes.append("post-start hook")
+    if script_removed:
+        changes.append("generated post-start script")
+
+    if not changes:
+        return True, f"No QjackCtl RT/taskset changes detected in {path}"
+    return True, f"Reset QjackCtl settings ({', '.join(changes)})"
+
+
+def _force_reset_wpctl_profile(params: dict[str, Any]) -> tuple[bool, str]:
+    from audioknob_gui.platform.packages import which_command
+
+    device_id = params.get("device_id")
+    if device_id is None or str(device_id).strip() == "":
+        return True, "No configured device id for Pro Audio profile (already default)"
+
+    cmd = which_command("wpctl")
+    if not cmd:
+        return False, "wpctl not found; cannot inspect current profile safely"
+
+    try:
+        inspect = subprocess.run(
+            [cmd, "inspect", str(device_id)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as exc:
+        return False, f"Failed to inspect PipeWire device {device_id}: {exc}"
+    if inspect.returncode != 0:
+        detail = inspect.stderr.strip() or inspect.stdout.strip() or "wpctl inspect failed"
+        return False, f"Failed to inspect PipeWire device {device_id}: {detail}"
+
+    current = ""
+    pro_flag = False
+    for line in (inspect.stdout or "").splitlines():
+        clean = line.strip().lstrip("* ").strip()
+        if not clean:
+            continue
+        low = clean.lower()
+        if low.startswith("active profile:"):
+            current = clean.split(":", 1)[1].strip()
+        if low.startswith("device.profile.pro"):
+            _, _, value = clean.partition("=")
+            pro_flag = value.strip().strip('"').lower() in ("true", "1", "yes")
+
+    current_low = current.lower()
+    if pro_flag or "pro audio" in current_low or "pro-audio" in current_low:
+        return False, (
+            "Cannot safely force-reset Pro Audio profile without a recorded transaction. "
+            "Select a non-Pro profile manually, or restore from transaction history."
+        )
+    return True, "Device is not using Pro Audio profile; no force reset needed"
+
+
 def _kernel_cmdline_tokens(text: str, boot_system: str) -> list[str]:
     if boot_system in ("grub2-bls", "bls", "systemd-boot"):
         return text.strip().split()
@@ -3425,8 +3790,19 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     kind = k.impl.kind
     params = k.impl.params
     state = _load_gui_state()
+    power_profile_backend = _power_profile_backend_override(state)
     if knob_id == "pipewire_rt_limits_group" and kind == "pam_limits_audio_group":
         params = _apply_pipewire_state_overrides(knob_id, params, state)
+    if kind == "wpctl_profile" and knob_id.startswith("pipewire_"):
+        params = _apply_pipewire_state_overrides(knob_id, params, state)
+    if (
+        power_profile_backend is not None
+        and knob_id == "power_profile_performance"
+        and kind == "power_profile"
+    ):
+        new_params = dict(params)
+        new_params["backend"] = power_profile_backend
+        params = new_params
     success = False
     message = ""
 
@@ -3460,6 +3836,14 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
         success, message = _force_reset_wireplumber_conf(path)
     elif kind == "rtirq_config":
         success, message = _force_reset_rtirq_config(params)
+    elif kind == "irq_affinity":
+        success, message = _force_reset_irq_affinity(params)
+    elif kind == "power_profile":
+        success, message = _force_reset_power_profile(params)
+    elif kind == "qjackctl_server_prefix":
+        success, message = _force_reset_qjackctl_server_prefix(params)
+    elif kind == "wpctl_profile":
+        success, message = _force_reset_wpctl_profile(params)
     elif kind == "user_service_mask":
         services = params.get("services", [])
         if isinstance(services, str):

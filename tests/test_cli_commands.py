@@ -275,3 +275,78 @@ def test_cmd_status_uses_kernel_status_param_fallback(monkeypatch):
 
     assert rc == 0
     assert captured_param.get("value") == "isolcpus"
+
+
+@pytest.mark.parametrize(
+    "knob_id,kind,helper_name",
+    [
+        ("irq_pinning", "irq_affinity", "_force_reset_irq_affinity"),
+        ("power_profile_performance", "power_profile", "_force_reset_power_profile"),
+        ("qjackctl_server_prefix_rt", "qjackctl_server_prefix", "_force_reset_qjackctl_server_prefix"),
+        ("pipewire_pro_audio_profile", "wpctl_profile", "_force_reset_wpctl_profile"),
+    ],
+)
+def test_cmd_force_reset_knob_dispatches_rb001_kinds(monkeypatch, knob_id, kind, helper_name):
+    import argparse
+    import io
+    import sys
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id=knob_id,
+        title="Test",
+        description="",
+        category="test",
+        risk_level="low",
+        requires_root=False,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind=kind, params={}),
+    )
+    called: dict[str, bool] = {}
+
+    def _fake_handler(_params):
+        called["hit"] = True
+        return True, f"handled {kind}"
+
+    monkeypatch.setattr(cli, "load_registry", lambda _registry: [knob])
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {})
+    monkeypatch.setattr(cli, "_log_audit_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr(cli, helper_name, _fake_handler)
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_force_reset_knob(argparse.Namespace(knob_id=knob_id, registry="unused"))
+
+    payload = json.loads(captured.getvalue())
+    assert rc == 0
+    assert payload["success"] is True
+    assert payload["message"] == f"handled {kind}"
+    assert called.get("hit") is True
+
+
+def test_force_reset_wpctl_profile_declines_pro_audio(monkeypatch):
+    import subprocess
+
+    from audioknob_gui.worker.cli import _force_reset_wpctl_profile
+
+    inspect_stdout = """
+id 42, type PipeWire:Interface:Device
+Active Profile: pro-audio
+device.profile.pro = "true"
+"""
+
+    monkeypatch.setattr("audioknob_gui.platform.packages.which_command", lambda _name: "wpctl")
+    monkeypatch.setattr(
+        "audioknob_gui.worker.cli.subprocess.run",
+        lambda *_a, **_kw: subprocess.CompletedProcess(args=["wpctl", "inspect", "42"], returncode=0, stdout=inspect_stdout, stderr=""),
+    )
+
+    success, message = _force_reset_wpctl_profile({"device_id": "42"})
+    assert success is False
+    assert "Cannot safely force-reset Pro Audio profile" in message

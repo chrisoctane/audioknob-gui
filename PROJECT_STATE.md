@@ -14,6 +14,7 @@
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
+- **Group membership special-case contract** - `audio_group_membership` remains an immediate Join/Leave workflow (explicit confirmation), intentionally outside worker preview/apply/reset/force-reset transaction paths
 - **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible action queue (apply/reset)
 - **Simple mode title** - home view heading is `AudioKnob`
 - **Mode switch in header** - dedicated far-left `View` button switches between Simple and Full UI
@@ -196,7 +197,7 @@ Next phases (planned, incremental):
 - Reset errors now surface detailed messages instead of a generic "Unknown error".
 - Sysfs knobs report "not applicable" if the kernel interface is absent, instead of silently failing.
 - Package installs on Tumbleweed can add multimedia:proaudio and packman repos when providers are missing.
-- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt when defaults can be inferred or safely removed: systemd_unit_toggle, kernel_cmdline, sysfs_glob_kv (bracketed default only), pam_limits_audio_group, sysctl_conf, udev_rule (only if file matches audioknob content), pipewire_conf (audioknob header), user_service_mask, baloo_disable.
+- Knobs that lack a transaction can be force-reset via an explicit confirmation prompt when defaults can be inferred or safely removed: systemd_unit_toggle, kernel_cmdline, sysfs_glob_kv (bracketed default only), pam_limits_audio_group, sysctl_conf, udev_rule (only if file matches audioknob content), pipewire_conf/wireplumber_conf (audioknob header), rtirq_config, irq_affinity (generic reset to kernel default IRQ mask + remove audioknob IRQ persistence), power_profile (set conservative `balanced` when backend supports it), qjackctl_server_prefix (strip RT/taskset and clear audioknob post-start hook), user_service_mask, baloo_disable. For wpctl_profile, force reset is explicit-safe-decline when no deterministic fallback profile can be proven.
 - Queued resets now group "no transaction" knobs and offer a force-reset prompt instead of failing the whole queue.
 - QjackCtl RT blocks apply while QjackCtl is running to avoid config overwrite; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
@@ -370,7 +371,7 @@ Tie-break implementation (draft policy):
 - Simple queue composition must auto-include hard dependencies (`depends_on`) for selected knobs.
 - Safety latch tier `10` (Safe RT stack):
   - queue `rt_limits_audio_group`
-  - queue `audio_group_membership`
+  - require `audio_group_membership` via immediate Join/Leave workflow (special-case, not worker-queued)
   - queue `pipewire_rt_limits_group` with fixed group `audio`
   - queue `pipewire_rt_module_tuning` with one conservative RT-module preset
   - queue `pipewire_mlock_policy` with one fixed mlock preset
@@ -521,7 +522,7 @@ This is the enforcement layer. Any agent making changes MUST satisfy this contra
 
 - **Behavioral change?** Update the relevant sections in this file (and add a “Bugs Fixed (Prevent Regression)” entry if applicable).
 - **User workflow changed?** Update `PLAN.md`.
-- **Backlog change?** Update `BUGFEAT.md` and keep the `README.md` backlog section in sync. Use strikethrough for fixed items.
+- **Backlog change?** Update the `README.md` backlog section (and any active internal tracking doc used for open gaps) so unresolved work stays centralized.
 - **Touched registry/schema?**
   - Update canonical: `config/registry.json`, `config/registry.schema.json`
   - Sync packaged: `audioknob_gui/data/registry.json`, `audioknob_gui/data/registry.schema.json`
@@ -983,6 +984,11 @@ else:
 | `baloo_disable` | Disable KDE Baloo indexer | Check balooctl status |
 | `group_membership` | Add user to groups | Check user's groups |
 | `read_only` | No changes, just info/test | Returns "read_only" status |
+
+Special-case contract (`group_membership`):
+- `audio_group_membership` uses explicit Join/Leave actions from the GUI requirements workflow.
+- Worker parity for this kind is status/target reporting only (`check_knob_status` + system-profile targets), not queue preview/apply/reset/force-reset handling.
+- This is intentional for the current architecture and remains documented as a special-case parity exception.
 
 ---
 

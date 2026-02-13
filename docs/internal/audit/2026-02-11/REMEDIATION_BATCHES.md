@@ -11,6 +11,11 @@ Planning outcome:
 2. `AK-AUD-001` is explicitly deferred (`RB-002`) with rationale/milestone.
 3. All findings now have a release disposition (planned/deferred/resolved).
 
+Closeout update:
+1. `RB-001` completed on 2026-02-12; `AK-AUD-002` resolved.
+2. `RB-002` completed on 2026-02-12 via contract hardening; `AK-AUD-001` resolved.
+3. No open audit findings remain in this batch set.
+
 ---
 
 ## `RB-001` - Force-reset parity expansion
@@ -19,7 +24,7 @@ Planning outcome:
 - Priority: `P1` (highest open severity in this cycle)
 - Severity target: `Medium -> resolved`
 - Fix class: `cross-system parity batch`
-- Status: `Planned`
+- Status: `Completed (2026-02-12)`
 
 ### Objective
 Add explicit `force-reset-knob` support for full-parity kinds that currently rely on transaction-only fallback:
@@ -28,11 +33,11 @@ Add explicit `force-reset-knob` support for full-parity kinds that currently rel
 - `qjackctl_server_prefix`
 - `wpctl_profile`
 
-### Scope (planned files)
+### Scope (implemented files)
 - `audioknob_gui/worker/cli.py`
-- `audioknob_gui/worker/ops.py` (if helper reuse is needed)
+- `audioknob_gui/gui/main_window.py`
 - `tests/*` (new/updated worker parity tests for added kinds)
-- `PROJECT_STATE.md` (force-reset support matrix/status line updates)
+- `PROJECT_STATE.md` and `PLAN.md` (force-reset support matrix/status line updates)
 
 ### Constraints
 - Preserve guardrails: no silent/automatic reset behavior.
@@ -58,6 +63,16 @@ Add explicit `force-reset-knob` support for full-parity kinds that currently rel
 - `cmd_force_reset_knob` has explicit support (or explicit safe-decline rationale) for all full-parity kinds.
 - No new Blocker/Critical findings introduced.
 
+### Implementation outcome (2026-02-12)
+1. Added explicit `force-reset-knob` branches for:
+   - `irq_affinity` (generic reset to kernel default IRQ mask + persistence cleanup)
+   - `power_profile` (backend-aware conservative reset to `balanced`)
+   - `qjackctl_server_prefix` (strip RT/taskset + clear audioknob post-start artifacts)
+   - `wpctl_profile` (explicit deterministic safe-decline when fallback profile cannot be inferred safely)
+2. Expanded GUI `_force_reset_supported` allowlist to include the above kinds.
+3. Added targeted CLI tests for new dispatch/decline behavior.
+4. Re-ran compile and consistency gates successfully.
+
 ---
 
 ## `RB-002` - Group membership special-case contract hardening
@@ -66,28 +81,30 @@ Add explicit `force-reset-knob` support for full-parity kinds that currently rel
 - Priority: `P3`
 - Severity target: `Low`
 - Fix class: `contract/docs only`
-- Status: `Deferred`
+- Status: `Completed (2026-02-12)`
 
 ### Objective
 Keep `group_membership` as an intentional special-case path while making contract language unambiguous for future contributors.
 
-### Defer rationale
+### Contract rationale
 - Current behavior is intentional and stable for the release branch.
 - Converting `group_membership` into full queue parity would require root group-mutation workflow changes with non-trivial UX/safety impact.
-- This is not required to close current safety/functionality goals.
+- The required fix for this batch was documentation/contract hardening, not architectural rework.
 
-### Deferred milestone
-- Re-evaluate during next architecture cycle (`v0.8.x` planning + audit refresh).
+### Implementation outcome (2026-02-12)
+1. `PLAN.md` now explicitly states `group_membership` is outside worker preview/apply/reset/force-reset transaction flows.
+2. `PROJECT_STATE.md` now includes a matching special-case contract block in the implementation-kinds section.
+3. Audit disposition files now mark `AK-AUD-001` as resolved-by-contract (`RB-002` complete).
 
-### Deferred acceptance note
-- Until rework is approved, retain explicit special-case classification in audit artifacts and kind matrix.
+### Residual note
+- Optional future architecture work (`v0.8.x+`): implement full queue/apply/reset parity for `group_membership` if product direction requires it.
 
 ---
 
 ## Batch order and release gating
 
-1. `RB-001` (required before Phase 6 closeout of open Medium finding)
-2. `RB-002` (deferred by rationale; not release-blocking)
+1. `RB-001` (completed; no longer open)
+2. `RB-002` (completed; no longer open)
 
 ---
 
@@ -95,6 +112,6 @@ Keep `group_membership` as an intentional special-case path while making contrac
 
 | Finding | Disposition | Batch | Notes |
 |---|---|---|---|
-| `AK-AUD-001` | Deferred | `RB-002` | Intentional special-case; revisit in `v0.8.x` planning |
-| `AK-AUD-002` | Planned | `RB-001` | Open Medium parity gap; implementation batch required |
+| `AK-AUD-001` | Resolved | `RB-002` | Special-case contract hardened in `PLAN.md` + `PROJECT_STATE.md` |
+| `AK-AUD-002` | Resolved | `RB-001` | Closed in Phase 6 after force-reset parity expansion |
 | `AK-AUD-003` | Resolved | N/A | Closed in Phase 4 via docs coherence fix |

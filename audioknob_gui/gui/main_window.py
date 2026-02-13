@@ -4082,7 +4082,12 @@ class MainWindow(TableMixin, QMainWindow):
             "sysctl_conf",
             "udev_rule",
             "pipewire_conf",
+            "wireplumber_conf",
             "rtirq_config",
+            "irq_affinity",
+            "power_profile",
+            "qjackctl_server_prefix",
+            "wpctl_profile",
             "user_service_mask",
             "baloo_disable",
         )

@@ -123,7 +123,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 
 ### Current simple inclusion set
 
-- `audio_group_membership`
+- `audio_group_membership` (special-case immediate Join/Leave prerequisite; not a worker queue/apply kind)
 - `inotify_max_watches`
 - `swappiness`
 - `dirty_bytes`
@@ -456,8 +456,8 @@ self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 
 Apply/Reset runs in the background; the status column shows “⏳ Updating” and the action button is disabled while work is in progress.
 Apply and Reset now queue the change. The global header button applies the queued set: "Apply" for non-reboot changes or "Apply & Reboot" if any queued knob requires reboot. "Apply & Reboot" always triggers a reboot prompt after apply, even if pending-reboot status is not yet detected.
-Group join/leave actions remain immediate because they require explicit confirmation.
-If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (for both single and queued resets). Force reset is supported where defaults can be inferred or safely removed: `systemd_unit_toggle`, `kernel_cmdline`, `sysfs_glob_kv` (only when sysfs exposes a bracketed default), `pam_limits_audio_group`, `sysctl_conf`, `udev_rule` (only if file matches audioknob content), `pipewire_conf` (only if file has audioknob header), `user_service_mask`, and `baloo_disable`.
+Group join/leave actions remain immediate because they require explicit confirmation. `group_membership` is an intentional special-case kind and stays outside the worker preview/apply/reset/force-reset transaction pipeline.
+If a reset fails with "No transaction found", the GUI offers a confirmation prompt to force-reset (for both single and queued resets). Force reset is supported where defaults can be inferred or safely removed: `systemd_unit_toggle`, `kernel_cmdline`, `sysfs_glob_kv` (only when sysfs exposes a bracketed default), `pam_limits_audio_group`, `sysctl_conf`, `udev_rule` (only if file matches audioknob content), `pipewire_conf`/`wireplumber_conf` (only if file has audioknob header), `rtirq_config`, `irq_affinity` (generic reset to kernel default IRQ mask + remove audioknob IRQ persistence), `power_profile` (set conservative `balanced` profile when backend supports it), `qjackctl_server_prefix` (strip RT/taskset and clear audioknob post-start hook), `user_service_mask`, and `baloo_disable`. For `wpctl_profile`, force reset is explicit-safe-decline: if a deterministic fallback profile cannot be inferred, the worker refuses to guess and asks for manual profile selection or transaction restore.
 Reboot-required knobs are disabled until the user enables **Tools → Locks → Reboot-required changes**.
 Knobs requiring audio groups stay locked while group membership is pending reboot.
 

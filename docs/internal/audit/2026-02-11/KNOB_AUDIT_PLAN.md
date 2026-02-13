@@ -29,9 +29,9 @@ Out-of-scope:
 - `[x]` Phase 3: Knob-level parity audit
 - `[x]` Phase 4: Cross-system coherence audit
 - `[x]` Phase 5: Remediation batch planning
-- `[ ]` Phase 6: Post-fix verification and closeout
+- `[x]` Phase 6: Post-fix verification and closeout
 
-Current resume point: `Phase 6`
+Current resume point: `Closed`
 
 ## Phase details
 
@@ -221,6 +221,8 @@ Exit criteria:
 
 Resume marker to set when done:
 - `Current resume point: Closed`
+
+Status: `Complete (2026-02-12)`
 
 ## Handoff protocol (for pause/resume)
 Before ending any session:
