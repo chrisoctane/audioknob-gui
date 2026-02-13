@@ -13,7 +13,7 @@ Scope:
 Execution helper:
 - Use `scripts/run_quality_gate.py` as the canonical wrapper:
   - `--gate g1` for change gate
-  - `--gate g2` for parity gate
+  - `--gate g2 --tests <targeted pytest selectors...>` for parity gate
   - `--gate ci` for CI baseline (`G1` + tests)
   - `--gate g3 --release-version vX.Y.Z` for release gate
 
@@ -92,6 +92,10 @@ Required checks:
 Exit criteria:
 - All required checks `PASS`
 - No release-blocking findings remain
+
+Automation notes:
+- `run_quality_gate.py --gate g2` fails unless `--tests` selectors are provided.
+- `run_quality_gate.py --gate g3` enforces both release artifacts and audit closure checks.
 
 ## Feature-complete definition
 

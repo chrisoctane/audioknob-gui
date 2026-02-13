@@ -26,7 +26,10 @@ If any doc is stale or conflicts with code, update it before proceeding.
 ## Hard guardrails (no exceptions without explicit user approval)
 - No background daemon/service, no auto-apply workflows, no hidden state machines.
 - No silent system changes; every change must be user-initiated and visible in UI.
-- Root operations must use pkexec via `/usr/libexec/audioknob-gui-worker`.
+- Root knob/system operations must use pkexec via `/usr/libexec/audioknob-gui-worker`.
+- Direct pkexec command execution is allowed only through `audioknob_gui/gui/worker_api.py`
+  for explicit GUI maintenance actions (group membership, package install,
+  bootloader follow-up, reboot, and root log clear).
 - If status cannot be proven, report "unknown"/not applied (conservative).
 
 ## Optimization mandate (always on)

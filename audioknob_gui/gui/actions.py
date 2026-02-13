@@ -14,12 +14,14 @@ from audioknob_gui.gui.worker_api import (
     _PKEXEC_CANCELLED,
     _is_force_reset_error,
     _is_no_transaction_error,
-    _is_pkexec_cancel,
-    _pick_root_worker_path,
     _run_worker_apply_pkexec,
     _run_worker_apply_user,
     _run_worker_force_reset_pkexec,
     _run_worker_force_reset_user,
+    _run_worker_reset_defaults_pkexec,
+    _run_worker_reset_defaults_user,
+    _run_worker_restore_knob_pkexec,
+    _run_worker_restore_knob_user,
 )
 
 
@@ -335,61 +337,22 @@ def run_force_reset_many(ui, knob_ids: list[str]) -> None:
 
 def restore_knob_internal(ui, knob_id: str, requires_root: bool) -> tuple[bool, str]:
     """Restore a single knob to its original state."""
-    if requires_root:
-        try:
-            worker = _pick_root_worker_path()
-            argv = ["pkexec", worker, "restore-knob", knob_id]
-            p = subprocess.run(argv, text=True, capture_output=True)
-            if not p.stdout.strip():
-                err = p.stderr.strip() or "Unknown error"
-                if _is_pkexec_cancel(err):
-                    return False, _PKEXEC_CANCELLED
-                return False, err
-            try:
-                result = json.loads(p.stdout)
-            except Exception:
-                err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
-                if _is_pkexec_cancel(err):
-                    return False, _PKEXEC_CANCELLED
-                return False, err
-            if result.get("success"):
-                return True, f"Reset {knob_id}"
-            errors = result.get("errors") or []
-            if errors:
-                return False, "\n".join(str(e) for e in errors)
-            return False, result.get("error", "Unknown error")
-        except Exception as e:
-            return False, str(e)
-    else:
-        try:
-            argv = [
-                sys.executable,
-                "-m",
-                "audioknob_gui.worker.cli",
-                "restore-knob",
-                knob_id,
-            ]
-            p = subprocess.run(argv, text=True, capture_output=True)
-            if not p.stdout.strip():
-                err = p.stderr.strip() or "Unknown error"
-                if _is_pkexec_cancel(err):
-                    return False, _PKEXEC_CANCELLED
-                return False, err
-            try:
-                result = json.loads(p.stdout)
-            except Exception:
-                err = p.stderr.strip() or p.stdout.strip() or "Unknown error"
-                if _is_pkexec_cancel(err):
-                    return False, _PKEXEC_CANCELLED
-                return False, err
-            if result.get("success"):
-                return True, f"Reset {knob_id}"
-            errors = result.get("errors") or []
-            if errors:
-                return False, "\n".join(str(e) for e in errors)
-            return False, result.get("error", "Unknown error")
-        except Exception as e:
-            return False, str(e)
+    try:
+        if requires_root:
+            result = _run_worker_restore_knob_pkexec(knob_id)
+        else:
+            result = _run_worker_restore_knob_user(knob_id)
+    except Exception as e:
+        msg = str(e)
+        if msg == _PKEXEC_CANCELLED:
+            return False, _PKEXEC_CANCELLED
+        return False, msg
+    if result.get("success"):
+        return True, f"Reset {knob_id}"
+    errors = result.get("errors") or []
+    if errors:
+        return False, "\n".join(str(e) for e in errors)
+    return False, result.get("error", "Unknown error")
 
 
 def restore_knob(ui, knob_id: str, requires_root: bool) -> tuple[bool, str]:
@@ -529,65 +492,26 @@ def on_reset_defaults(ui) -> None:
 
         # Phase 1: User-scope reset (no pkexec needed)
         try:
-            argv = [
-                sys.executable,
-                "-m",
-                "audioknob_gui.worker.cli",
-                "reset-defaults",
-                "--scope",
-                "user",
-            ]
-            p = subprocess.run(argv, text=True, capture_output=True, timeout=120)
-            parsed = None
-            stdout_text = (p.stdout or "").strip()
-            if stdout_text:
-                try:
-                    parsed = json.loads(stdout_text)
-                except json.JSONDecodeError:
-                    parsed = None
-            if parsed is not None:
-                if parsed.get("reset_count", 0) > 0:
-                    results_text.append(f"Reset {parsed['reset_count']} user file(s)")
-                errors.extend(parsed.get("errors", []))
-                needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
-            elif p.returncode != 0:
-                err_msg = p.stderr.strip() or stdout_text or f"Exit code {p.returncode}"
-                errors.append(f"User reset failed: {err_msg}")
-            elif stdout_text:
-                errors.append("User reset: invalid response")
+            parsed = _run_worker_reset_defaults_user(timeout=120)
+            if parsed.get("reset_count", 0) > 0:
+                results_text.append(f"Reset {parsed['reset_count']} user file(s)")
+            errors.extend(parsed.get("errors", []))
+            needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
         except Exception as e:
             errors.append(f"User reset failed: {e}")
 
         # Phase 2: Root-scope reset (needs pkexec)
         if needs_root:
             try:
-                worker = _pick_root_worker_path()
-                argv = [
-                    "pkexec",
-                    worker,
-                    "reset-defaults",
-                    "--scope",
-                    "root",
-                ]
-                p = subprocess.run(argv, text=True, capture_output=True, timeout=300)
-                parsed = None
-                stdout_text = (p.stdout or "").strip()
-                if stdout_text:
-                    try:
-                        parsed = json.loads(stdout_text)
-                    except json.JSONDecodeError:
-                        parsed = None
-                if parsed is not None:
-                    if parsed.get("reset_count", 0) > 0:
-                        results_text.append(f"Reset {parsed['reset_count']} system file(s)")
-                    errors.extend(parsed.get("errors", []))
-                    needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
-                elif p.returncode != 0:
-                    err_msg = p.stderr.strip() or stdout_text or f"Exit code {p.returncode}"
-                    errors.append(f"Root reset failed: {err_msg}")
-                elif stdout_text:
-                    errors.append("Root reset: invalid response")
+                parsed = _run_worker_reset_defaults_pkexec(timeout=300)
+                if parsed.get("reset_count", 0) > 0:
+                    results_text.append(f"Reset {parsed['reset_count']} system file(s)")
+                errors.extend(parsed.get("errors", []))
+                needs_reboot = bool(parsed.get("needs_reboot", False)) or needs_reboot
             except Exception as e:
+                if str(e) == _PKEXEC_CANCELLED:
+                    errors.append("Root reset cancelled: authentication was cancelled.")
+                    return False, {"results_text": results_text, "errors": errors, "needs_reboot": needs_reboot}, ""
                 errors.append(f"Root reset failed: {e}")
 
         return True, {"results_text": results_text, "errors": errors, "needs_reboot": needs_reboot}, ""

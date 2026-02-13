@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import subprocess
 import sys
@@ -280,85 +281,317 @@ def check_compile(repo: Path) -> list[str]:
     return errors
 
 
-def check_docs_updated_for_code_changes(repo: Path) -> list[str]:
-    """
-    Check that if code paths are modified, docs are also modified.
-    
-    This is a diff-based check for CI. It compares against the merge base.
-    For pre-commit, we check staged files.
-    """
-    errors = []
-    
-    # Paths that require doc updates when changed
-    code_paths = [
-        "audioknob_gui/worker/",
-        "audioknob_gui/gui/",
-        "audioknob_gui/platform/",
-        "config/registry",
-        "pyproject.toml",
-        "bin/",
-        "packaging/",
-    ]
-    
-    doc_paths = ["PLAN.md", "PROJECT_STATE.md"]
-    
-    # Get list of changed files (staged for pre-commit, or all in CI)
-    # First try staged files (pre-commit)
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"],
+def _run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
         capture_output=True,
         text=True,
         cwd=repo,
     )
-    changed_files = result.stdout.strip().split("\n") if result.stdout.strip() else []
-    
-    # If no staged files, try diff against origin/master (CI mode)
-    if not changed_files:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "origin/master...HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=repo,
-        )
-        changed_files = result.stdout.strip().split("\n") if result.stdout.strip() else []
-    
-    if not changed_files:
-        return []  # No changes to check
-    
-    # Check if any code paths were touched
-    code_touched = False
-    for f in changed_files:
-        for code_path in code_paths:
-            if f.startswith(code_path) or code_path in f:
-                code_touched = True
-                break
-        if code_touched:
-            break
-    
-    if not code_touched:
-        return []  # No code changes, no doc requirement
-    
-    # Check if any doc was also touched
-    doc_touched = any(f in doc_paths for f in changed_files)
-    
-    if not doc_touched:
-        # Check for exception tag in commit message
-        result = subprocess.run(
-            ["git", "log", "-1", "--format=%B"],
-            capture_output=True,
-            text=True,
-            cwd=repo,
-        )
-        commit_msg = result.stdout.lower()
-        if "docs-not-needed:" in commit_msg:
-            return []  # Explicitly waived
-        
+
+
+def _parse_changed_files(output: str) -> list[str]:
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def _parse_status_porcelain(output: str) -> list[str]:
+    files: list[str] = []
+    for raw in output.splitlines():
+        line = raw.rstrip()
+        if len(line) < 4:
+            continue
+        # porcelain v1 format: XY<space>PATH (or PATH1 -> PATH2 for renames)
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip()
+        if path:
+            files.append(path)
+    return files
+
+
+def _resolve_changed_files(repo: Path) -> tuple[list[str], str, list[str]]:
+    """Resolve changed files for docs-update gating with CI-safe fallbacks."""
+    notes: list[str] = []
+
+    # Pre-commit / local staged changes.
+    staged = _run_git(repo, "diff", "--cached", "--name-only")
+    if staged.returncode == 0:
+        files = _parse_changed_files(staged.stdout)
+        if files:
+            return files, "staged", notes
+    else:
+        notes.append(f"staged diff failed: {staged.stderr.strip() or staged.stdout.strip()}")
+
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip().lower()
+    base_ref = os.environ.get("GITHUB_BASE_REF", "").strip()
+    before_sha = os.environ.get("GITHUB_EVENT_BEFORE", "").strip()
+    is_ci = os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true"
+
+    # Pull requests: compare from merge-base with origin/<base>.
+    if base_ref:
+        base_name = f"origin/{base_ref}"
+        base_check = _run_git(repo, "rev-parse", "--verify", base_name)
+        if base_check.returncode == 0:
+            merge_base = _run_git(repo, "merge-base", "HEAD", base_name)
+            if merge_base.returncode == 0:
+                mb = merge_base.stdout.strip()
+                if mb:
+                    diff = _run_git(repo, "diff", "--name-only", f"{mb}..HEAD")
+                    if diff.returncode == 0:
+                        files = _parse_changed_files(diff.stdout)
+                        if files:
+                            return files, f"merge-base:{base_name}", notes
+                        notes.append(f"merge-base diff empty ({base_name})")
+                    else:
+                        notes.append(
+                            f"merge-base diff failed ({base_name}): {diff.stderr.strip() or diff.stdout.strip()}"
+                        )
+                else:
+                    notes.append(f"merge-base empty for {base_name}")
+            else:
+                notes.append(f"merge-base failed for {base_name}: {merge_base.stderr.strip() or merge_base.stdout.strip()}")
+        else:
+            notes.append(f"base ref not found: {base_name}")
+
+    # Push events: compare against the previous SHA from event payload.
+    if before_sha and set(before_sha) != {"0"}:
+        before_check = _run_git(repo, "rev-parse", "--verify", before_sha)
+        if before_check.returncode == 0:
+            diff = _run_git(repo, "diff", "--name-only", f"{before_sha}..HEAD")
+            if diff.returncode == 0:
+                files = _parse_changed_files(diff.stdout)
+                if files:
+                    return files, f"push-before:{before_sha[:12]}", notes
+                notes.append(f"push-before diff empty ({before_sha[:12]})")
+            else:
+                notes.append(f"before-sha diff failed: {diff.stderr.strip() or diff.stdout.strip()}")
+        else:
+            notes.append(f"before sha not found: {before_sha[:12]}")
+
+    # Legacy fallback for local workflows.
+    for base in ("origin/master", "origin/main"):
+        base_check = _run_git(repo, "rev-parse", "--verify", base)
+        if base_check.returncode != 0:
+            continue
+        diff = _run_git(repo, "diff", "--name-only", f"{base}...HEAD")
+        if diff.returncode == 0:
+            files = _parse_changed_files(diff.stdout)
+            if files:
+                return files, f"triple-dot:{base}", notes
+            notes.append(f"triple-dot diff empty ({base})")
+        else:
+            notes.append(f"triple-dot diff failed ({base}): {diff.stderr.strip() or diff.stdout.strip()}")
+
+    # Working tree fallback.
+    wt = _run_git(repo, "diff", "--name-only")
+    if wt.returncode == 0:
+        files = _parse_changed_files(wt.stdout)
+        if files:
+            return files, "working-tree", notes
+    else:
+        notes.append(f"working-tree diff failed: {wt.stderr.strip() or wt.stdout.strip()}")
+
+    # Include untracked files for local/manual runs.
+    status = _run_git(repo, "status", "--porcelain")
+    if status.returncode == 0:
+        files = _parse_status_porcelain(status.stdout)
+        if files:
+            return files, "status-porcelain", notes
+    else:
+        notes.append(f"status porcelain failed: {status.stderr.strip() or status.stdout.strip()}")
+
+    # Final fallback: last commit delta (best effort for CI/local ad-hoc runs).
+    head_prev = _run_git(repo, "rev-parse", "--verify", "HEAD~1")
+    if head_prev.returncode == 0:
+        diff = _run_git(repo, "diff", "--name-only", "HEAD~1..HEAD")
+        if diff.returncode == 0:
+            files = _parse_changed_files(diff.stdout)
+            if files:
+                return files, "head-prev", notes
+            notes.append("HEAD~1 diff empty")
+        else:
+            notes.append(f"HEAD~1 diff failed: {diff.stderr.strip() or diff.stdout.strip()}")
+
+    # CI must never silently skip because base resolution failed.
+    if is_ci and event_name in ("pull_request", "push"):
+        return [], "ci-unresolved", notes
+    return [], "none", notes
+
+
+def _matches_path_prefix(path: str, prefixes: list[str]) -> bool:
+    return any(path == p or path.startswith(p) for p in prefixes)
+
+
+def check_docs_updated_for_code_changes(repo: Path) -> list[str]:
+    """
+    Check that if code paths are modified, docs are also modified.
+
+    This is a diff-based check for CI and pre-commit workflows.
+    """
+    errors = []
+
+    # Paths that require doc updates when changed.
+    code_path_prefixes = [
+        "audioknob_gui/worker/",
+        "audioknob_gui/gui/",
+        "audioknob_gui/platform/",
+        "config/registry.json",
+        "config/registry.schema.json",
+        "pyproject.toml",
+        "bin/",
+        "packaging/",
+        "scripts/check_repo_consistency.py",
+        "scripts/run_quality_gate.py",
+    ]
+
+    doc_paths = {"PLAN.md", "PROJECT_STATE.md"}
+
+    changed_files, source, notes = _resolve_changed_files(repo)
+    if source == "ci-unresolved":
+        detail = "; ".join(notes) if notes else "no diff base could be resolved"
         errors.append(
-            "Code changes detected without doc updates.\n"
-            "  Modified code paths require PLAN.md or PROJECT_STATE.md to also be updated.\n"
-            "  If this is a pure refactor with no behavior change, add 'docs-not-needed:' to commit message."
+            "Unable to determine changed files in CI; refusing to skip docs-update gate.\n"
+            f"  Diagnostics: {detail}"
         )
-    
+        return errors
+
+    if not changed_files:
+        return []
+
+    code_touched = any(_matches_path_prefix(path, code_path_prefixes) for path in changed_files)
+    if not code_touched:
+        return []
+
+    doc_touched = any(path in doc_paths for path in changed_files)
+    if doc_touched:
+        return []
+
+    result = _run_git(repo, "log", "-1", "--format=%B")
+    commit_msg = (result.stdout or "").lower()
+    if "docs-not-needed:" in commit_msg:
+        return []
+
+    extra = f"\n  Diff source: {source}" if source not in ("none", "") else ""
+    errors.append(
+        "Code changes detected without doc updates.\n"
+        "  Modified code paths require PLAN.md or PROJECT_STATE.md to also be updated.\n"
+        "  If this is a pure refactor with no behavior change, add 'docs-not-needed:' to commit message."
+        + extra
+    )
+    return errors
+
+
+def _literal_sequence_starts_with_pkexec(node: ast.AST) -> bool:
+    if not isinstance(node, (ast.List, ast.Tuple)) or not node.elts:
+        return False
+    first = node.elts[0]
+    return isinstance(first, ast.Constant) and first.value == "pkexec"
+
+
+def _collect_pkexec_sequence_names(tree: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        value: ast.AST | None = None
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            value = node.value
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            value = node.value
+            targets = [node.target]
+        if value is None or not _literal_sequence_starts_with_pkexec(value):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+    return names
+
+
+def _iter_subprocess_run_calls(tree: ast.AST) -> list[ast.Call]:
+    calls: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if not isinstance(fn, ast.Attribute):
+            continue
+        if fn.attr != "run":
+            continue
+        if not isinstance(fn.value, ast.Name) or fn.value.id != "subprocess":
+            continue
+        calls.append(node)
+    return calls
+
+
+def _subprocess_run_args_node(call: ast.Call) -> ast.AST | None:
+    if call.args:
+        return call.args[0]
+    for kw in call.keywords:
+        if kw.arg == "args":
+            return kw.value
+    return None
+
+
+def check_privilege_model_guards(repo: Path) -> list[str]:
+    """Enforce privileged command guardrails in GUI code paths."""
+    errors: list[str] = []
+
+    gui_root = repo / "audioknob_gui" / "gui"
+    for path in sorted(gui_root.rglob("*.py")):
+        rel = path.relative_to(repo).as_posix()
+        if rel == "audioknob_gui/gui/worker_api.py":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"Failed reading {rel}: {exc}")
+            continue
+        try:
+            tree = ast.parse(text)
+        except Exception as exc:
+            errors.append(f"Failed parsing {rel}: {exc}")
+            continue
+
+        pkexec_names = _collect_pkexec_sequence_names(tree)
+        for call in _iter_subprocess_run_calls(tree):
+            args_node = _subprocess_run_args_node(call)
+            if args_node is None:
+                continue
+            is_pkexec = _literal_sequence_starts_with_pkexec(args_node) or (
+                isinstance(args_node, ast.Name) and args_node.id in pkexec_names
+            )
+            if not is_pkexec:
+                continue
+            line = getattr(call, "lineno", 1)
+            errors.append(
+                f"Direct pkexec subprocess.run outside worker_api: {rel}:{line}\n"
+                "  Route privileged GUI commands through worker_api helpers."
+            )
+
+    worker_api_path = repo / "audioknob_gui" / "gui" / "worker_api.py"
+    try:
+        worker_api_text = worker_api_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        errors.append(f"Failed reading audioknob_gui/gui/worker_api.py: {exc}")
+        return errors
+
+    if "/usr/libexec/audioknob-gui-worker" not in worker_api_text:
+        errors.append(
+            "worker_api must include fixed worker path /usr/libexec/audioknob-gui-worker"
+        )
+    legacy_paths = (
+        "/usr/local/libexec/audioknob-gui-worker",
+        "/usr/local/bin/audioknob-worker",
+        "/usr/bin/audioknob-worker",
+    )
+    for legacy in legacy_paths:
+        if legacy in worker_api_text:
+            errors.append(
+                f"Legacy worker fallback path detected in worker_api: {legacy}\n"
+                "  Root knob operations must use fixed worker wrapper path."
+            )
+
     return errors
 
 
@@ -380,6 +613,7 @@ def main() -> int:
         ("Docs exist", check_docs_exist),
         ("Docs sections", check_docs_sections),
         ("Semantic doc contracts", check_semantic_doc_contracts),
+        ("Privilege model guards", check_privilege_model_guards),
         ("Python compile", check_compile),
         ("Docs updated for code changes", check_docs_updated_for_code_changes),
     ]

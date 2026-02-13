@@ -38,6 +38,7 @@
 - **Status tooltips** - Status column remains operational-only (applied/not_applied/partial/etc.).
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
+- **Privileged execution hardening** - root knob/system operations use only `/usr/libexec/audioknob-gui-worker`; direct GUI pkexec maintenance commands are centralized in `worker_api` and allowlisted.
 - **Factory Preset (Reset All)** - reverts all changes to system defaults (leave no trace)
 - **Reference preset capture** - first-run pkexec scan stores initial system state in `state.json` as the Reference Preset.
 - **Factory preset auto-capture** - first-run reference scan also captures Factory Preset if none exists.
@@ -202,6 +203,7 @@ Next phases (planned, incremental):
 - QjackCtl RT blocks apply while QjackCtl is running to avoid config overwrite; RT Limits shows a reboot/log-out prompt when session limits are inactive.
 - Kernel cmdline apply warns when bootloader update fails and instructs manual update/reboot.
 - Kernel cmdline apply can prompt to run the bootloader update command via pkexec.
+- Unknown-distro BLS fallback no longer uses a synthetic `echo` update command; apply/reset now surface explicit manual bootloader follow-up steps.
 - Reboot-required knobs are gated behind `Tools -> Locks -> Reboot-required changes`; group-required knobs stay locked while group changes are pending reboot.
 - Reboot-required toggle preserves scroll position instead of jumping the table.
 - Table refreshes now preserve scroll position (config changes no longer jump the view).
@@ -567,7 +569,9 @@ Required:
   - Enforces `PROJECT_STATE.md` release version matches `pyproject.toml`
   - Enforces `PROJECT_STATE.md` knob-count claim matches `config/registry.json`
   - Enforces status vocabulary contract (`PLAN.md` operational labels + table status mapping keys)
+  - Enforces privileged command guardrails (direct GUI `pkexec` subprocess calls are blocked outside `worker_api`; fixed worker path contract is enforced)
 - `python3 -m compileall -q audioknob_gui`
+- `python3 scripts/run_quality_gate.py --gate g2 --tests <targeted test selectors>` for parity/system changes
 
 Planned / required next:
 - `pytest` unit tests for core logic (registry parsing, config generation, token checks, transaction logic)
@@ -700,7 +704,7 @@ A single GUI that:
 | **Status visibility** | User must always see current state. No guessing. If applied, show ✓. If not, show —. |
 | **One button per action** | Simpler than dropdowns. User sees status, clicks Apply or Reset. No cognitive load. |
 | **Distro-aware** | Linux is fragmented. PipeWire vs JACK, systemd-boot vs GRUB, rpm vs deb. Detect and adapt. |
-| **Privilege separation** | Root operations MUST go through pkexec (not sudo). Polkit integrates with desktop auth. |
+| **Privilege separation** | Root knob/system operations MUST go through pkexec + fixed worker wrapper `/usr/libexec/audioknob-gui-worker`; direct GUI pkexec is limited to explicit allowlisted maintenance actions. |
 | **Fail-safe defaults** | If we can't determine status, show "—" not "Applied". Conservative is safer. |
 
 ---
@@ -796,6 +800,7 @@ audioknob-gui/
 - Worker (trusted, can run as root) → validates all inputs
 - Worker is installed to /usr/libexec/ (not in user's PATH)
 - Polkit policy explicitly allows this specific binary
+- Direct GUI pkexec commands are constrained to an explicit allowlist in `audioknob_gui/gui/worker_api.py` (group membership, package install, bootloader follow-up, reboot, root-log clear).
 
 **Development vs Production:**
 - Development: set `AUDIOKNOB_DEV_REPO=/path/to/repo` environment variable
@@ -1976,5 +1981,5 @@ The registry exists in two locations:
 
 ---
 
-*Last updated: 2026-02-11*
+*Last updated: 2026-02-13*
 *This document is the technical source of truth. Any AI continuing this project must read and follow it.*

@@ -54,7 +54,8 @@ sudo zypper remove -y audioknob-gui
 
 Notes:
 - This installs the GUI launcher `audioknob-gui` and the worker `audioknob-worker`.
-- Root operations use polkit + a fixed-path worker wrapper at `/usr/libexec/audioknob-gui-worker`.
+- Root knob/system operations use polkit + fixed-path worker wrapper at `/usr/libexec/audioknob-gui-worker`.
+- A small set of explicit GUI maintenance actions (group membership, package install, bootloader follow-up, reboot, root-log clear) use allowlisted direct pkexec commands via `audioknob_gui/gui/worker_api.py`.
 
 ### Install on Debian/Ubuntu (DEB)
 
@@ -637,6 +638,7 @@ diff config/registry.schema.json audioknob_gui/data/registry.schema.json || echo
 4. **One click actions** - No dropdowns, queue + apply is explicit and user-driven
 5. **Lock until ready** - Missing groups? 🔒. Missing packages? 📦 Install.
 6. **Docs match code** - `PROJECT_STATE.md` and `PLAN.md` are first-class deliverables
+7. **Privileged channels are explicit** - knob/system changes run through the worker wrapper; GUI maintenance pkexec commands are allowlisted and user-initiated.
 
 ---
 
@@ -664,6 +666,7 @@ python3 -m pip install -e .[dev]
 
 ```bash
 python3 scripts/check_repo_consistency.py
+python3 scripts/run_quality_gate.py --gate g2 --tests tests/test_<touched_area>.py
 python3 -m audioknob_gui.worker.cli status
 python3 -m audioknob_gui.worker.cli preview pipewire_quantum pipewire_sample_rate
 ```
@@ -726,4 +729,4 @@ See `audioknob_gui/testing/rtcheck.py`
 
 ---
 
-*Last updated: 2025-12-20*
+*Last updated: 2026-02-13*

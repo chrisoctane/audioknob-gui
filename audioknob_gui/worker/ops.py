@@ -352,7 +352,8 @@ def detect_distro() -> DistroInfo:
             distro_id=distro_id,
             boot_system="bls",
             kernel_cmdline_file="/etc/kernel/cmdline",
-            kernel_cmdline_update_cmd=["echo", "Manual bootloader update required"],
+            # Unknown-distro BLS fallback: require explicit manual follow-up from CLI/UI.
+            kernel_cmdline_update_cmd=[],
         )
     
     if Path("/etc/default/grub").exists():

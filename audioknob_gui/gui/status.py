@@ -16,10 +16,10 @@ from audioknob_gui.gui.state import save_state
 from audioknob_gui.gui.system_info import _param_present
 from audioknob_gui.gui.worker_api import (
     _PKEXEC_CANCELLED,
-    _is_pkexec_cancel,
-    _pick_root_worker_path,
     _pkexec_available,
     _registry_path,
+    _run_worker_status_pkexec,
+    _run_worker_status_user,
 )
 
 
@@ -584,33 +584,16 @@ def start_baseline_scan(
     set_baseline_buttons_enabled(ui, False)
 
     def _task() -> tuple[bool, object, str]:
-        argv = [
-            sys.executable,
-            "-m",
-            "audioknob_gui.worker.cli",
-            "--registry",
-            _registry_path(),
-            "status",
-        ]
-        if _pkexec_available():
-            worker = _pick_root_worker_path()
-            argv = ["pkexec", worker, "--registry", _registry_path(), "status"]
         try:
-            p = subprocess.run(argv, text=True, capture_output=True)
+            if _pkexec_available():
+                payload = _run_worker_status_pkexec()
+            else:
+                payload = _run_worker_status_user()
         except Exception as e:
-            return False, {}, str(e)
-        if not p.stdout.strip():
-            err = p.stderr.strip() or f"{REFERENCE_PRESET_LABEL} scan failed"
-            if _is_pkexec_cancel(err):
+            msg = str(e) or f"{REFERENCE_PRESET_LABEL} scan failed"
+            if msg == _PKEXEC_CANCELLED:
                 return False, {}, _PKEXEC_CANCELLED
-            return False, {}, err
-        try:
-            payload = json.loads(p.stdout)
-        except Exception:
-            err = p.stderr.strip() or p.stdout.strip() or f"{REFERENCE_PRESET_LABEL} parse failed"
-            if _is_pkexec_cancel(err):
-                return False, {}, _PKEXEC_CANCELLED
-            return False, {}, err
+            return False, {}, msg
         status_map: dict[str, str] = {}
         for item in payload.get("statuses", []):
             if isinstance(item, dict) and item.get("knob_id"):

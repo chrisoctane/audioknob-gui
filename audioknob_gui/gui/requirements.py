@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from audioknob_gui.gui.actions import QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger, _log_gui_audit
+from audioknob_gui.gui.worker_api import _PKEXEC_CANCELLED, _run_pkexec_command_capture
 
 
 def refresh_user_groups(ui) -> None:
@@ -140,12 +141,12 @@ def on_join_groups(ui) -> None:
 
         for group in groups_to_add:
             try:
-                cmd = ["pkexec", usermod, "-aG", group, user]
-                p = subprocess.run(cmd, capture_output=True, text=True)
+                cmd = [usermod, "-aG", group, user]
+                p = _run_pkexec_command_capture(cmd, timeout=30)
                 results.append(
                     {
                         "group": group,
-                        "cmd": cmd,
+                        "cmd": ["pkexec", *cmd],
                         "returncode": p.returncode,
                         "stdout": p.stdout,
                         "stderr": p.stderr,
@@ -157,6 +158,9 @@ def on_join_groups(ui) -> None:
                     errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
             except Exception as e:
                 results.append({"group": group, "error": str(e)})
+                if str(e) == _PKEXEC_CANCELLED:
+                    errors.append(f"{group}: Authentication cancelled")
+                    break
                 errors.append(f"{group}: {e}")
 
         payload = {
@@ -264,12 +268,12 @@ def on_leave_groups(ui) -> None:
         if gpasswd:
             for group in groups_to_remove:
                 try:
-                    cmd = ["pkexec", gpasswd, "-d", user, group]
-                    p = subprocess.run(cmd, capture_output=True, text=True)
+                    cmd = [gpasswd, "-d", user, group]
+                    p = _run_pkexec_command_capture(cmd, timeout=30)
                     results.append(
                         {
                             "group": group,
-                            "cmd": cmd,
+                            "cmd": ["pkexec", *cmd],
                             "returncode": p.returncode,
                             "stdout": p.stdout,
                             "stderr": p.stderr,
@@ -281,6 +285,9 @@ def on_leave_groups(ui) -> None:
                         errors.append(f"{group}: {p.stderr.strip() or 'Failed'}")
                 except Exception as e:
                     results.append({"group": group, "error": str(e)})
+                    if str(e) == _PKEXEC_CANCELLED:
+                        errors.append(f"{group}: Authentication cancelled")
+                        break
                     errors.append(f"{group}: {e}")
         else:
             try:
@@ -293,12 +300,12 @@ def on_leave_groups(ui) -> None:
                         pass
                 keep_groups = [g for g in keep_groups if g not in groups_to_remove]
                 group_list = ",".join(sorted(set(keep_groups)))
-                cmd = ["pkexec", usermod, "-G", group_list, user]
-                p = subprocess.run(cmd, capture_output=True, text=True)
+                cmd = [usermod, "-G", group_list, user]
+                p = _run_pkexec_command_capture(cmd, timeout=30)
                 results.append(
                     {
                         "groups": groups_to_remove,
-                        "cmd": cmd,
+                        "cmd": ["pkexec", *cmd],
                         "returncode": p.returncode,
                         "stdout": p.stdout,
                         "stderr": p.stderr,
@@ -310,7 +317,10 @@ def on_leave_groups(ui) -> None:
                     errors.append(p.stderr.strip() or "Failed to update groups")
             except Exception as e:
                 results.append({"groups": groups_to_remove, "error": str(e)})
-                errors.append(str(e))
+                if str(e) == _PKEXEC_CANCELLED:
+                    errors.append("Authentication cancelled")
+                else:
+                    errors.append(str(e))
 
         payload = {
             "user": user,
@@ -430,13 +440,13 @@ def on_install_packages(ui, commands: list[str]) -> None:
 
         if manager == PackageManager.RPM:
             if shutil.which("zypper"):
-                cmd = ["pkexec", "zypper", "--non-interactive", "install", *packages]
+                cmd = ["zypper", "--non-interactive", "install", *packages]
             else:
-                cmd = ["pkexec", "dnf", "install", "-y", *packages]
+                cmd = ["dnf", "install", "-y", *packages]
         elif manager == PackageManager.DPKG:
-            cmd = ["pkexec", "apt-get", "install", "-y", *packages]
+            cmd = ["apt-get", "install", "-y", *packages]
         elif manager == PackageManager.PACMAN:
-            cmd = ["pkexec", "pacman", "-S", "--noconfirm", *packages]
+            cmd = ["pacman", "-S", "--noconfirm", *packages]
         else:
             QMessageBox.warning(ui, "Error", "Unknown package manager")
             _log_gui_audit(
@@ -452,18 +462,26 @@ def on_install_packages(ui, commands: list[str]) -> None:
         def _run_install(*, retry: bool) -> None:
             def _task() -> tuple[bool, object, str]:
                 try:
-                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    p = _run_pkexec_command_capture(cmd, timeout=300)
                 except subprocess.TimeoutExpired:
                     return False, {
-                        "cmd": cmd,
+                        "cmd": ["pkexec", *cmd],
                         "returncode": -1,
                         "stdout": "",
                         "stderr": "timeout",
                         "retry": retry,
                         "timeout": True,
                     }, "timeout"
+                except Exception as exc:
+                    return False, {
+                        "cmd": ["pkexec", *cmd],
+                        "returncode": -1,
+                        "stdout": "",
+                        "stderr": str(exc),
+                        "retry": retry,
+                    }, str(exc)
                 return p.returncode == 0, {
-                    "cmd": cmd,
+                    "cmd": ["pkexec", *cmd],
                     "returncode": p.returncode,
                     "stdout": p.stdout,
                     "stderr": p.stderr,
@@ -482,6 +500,20 @@ def on_install_packages(ui, commands: list[str]) -> None:
                 stdout = (payload.get("stdout") or "").strip()
                 rc = payload.get("returncode")
                 retry_flag = bool(payload.get("retry"))
+
+                if stderr == _PKEXEC_CANCELLED:
+                    _log_gui_audit(
+                        "install-packages",
+                        {
+                            "commands": commands,
+                            "packages": packages,
+                            "cmd": cmd,
+                            "status": "cancelled",
+                            "retry": retry_flag,
+                        },
+                    )
+                    ui._install_busy = False
+                    return
 
                 if success:
                     if any(cmd_name in ("qjackctl", "qjackctl6") for cmd_name in commands):
@@ -565,16 +597,16 @@ def on_install_packages(ui, commands: list[str]) -> None:
                         def _repo_task() -> tuple[bool, object, str]:
                             repo_errors = []
                             for name, url in repo_defs:
-                                add_cmd = ["pkexec", "zypper", "ar", "-f", "-n", name, url, name]
-                                r = subprocess.run(add_cmd, capture_output=True, text=True, timeout=120)
+                                add_cmd = ["zypper", "ar", "-f", "-n", name, url, name]
+                                r = _run_pkexec_command_capture(add_cmd, timeout=120)
                                 if r.returncode != 0:
                                     msg = (r.stderr.strip() or r.stdout.strip())
                                     if "already exists" not in msg.lower():
                                         repo_errors.append(f"{name}: {msg or 'failed'}")
 
                             if not repo_errors:
-                                refresh_cmd = ["pkexec", "zypper", "--gpg-auto-import-keys", "refresh"]
-                                r = subprocess.run(refresh_cmd, capture_output=True, text=True, timeout=300)
+                                refresh_cmd = ["zypper", "--gpg-auto-import-keys", "refresh"]
+                                r = _run_pkexec_command_capture(refresh_cmd, timeout=300)
                                 if r.returncode != 0:
                                     repo_errors.append(r.stderr.strip() or r.stdout.strip() or "refresh failed")
 
@@ -586,6 +618,9 @@ def on_install_packages(ui, commands: list[str]) -> None:
 
                         def _on_repo_done(success: bool, payload: object, message: str) -> None:
                             if not success or not isinstance(payload, dict):
+                                if message == _PKEXEC_CANCELLED:
+                                    ui._install_busy = False
+                                    return
                                 ui._install_busy = False
                                 QMessageBox.critical(ui, "Repo Add Failed", message or "Repo add failed")
                                 return

@@ -1736,7 +1736,7 @@ class MainWindow(TableMixin, QMainWindow):
 
             if root_worker_log.exists():
                 try:
-                    _run_pkexec_command(["/bin/sh", "-c", f": > {root_worker_log}"])
+                    _run_pkexec_command(["truncate", "--size", "0", str(root_worker_log)])
                     cleared.append(str(root_worker_log))
                 except Exception as exc:
                     errors.append(f"{root_worker_log}: {exc}")

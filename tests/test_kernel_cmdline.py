@@ -107,3 +107,25 @@ def test_check_knob_status_bare_key_matches_key_value(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(Path, "read_text", fake_read_text)
 
     assert ops.check_knob_status(knob) == "applied"
+
+
+def test_detect_distro_unknown_bls_requires_manual_followup(monkeypatch) -> None:
+    from audioknob_gui.platform import packages
+    from audioknob_gui.worker import ops
+
+    monkeypatch.setattr(
+        ops,
+        "read_os_release",
+        lambda: {"ID": "example", "VERSION_ID": "1"},
+    )
+    monkeypatch.setattr(packages, "which_command", lambda _cmd: None)
+
+    def fake_exists(self: Path) -> bool:
+        return str(self) == "/etc/kernel/cmdline"
+
+    monkeypatch.setattr(ops.Path, "exists", fake_exists, raising=False)
+
+    distro = ops.detect_distro()
+    assert distro.boot_system == "bls"
+    assert distro.kernel_cmdline_file == "/etc/kernel/cmdline"
+    assert distro.kernel_cmdline_update_cmd == []
