@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from copy import deepcopy
 
@@ -27,6 +27,10 @@ REFERENCE_PRESET_LABEL = "Reference Preset"
 FACTORY_PRESET_LABEL = "Factory Preset"
 REFERENCE_PRESET_DOT_COLOR = "#4a90e2"
 FACTORY_PRESET_DOT_COLOR = "#2fbf71"
+
+
+def _utc_now_iso_z() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _status_for_preset_compare(value: object) -> str | None:
@@ -129,7 +133,7 @@ def _baseline_snapshot_payload(
     from audioknob_gui import __version__
 
     if not isinstance(captured_at, str) or not captured_at:
-        captured_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        captured_at = _utc_now_iso_z()
     profile = ui.state.get("system_profile")
     profile_payload = deepcopy(profile) if isinstance(profile, dict) else None
     return {
@@ -140,7 +144,7 @@ def _baseline_snapshot_payload(
         "baseline_source": source,
         "baseline_config": dict(config or {}),
         "system_profile": profile_payload,
-        "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "exported_at": _utc_now_iso_z(),
         "app_version": __version__,
     }
 
@@ -255,7 +259,7 @@ def set_baseline_state(
     if not cleaned:
         return
     if not isinstance(captured_at, str) or not captured_at:
-        captured_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        captured_at = _utc_now_iso_z()
     ui.state["baseline_statuses"] = cleaned
     ui.state["baseline_captured_at"] = captured_at
     ui.state["baseline_txid_user"] = ui.state.get("last_user_txid")
@@ -328,7 +332,7 @@ def set_factory_state(
     if isinstance(captured_at, str) and captured_at:
         factory_captured_at = captured_at
     else:
-        factory_captured_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        factory_captured_at = _utc_now_iso_z()
     ui.state["factory_captured_at"] = factory_captured_at
     ui.state["factory_source"] = source if isinstance(source, str) and source else "capture"
     if source == "import":
@@ -357,7 +361,7 @@ def baseline_snapshot(ui) -> dict[str, object]:
         "baseline_source": ui.state.get("baseline_source", "initial"),
         "baseline_config": dict(ui.state.get("baseline_config") or {}),
         "system_profile": profile_payload,
-        "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "exported_at": _utc_now_iso_z(),
         "app_version": __version__,
     }
 
@@ -377,7 +381,7 @@ def factory_snapshot(ui) -> dict[str, object]:
         "factory_source": ui.state.get("factory_source"),
         "factory_config": dict(ui.state.get("factory_config") or {}),
         "system_profile": profile_payload,
-        "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "exported_at": _utc_now_iso_z(),
         "app_version": __version__,
     }
 
@@ -646,7 +650,7 @@ def ensure_baseline_state(ui) -> None:
         return
 
     def _on_success(statuses: dict[str, str]) -> None:
-        now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        now = _utc_now_iso_z()
         set_baseline_state(ui, statuses, source="initial", captured_at=now)
         if not factory_available(ui):
             config = _extract_baseline_config(ui)
