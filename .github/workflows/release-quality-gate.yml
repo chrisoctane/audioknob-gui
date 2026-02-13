@@ -1,31 +1,30 @@
-name: Consistency Check
+name: Release Quality Gate
 
 on:
   push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
+    tags:
+      - "v*"
 
 jobs:
-  check:
+  release-gate:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Need full history for diff against base
-      
+          fetch-depth: 0
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      
+          python-version: "3.11"
+
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install pytest
           python3 -m pip install -e .
-      
-      - name: Run CI quality gate (G1 + G2)
-        run: python3 scripts/run_quality_gate.py --gate ci
+
+      - name: Run release quality gate (G3)
+        run: python3 scripts/run_quality_gate.py --gate g3 --release-version "${GITHUB_REF_NAME}"

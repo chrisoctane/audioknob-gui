@@ -13,10 +13,12 @@ It is for agent control only and does not change public docs.
 - `AGENTS.md` (this file) — authoritative workflow rules.
 - `PLAN.md` when touching UX/user workflows.
 - `PROJECT_STATE.md` when touching behavior/architecture or release processes.
+- `docs/internal/audit/QUALITY_GATE.md` when planning or executing implementation, parity, or release work.
 - `docs/KNOB_INTERACTIONS.md` before any IRQ/kernel/RT/power/CPU isolation changes.
 - `docs/knobs.md` before adding or implementing new knobs.
 - `docs/KNOB_SYSTEM_AUDIT_MAP.md` when planning or executing parity/code audits.
 - `CHANGELOG.md` for release work (must be updated per release).
+- `docs/internal/audit/releases/README.md` for release work (checklist artifact contract).
 - `docs/internal/archive/overseer.md` only when acting in an overseer/audit role.
 
 If any doc is stale or conflicts with code, update it before proceeding.
@@ -76,8 +78,21 @@ management, or CPU isolation:
 - Consistency gate passes:
   - `python3 scripts/check_repo_consistency.py`
   - `python3 -m compileall -q audioknob_gui`
+- Applicable quality gate level(s) from `docs/internal/audit/QUALITY_GATE.md` are satisfied.
 - Docs updated when required (per rules above).
 - No unaddressed TODOs or debug prints left in code.
+
+## Quality gate enforcement (mandatory)
+- Apply gate levels from `docs/internal/audit/QUALITY_GATE.md`:
+  - `G1` for any change.
+  - `G2` when touching knob/system parity behavior.
+  - `G3` for releases/tags/build uploads.
+- Targeted pytest is required for touched behavior; full pytest is required for release work.
+- Final response must include the executed gate commands and pass/fail outcomes.
+- Do not mark work complete if any required gate is failing or skipped without explicit user waiver.
+- Release work must include a checklist artifact at:
+  - `docs/internal/audit/releases/v<version>/CHECKLIST.md`
+  - with `Release version: <version>` and `Final status: PASS`.
 
 ## Stop conditions (ask the user before proceeding)
 - Missing or unreadable referenced files.
