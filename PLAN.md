@@ -84,7 +84,7 @@ sudo apt-get remove -y audioknob-gui
 pip install pre-commit && pre-commit install
 ```
 
-This runs `scripts/check_repo_consistency.py` before each commit to catch registry/doc drift, verify release-version/knob-count/status-label contracts, and require `docs/KNOB_INTERACTIONS.md` updates when conflict/knob behavior paths change.
+This runs `scripts/check_repo_consistency.py` before each commit to catch registry/doc drift, verify release-version/knob-count/status-label contracts (including `pyproject.toml`/`audioknob_gui.__version__`/`PROJECT_STATE.md` sync), and require `docs/KNOB_INTERACTIONS.md` updates when conflict/knob behavior paths change.
 
 ### Run the worker CLI directly (debugging)
 
@@ -124,7 +124,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 
 ### Current simple inclusion set
 
-- `audio_group_membership` (special-case immediate Join/Leave prerequisite; not a worker queue/apply kind)
+- `audio_group_membership` (special-case immediate Join/Leave prerequisite; visible in simple mode but not sent through worker queue apply/reset)
 - `inotify_max_watches`
 - `swappiness`
 - `dirty_bytes`
@@ -149,7 +149,11 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - **Expert IRQ/core isolation knobs are excluded** from dial control.
 - `disable_tracker` and `disable_baloo` are excluded from simple mode due non-audio desktop usability impact.
 - Simple mode auto-queues dependency bundles (for example RT setup also queues its required RT limits/module pieces).
+- Simple mode normalizes queue actions before apply: non-queue kinds (for example `group_membership`) are removed and already-active knobs are skipped to avoid duplicate apply attempts.
+- Simple-mode queue preview still shows filtered apply/reset items in the list, dimmed with reason labels (for example `manual action`, `already active`, `set outside AudioKnob`) so intent remains visible.
+- At dial level `0`, the reset preview lists all simple knobs and explains non-reset entries (for example `manual action` or `already off`) so turn-down intent is explicit.
 - If a knob was applied by AudioKnob, the same knob row in Full mode is locked as **Managed by AudioKnob** to prevent mixed-workflow edits.
+- If a simple queue contains knobs that require audio groups, Apply first enforces the same group prerequisite flow as Full mode (Join action first, then reboot/logout-login if pending).
 - Full mode can release these locks only via **Tools → Locks → Release AudioKnob Locks**.
 - Dial movement never auto-applies.
 - Dial up composes apply actions; dial down composes reset actions for AudioKnob-managed knobs that are no longer in scope.

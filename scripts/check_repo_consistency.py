@@ -125,6 +125,15 @@ def _read_project_state_release_version(repo: Path) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def _read_package_init_version(repo: Path) -> str | None:
+    path = repo / "audioknob_gui" / "__init__.py"
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8")
+    m = re.search(r'^\s*__version__\s*=\s*"([^"]+)"\s*$', text, flags=re.MULTILINE)
+    return m.group(1).strip() if m else None
+
+
 def _read_registry_knob_count(repo: Path) -> int | None:
     path = repo / "config" / "registry.json"
     if not path.exists():
@@ -201,15 +210,30 @@ def check_semantic_doc_contracts(repo: Path) -> list[str]:
 
     pyproject_version = _read_pyproject_version(repo)
     project_state_version = _read_project_state_release_version(repo)
+    package_init_version = _read_package_init_version(repo)
     if not pyproject_version:
         errors.append("Cannot parse project version from pyproject.toml")
     if not project_state_version:
         errors.append("Cannot parse '**Release version**' from PROJECT_STATE.md")
+    if not package_init_version:
+        errors.append("Cannot parse package __version__ from audioknob_gui/__init__.py")
     if pyproject_version and project_state_version and pyproject_version != project_state_version:
         errors.append(
             "Release version mismatch:\n"
             f"  pyproject.toml: {pyproject_version}\n"
             f"  PROJECT_STATE.md: {project_state_version}"
+        )
+    if pyproject_version and package_init_version and pyproject_version != package_init_version:
+        errors.append(
+            "Package version mismatch:\n"
+            f"  pyproject.toml: {pyproject_version}\n"
+            f"  audioknob_gui/__init__.py: {package_init_version}"
+        )
+    if project_state_version and package_init_version and project_state_version != package_init_version:
+        errors.append(
+            "Release version mismatch:\n"
+            f"  PROJECT_STATE.md: {project_state_version}\n"
+            f"  audioknob_gui/__init__.py: {package_init_version}"
         )
 
     registry_knob_count = _read_registry_knob_count(repo)

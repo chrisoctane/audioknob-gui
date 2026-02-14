@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 MIN_LEVEL = 0
 MAX_LEVEL = 11
+NON_QUEUE_KNOB_IDS: frozenset[str] = frozenset({"audio_group_membership"})
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,7 @@ ORDERED_QUEUE_KNOBS: tuple[str, ...] = (
 )
 
 SIMPLE_MANAGED_KNOB_IDS = frozenset(
-    set(ORDERED_QUEUE_KNOBS)
+    (set(ORDERED_QUEUE_KNOBS) - set(NON_QUEUE_KNOB_IDS))
     | {
         # Concept knob row that mirrors bundle status in full view.
         "pipewire_rt_setup",
@@ -136,6 +137,27 @@ def compose_queue_actions(
         if kid in managed and kid not in actions:
             actions[kid] = "reset"
     return actions
+
+
+def normalize_queue_actions(
+    actions: dict[str, str],
+    *,
+    non_queue_knob_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    skip_apply_knob_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> dict[str, str]:
+    """Drop non-queue kinds and already-applied apply actions."""
+    non_queue = {str(kid) for kid in (non_queue_knob_ids or ())}
+    skip_apply = {str(kid) for kid in (skip_apply_knob_ids or ())}
+    out: dict[str, str] = {}
+    for kid, action in actions.items():
+        if action not in ("apply", "reset"):
+            continue
+        if kid in non_queue:
+            continue
+        if action == "apply" and kid in skip_apply:
+            continue
+        out[kid] = action
+    return out
 
 
 def apply_fixed_presets(state: dict, *, level: int) -> None:

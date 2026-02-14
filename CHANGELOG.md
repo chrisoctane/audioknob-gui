@@ -4,6 +4,23 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.4] - 2026-02-14
+
+### Added
+- Release-gate version drift enforcement across `pyproject.toml`, `audioknob_gui/__init__.py`, and `PROJECT_STATE.md`.
+- Simple-mode queue preview now stays intent-complete for dial-up/down:
+  - dimmed reason labels for filtered apply rows (`already active`, `manual action`)
+  - level-0 reset preview shows all simple knobs, including non-reset rows with explanations (`set outside AudioKnob`, `already off`, `manual action`)
+
+### Changed
+- Simple apply preflight now removes non-queue kinds from worker payload and skips duplicate applies for already-active knobs, while preserving full preview visibility.
+- Simple/full mode transitions keep queue semantics stable (no spurious re-queue on view switch for already-active knobs).
+- App title git-revision detection now prefers `git rev-parse` and falls back to `.git` metadata/packed-refs parsing.
+
+### Fixed
+- `audio_group_membership` no longer triggers worker `Unsupported knob kind: group_membership` failures from simple apply paths.
+- App runtime version was aligned from `0.7.2` drift to release-tracked package versioning.
+
 ## [0.7.3] - 2026-02-14
 
 ### Added

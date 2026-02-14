@@ -1232,52 +1232,240 @@ class MainWindow(TableMixin, QMainWindow):
             self.simple_dial.blockSignals(False)
         self.state["simple_level"] = level
         simple_mode.apply_fixed_presets(self.state, level=level)
-        backend_is_tuned = self._power_profile_backend_is_tuned()
-        self._queued_actions = simple_mode.compose_queue_actions(
-            level,
-            backend_is_tuned=backend_is_tuned,
-            managed_knob_ids=self._simple_owned_knob_ids(),
+        queued_actions = self._simple_planned_actions(level)
+        self._queued_actions, dropped_non_queue, dropped_applied = self._normalize_simple_queue_actions(
+            queued_actions
         )
+        if dropped_non_queue or dropped_applied:
+            _get_gui_logger().info(
+                "simple queue normalized non_queue=%s already_applied=%s",
+                ",".join(dropped_non_queue) or "-",
+                ",".join(dropped_applied) or "-",
+            )
         self._save_queue()
         save_state(self.state)
         self._update_queue_ui()
         self._populate()
+
+    def _simple_planned_actions(self, level: int) -> dict[str, str]:
+        backend_is_tuned = self._power_profile_backend_is_tuned()
+        return simple_mode.compose_queue_actions(
+            level,
+            backend_is_tuned=backend_is_tuned,
+            managed_knob_ids=self._simple_owned_knob_ids(),
+        )
+
+    def _simple_non_queue_knob_ids(self) -> set[str]:
+        out: set[str] = set(simple_mode.NON_QUEUE_KNOB_IDS)
+        for knob in self.registry:
+            if knob.id not in simple_mode.ORDERED_QUEUE_KNOBS:
+                continue
+            kind = knob.impl.kind if knob.impl is not None else ""
+            if kind in ("group_membership", "read_only"):
+                out.add(knob.id)
+        return out
+
+    def _simple_skip_apply_knob_ids(self) -> set[str]:
+        skip: set[str] = set()
+        for knob in self.registry:
+            if knob.id not in simple_mode.ORDERED_QUEUE_KNOBS:
+                continue
+            status = self._knob_statuses.get(knob.id, "unknown")
+            if status in ("applied", "pending_reboot"):
+                skip.add(knob.id)
+        return skip
+
+    def _simple_excluded_apply_reasons(self, actions: dict[str, str]) -> dict[str, str]:
+        non_queue_knob_ids = self._simple_non_queue_knob_ids()
+        skip_apply_knob_ids = self._simple_skip_apply_knob_ids()
+        reasons: dict[str, str] = {}
+        for kid, action in actions.items():
+            if action != "apply":
+                continue
+            status = self._knob_statuses.get(kid, "unknown")
+            if kid in non_queue_knob_ids:
+                if status in ("applied", "pending_reboot"):
+                    reasons[kid] = "already active"
+                elif kid == "audio_group_membership":
+                    reasons[kid] = "manual action"
+                else:
+                    reasons[kid] = "not queued"
+                continue
+            if kid in skip_apply_knob_ids:
+                reasons[kid] = "already active"
+        return reasons
+
+    def _simple_excluded_reset_reasons(self, level: int, actions: dict[str, str]) -> dict[str, str]:
+        if level != 0:
+            return {}
+        reasons: dict[str, str] = {}
+        planned_reset = {kid for kid, action in actions.items() if action == "reset"}
+        for knob in self.registry:
+            kid = knob.id
+            if kid not in simple_mode.ORDERED_QUEUE_KNOBS:
+                continue
+            if kid in planned_reset:
+                continue
+            status = self._knob_statuses.get(kid, "unknown")
+            if kid in simple_mode.NON_QUEUE_KNOB_IDS:
+                reasons[kid] = "manual action"
+                continue
+            if status in ("applied", "pending_reboot", "partial"):
+                reasons[kid] = "set outside AudioKnob"
+            else:
+                reasons[kid] = "already off"
+        return reasons
+
+    def _normalize_simple_queue_actions(self, actions: dict[str, str]) -> tuple[dict[str, str], list[str], list[str]]:
+        non_queue_knob_ids = self._simple_non_queue_knob_ids()
+        skip_apply_knob_ids = self._simple_skip_apply_knob_ids()
+        normalized = simple_mode.normalize_queue_actions(
+            actions,
+            non_queue_knob_ids=non_queue_knob_ids,
+            skip_apply_knob_ids=skip_apply_knob_ids,
+        )
+        dropped_non_queue = sorted(
+            kid for kid in actions if kid in non_queue_knob_ids
+        )
+        dropped_applied = sorted(
+            kid
+            for kid, action in actions.items()
+            if action == "apply" and kid in skip_apply_knob_ids and kid not in non_queue_knob_ids
+        )
+        return normalized, dropped_non_queue, dropped_applied
+
+    def _simple_display_apply_ids(self, level: int) -> tuple[list[str], dict[str, str]]:
+        planned = self._simple_planned_actions(level)
+        excluded = self._simple_excluded_apply_reasons(planned)
+        ordered = [kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if planned.get(kid) == "apply"]
+        extras = [
+            kid
+            for kid, action in planned.items()
+            if action == "apply" and kid not in ordered
+        ]
+        ordered.extend(sorted(extras))
+        return ordered, excluded
+
+    def _simple_display_reset_ids(self, level: int) -> tuple[list[str], dict[str, str]]:
+        planned = self._simple_planned_actions(level)
+        excluded = self._simple_excluded_reset_reasons(level, planned)
+        ordered = [kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if planned.get(kid) == "reset"]
+        for kid in simple_mode.ORDERED_QUEUE_KNOBS:
+            if kid in excluded and kid not in ordered:
+                ordered.append(kid)
+        extras = [
+            kid
+            for kid, action in planned.items()
+            if action == "reset" and kid not in ordered
+        ]
+        ordered.extend(sorted(extras))
+        return ordered, excluded
+
+    def _simple_group_prereq_ready(self, queued: list[tuple[str, str]]) -> bool:
+        by_id = {k.id: k for k in self.registry}
+        apply_knobs = [
+            by_id[kid]
+            for kid, action in queued
+            if action == "apply" and kid in by_id and by_id[kid].requires_groups
+        ]
+        if not apply_knobs:
+            return True
+
+        group_status = self._knob_statuses.get("audio_group_membership", "unknown")
+        if group_status == "pending_reboot":
+            QMessageBox.information(
+                self,
+                "Groups Pending Reboot",
+                "Audio groups are configured but not active yet.\n\n"
+                "Log out/in or reboot, then apply this level again.",
+            )
+            return False
+
+        missing = [k for k in apply_knobs if not self._knob_group_ok(k)]
+        if not missing:
+            return True
+
+        titles = sorted({k.title for k in missing})
+        msg = (
+            "This level includes settings that require audio groups:\n\n"
+            + "\n".join(f"• {title}" for title in titles)
+            + "\n\nJoin audio groups now?"
+        )
+        if QMessageBox.question(
+            self,
+            "Join Audio Groups Required",
+            msg,
+            QMessageBox.Ok | QMessageBox.Cancel,
+        ) == QMessageBox.Ok:
+            self._on_join_groups()
+        return False
 
     def _refresh_simple_summary(
         self,
         level: int,
         apply_queue_ids: list[str],
         reset_queue_ids: list[str] | None = None,
+        *,
+        excluded_apply_reasons: dict[str, str] | None = None,
+        excluded_reset_reasons: dict[str, str] | None = None,
     ) -> None:
         by_id = {k.id: k.title for k in self.registry}
         reset_queue_ids = list(reset_queue_ids or [])
-        apply_titles = [by_id.get(kid, kid) for kid in apply_queue_ids]
-        reset_titles = [by_id.get(kid, kid) for kid in reset_queue_ids]
+        excluded_apply_reasons = dict(excluded_apply_reasons or {})
+        excluded_reset_reasons = dict(excluded_reset_reasons or {})
         if level == 0:
             self.simple_level_label.setText(f"Risk level: 0/{simple_mode.MAX_LEVEL} (Off)")
         else:
             self.simple_level_label.setText(f"Risk level: {level}/{simple_mode.MAX_LEVEL}")
-        apply_count = len(apply_queue_ids)
-        reset_count = len(reset_queue_ids)
+        skipped_apply_count = sum(1 for kid in apply_queue_ids if kid in excluded_apply_reasons)
+        skipped_reset_count = sum(1 for kid in reset_queue_ids if kid in excluded_reset_reasons)
+        apply_count = len(apply_queue_ids) - skipped_apply_count
+        reset_count = len(reset_queue_ids) - skipped_reset_count
         total = apply_count + reset_count
         if reset_count:
-            self.simple_summary_label.setText(
+            summary = (
                 f"Queued actions: {total} ({apply_count} apply, {reset_count} reset)"
             )
+            skipped_total = skipped_apply_count + skipped_reset_count
+            if skipped_total:
+                summary += f" • {skipped_total} skipped"
+            self.simple_summary_label.setText(summary)
         else:
-            self.simple_summary_label.setText(f"Queued apply knobs: {apply_count}")
-        if apply_titles or reset_titles:
+            summary = f"Queued apply knobs: {apply_count}"
+            skipped_total = skipped_apply_count + skipped_reset_count
+            if skipped_total:
+                summary += f" ({skipped_total} skipped)"
+            self.simple_summary_label.setText(summary)
+        if apply_queue_ids or reset_queue_ids:
             lines: list[str] = []
-            if apply_titles:
+            if apply_queue_ids:
                 lines.append("<b>Apply queue</b>")
-                for title in apply_titles:
-                    lines.append(f"• {html_lib.escape(title)}")
-            if reset_titles:
+                for kid in apply_queue_ids:
+                    title = by_id.get(kid, kid)
+                    reason = excluded_apply_reasons.get(kid, "")
+                    if reason:
+                        lines.append(
+                            "<span style='color: #8f8f8f;'>"
+                            f"• {html_lib.escape(title)} ({html_lib.escape(reason)})"
+                            "</span>"
+                        )
+                    else:
+                        lines.append(f"• {html_lib.escape(title)}")
+            if reset_queue_ids:
                 if lines:
                     lines.append("")
                 lines.append("<b>Reset queue</b>")
-                for title in reset_titles:
-                    lines.append(f"• {html_lib.escape(title)}")
+                for kid in reset_queue_ids:
+                    title = by_id.get(kid, kid)
+                    reason = excluded_reset_reasons.get(kid, "")
+                    if reason:
+                        lines.append(
+                            "<span style='color: #8f8f8f;'>"
+                            f"• {html_lib.escape(title)} ({html_lib.escape(reason)})"
+                            "</span>"
+                        )
+                    else:
+                        lines.append(f"• {html_lib.escape(title)}")
             self.simple_list_label.setText("<br>".join(lines))
         else:
             self.simple_list_label.setText("No settings queued.")
@@ -1348,13 +1536,16 @@ class MainWindow(TableMixin, QMainWindow):
         raw = self.state.get("simple_owned_knobs")
         if not isinstance(raw, list):
             return set()
-        return {str(x) for x in raw if isinstance(x, (str, int))}
+        allowed = set(simple_mode.SIMPLE_MANAGED_KNOB_IDS)
+        return {str(x) for x in raw if isinstance(x, (str, int)) and str(x) in allowed}
 
     def _set_simple_owned_knob_ids(self, knob_ids: set[str]) -> None:
-        self.state["simple_owned_knobs"] = sorted({str(x) for x in knob_ids})
+        allowed = set(simple_mode.SIMPLE_MANAGED_KNOB_IDS)
+        filtered = {str(x) for x in knob_ids if str(x) in allowed}
+        self.state["simple_owned_knobs"] = sorted(filtered)
         save_state(self.state)
         if hasattr(self, "act_release_simple_locks"):
-            self.act_release_simple_locks.setEnabled(bool(knob_ids))
+            self.act_release_simple_locks.setEnabled(bool(filtered))
 
     def _simple_owned_lock_reason(self, knob_id: str, status: str) -> str:
         if self._ui_mode != "full":
@@ -2323,9 +2514,15 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_apply_queue.setEnabled(enabled)
         self.btn_apply_queue_reboot.setEnabled(enabled and self._queue_requires_reboot())
         if self._ui_mode == "simple" and hasattr(self, "simple_list_label"):
-            ordered_apply = self._ordered_queue_ids_for_action("apply")
-            ordered_reset = self._ordered_queue_ids_for_action("reset")
-            self._refresh_simple_summary(self._current_simple_level(), ordered_apply, ordered_reset)
+            ordered_apply, excluded_apply_reasons = self._simple_display_apply_ids(self._current_simple_level())
+            ordered_reset, excluded_reset_reasons = self._simple_display_reset_ids(self._current_simple_level())
+            self._refresh_simple_summary(
+                self._current_simple_level(),
+                ordered_apply,
+                ordered_reset,
+                excluded_apply_reasons=excluded_apply_reasons,
+                excluded_reset_reasons=excluded_reset_reasons,
+            )
 
     def _apply_queue_button_state(
         self, btn: QPushButton, knob_id: str, action: str, *, row_dim: bool = False
@@ -3670,7 +3867,29 @@ class MainWindow(TableMixin, QMainWindow):
             and self._simple_level_commit_timer.isActive()
         ):
             self._commit_pending_simple_level()
+        if self._ui_mode == "simple":
+            normalized, dropped_non_queue, dropped_applied = self._normalize_simple_queue_actions(
+                self._queued_actions
+            )
+            if normalized != self._queued_actions:
+                self._queued_actions = normalized
+                self._save_queue()
+                self._update_queue_ui()
+                self._populate()
+            if dropped_non_queue or dropped_applied:
+                _get_gui_logger().info(
+                    "simple apply preflight normalized non_queue=%s already_applied=%s",
+                    ",".join(dropped_non_queue) or "-",
+                    ",".join(dropped_applied) or "-",
+                )
         if not self._queued_actions or self._queue_busy:
+            if self._ui_mode == "simple" and not self._queue_busy:
+                QMessageBox.information(
+                    self,
+                    "Nothing to Apply",
+                    "No new simple-mode changes need apply.\n\n"
+                    "Queued knobs were already active or are manual-only actions.",
+                )
             return False
         if self._busy_knobs:
             QMessageBox.information(
@@ -3682,6 +3901,8 @@ class MainWindow(TableMixin, QMainWindow):
         by_id = {k.id: k for k in self.registry}
         queued = [(kid, action) for kid, action in self._queued_actions.items() if kid in by_id]
         if not queued:
+            return False
+        if self._ui_mode == "simple" and not self._simple_group_prereq_ready(queued):
             return False
         conflicts = find_conflicts(self._queued_actions, self._knob_statuses, state=self.state)
         if conflicts and not self._power_profile_backend_is_tuned():

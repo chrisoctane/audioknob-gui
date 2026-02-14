@@ -9,13 +9,16 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.3
+- **Release version**: 0.7.4
 - **48 knobs defined** (ALL 48 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
 - **Group membership special-case contract** - `audio_group_membership` remains an immediate Join/Leave workflow (explicit confirmation), intentionally outside worker preview/apply/reset/force-reset transaction paths
 - **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible action queue (apply/reset)
+- **Simple queue normalization** - simple apply strips non-queue kinds (for example `group_membership`) and skips duplicate apply actions for knobs already active
+- **Simple queue preview visibility** - simple view keeps the full planned apply/reset intent visible and dims filtered entries with explicit reason labels (`manual action`, `already active`, `set outside AudioKnob`)
+- **Simple level-0 reset visibility** - off position preview includes all simple knobs and explains non-reset rows (`manual action`, `set outside AudioKnob`, `already off`)
 - **Simple mode title** - home view heading is `AudioKnob`
 - **Mode switch in header** - dedicated far-left `View` button switches between Simple and Full UI
 - **Simple ownership locks** - knobs applied from simple mode are locked in full view as `Managed by AudioKnob` until explicitly released from Tools
@@ -124,6 +127,7 @@ Notes:
 - Reboot-required banner appears below the header row (wraps to avoid widening the window).
 - Category headers, separators, and the empty table background use the same dark gray as the main window header; knob rows use a lighter gray so each group floats on the backdrop.
 - Main window title includes app version and git short SHA when available.
+- App version source of truth is `audioknob_gui.__version__`, and release gates enforce sync with `pyproject.toml` and `PROJECT_STATE.md`.
 ```
 
 ### Module Map (GUI refactor plan)
@@ -276,6 +280,15 @@ Implemented pieces are reflected in "What Works"; remaining items below stay pla
   - conflict prompts
   - root/user split apply
   - transaction/audit logging
+- Simple apply preflight normalizes queue actions before worker execution:
+  - drop non-queue kinds (`group_membership`, `read_only`)
+  - skip apply actions for knobs already in `applied`/`pending_reboot` unless owned by simple mode
+  - if group-required knobs are queued and audio groups are missing, trigger the same Join Audio Groups workflow used in Full mode
+- Simple queue summary remains intent-first:
+  - show planned apply entries even when they are filtered from worker payload
+  - show planned reset exclusions at level `0` when knobs are active but owned outside AudioKnob
+  - show manual-only and already-off reset rows at level `0` so all simple knobs remain visible in turn-down preview
+  - dim filtered entries and annotate why they are skipped
 
 #### Registry/schema additions (planned)
 
@@ -567,7 +580,7 @@ Required:
 - `python3 scripts/check_repo_consistency.py`
   - Enforces registry sync (`config/` ↔ `audioknob_gui/data/`)
   - Enforces required doc sections
-  - Enforces `PROJECT_STATE.md` release version matches `pyproject.toml`
+  - Enforces release version sync across `pyproject.toml`, `audioknob_gui/__init__.py`, and `PROJECT_STATE.md`
   - Enforces `PROJECT_STATE.md` knob-count claim matches `config/registry.json`
   - Enforces status vocabulary contract (`PLAN.md` operational labels + table status mapping keys)
   - Enforces stabilization scope constraints when enabled via `docs/internal/audit/STABILIZATION_STATE.md` (allowlist + max changed files)
@@ -997,6 +1010,7 @@ Special-case contract (`group_membership`):
 - `audio_group_membership` uses explicit Join/Leave actions from the GUI requirements workflow.
 - Worker parity for this kind is status/target reporting only (`check_knob_status` + system-profile targets), not queue preview/apply/reset/force-reset handling.
 - This is intentional for the current architecture and remains documented as a special-case parity exception.
+- Simple mode keeps this knob visible as a prerequisite tier but excludes it from worker queue apply/reset payloads.
 
 ---
 

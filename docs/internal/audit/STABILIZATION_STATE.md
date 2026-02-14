@@ -5,9 +5,9 @@ Purpose:
 - Prevent open-ended audit/fix loops and uncontrolled file churn.
 
 Mode: ON
-Batch ID: STAB-003
-Objective: Prepare and publish release v0.7.3 (version/docs/checklist + tag/release).
-Max changed files: 8
+Batch ID: STAB-006
+Objective: Prepare and publish release v0.7.4 (code/docs sync + changelog + checklist + tag).
+Max changed files: 16
 
 Allowed paths:
 - `AGENTS.md`
@@ -20,8 +20,13 @@ Allowed paths:
 - `docs/internal/audit/releases/`
 - `CHANGELOG.md`
 - `pyproject.toml`
+- `audioknob_gui/gui/main_window.py`
+- `audioknob_gui/gui/simple_mode.py`
+- `audioknob_gui/gui/app_info.py`
+- `audioknob_gui/__init__.py`
 - `scripts/check_repo_consistency.py`
 - `tests/test_gate_scripts.py`
+- `tests/test_simple_mode.py`
 
 Batch protocol:
 1. Use read-only audit -> approved-fix batch -> read-only verification (no mixed passes).

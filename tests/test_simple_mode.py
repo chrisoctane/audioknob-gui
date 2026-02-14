@@ -67,3 +67,25 @@ def test_compose_queue_actions_adds_resets_for_managed_knobs_when_level_drops() 
     assert actions.get("pipewire_rt_module_tuning") == "reset"
     assert actions.get("kernel_threadirqs") == "reset"
     assert actions.get("cpu_governor_performance_persistent") == "apply"
+
+
+def test_simple_managed_knobs_exclude_group_membership() -> None:
+    assert "audio_group_membership" not in simple_mode.SIMPLE_MANAGED_KNOB_IDS
+
+
+def test_normalize_queue_actions_drops_non_queue_and_already_applied() -> None:
+    raw_actions = {
+        "audio_group_membership": "apply",
+        "inotify_max_watches": "apply",
+        "cpu_dma_latency_udev": "apply",
+        "swappiness": "reset",
+    }
+    normalized = simple_mode.normalize_queue_actions(
+        raw_actions,
+        non_queue_knob_ids={"audio_group_membership"},
+        skip_apply_knob_ids={"cpu_dma_latency_udev"},
+    )
+    assert normalized == {
+        "inotify_max_watches": "apply",
+        "swappiness": "reset",
+    }
