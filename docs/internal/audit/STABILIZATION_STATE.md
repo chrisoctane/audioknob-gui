@@ -5,9 +5,9 @@ Purpose:
 - Prevent open-ended audit/fix loops and uncontrolled file churn.
 
 Mode: ON
-Batch ID: STAB-001
-Objective: Bootstrap stabilization guardrails and enforce bounded scope.
-Max changed files: 12
+Batch ID: STAB-002
+Objective: Define a policy-controlled multi-agent control loop architecture (planner/executor/verifier/auditor + bounded self-improvement).
+Max changed files: 4
 
 Allowed paths:
 - `AGENTS.md`
@@ -16,6 +16,7 @@ Allowed paths:
 - `docs/KNOB_INTERACTIONS.md`
 - `docs/internal/audit/QUALITY_GATE.md`
 - `docs/internal/audit/STABILIZATION_STATE.md`
+- `docs/internal/audit/MULTI_AGENT_CONTROL_SYSTEM.md`
 - `scripts/check_repo_consistency.py`
 - `tests/test_gate_scripts.py`
 
