@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.2
+- **Release version**: 0.7.3
 - **48 knobs defined** (ALL 48 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue

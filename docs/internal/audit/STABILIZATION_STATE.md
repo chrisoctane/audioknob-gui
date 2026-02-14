@@ -5,9 +5,9 @@ Purpose:
 - Prevent open-ended audit/fix loops and uncontrolled file churn.
 
 Mode: ON
-Batch ID: STAB-002
-Objective: Define a policy-controlled multi-agent control loop architecture (planner/executor/verifier/auditor + bounded self-improvement).
-Max changed files: 4
+Batch ID: STAB-003
+Objective: Prepare and publish release v0.7.3 (version/docs/checklist + tag/release).
+Max changed files: 8
 
 Allowed paths:
 - `AGENTS.md`
@@ -17,6 +17,9 @@ Allowed paths:
 - `docs/internal/audit/QUALITY_GATE.md`
 - `docs/internal/audit/STABILIZATION_STATE.md`
 - `docs/internal/audit/MULTI_AGENT_CONTROL_SYSTEM.md`
+- `docs/internal/audit/releases/`
+- `CHANGELOG.md`
+- `pyproject.toml`
 - `scripts/check_repo_consistency.py`
 - `tests/test_gate_scripts.py`
 

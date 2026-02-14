@@ -4,6 +4,23 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.3] - 2026-02-14
+
+### Added
+- Stabilization batch control contract at `docs/internal/audit/STABILIZATION_STATE.md`.
+- Multi-agent control architecture blueprint at `docs/internal/audit/MULTI_AGENT_CONTROL_SYSTEM.md`.
+- Additional gate-script regression coverage for docs/privilege/stabilization enforcement paths.
+
+### Changed
+- `scripts/check_repo_consistency.py` now enforces:
+  - `docs/KNOB_INTERACTIONS.md` updates when conflict/knob behavior paths change.
+  - Stabilization scope constraints (allowlist + max changed files) when stabilization mode is on.
+- Quality gate and agent workflow docs now include stabilization scope requirements.
+
+### Fixed
+- Local consistency checks now use local in-progress diffs for stabilization scope checks (avoids false positives from historical branch deltas).
+- Privilege-path and docs-drift guardrails were tightened to reduce agent scope creep and policy bypass risk.
+
 ## [0.7.2] - 2026-02-11
 
 ### Added
