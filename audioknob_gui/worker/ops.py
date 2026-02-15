@@ -1876,15 +1876,11 @@ def check_knob_status(knob: Any) -> str:
         except Exception:
             service_partial = True
 
-        # RTIRQ status is primarily based on the presence of the audioknob config
-        # block. The service can be enabled by distro packaging without our
-        # config being present; that should not produce a persistent "partial"
-        # state after a factory reset.
-        if not cfg_ok:
-            return "not_applied"
-        if service_ok:
+        if cfg_ok and service_ok:
             return "applied"
-        return "partial"
+        if cfg_ok or service_ok or service_partial:
+            return "partial"
+        return "not_applied"
 
     if kind == "irq_affinity":
         from audioknob_gui.core.irq import (

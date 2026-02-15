@@ -302,6 +302,7 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - **Status/Check** shows live technical details (service states, group gaps, sysctl/sysfs values, PipeWire runtime settings, etc.); when status is **partial**, it includes a short reason line and raw checks below.
 - Partial reasons are explicit for mixed states (for example: masked/unmasked user services, partial group membership activation, sysfs match counts, and WirePlumber/PipeWire config drift).
 - Status column is operational only (`Applied`, `Not applied`, `Partial`, `Reboot`, `Unknown`, `N/A`).
+- When a knob is **Partial**, the row action queues a **Reset** (revert to defaults). Apply again after reset if you want to re-enable it.
 - Preset matches are shown as color dots beside the status button (**blue = matches Reference Preset**, **green = matches Factory Preset**).
 
 ### Conflicts and blockers

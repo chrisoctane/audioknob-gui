@@ -2977,6 +2977,16 @@ def _restore_knob_once(knob_id: str) -> dict:
 
         restored: list[str] = []
         errors: list[str] = []
+        unit = str(knob.impl.params.get("unit", "rtirq.service")) if knob.impl else "rtirq.service"
+        pre_not_found = False
+        for e in effects_for_knob:
+            if e.get("kind") != "systemd_unit_toggle":
+                continue
+            pre = e.get("pre") or {}
+            pre_enabled = str(pre.get("enabled", "")).strip().lower()
+            if "not-found" in pre_enabled or "not found" in pre_enabled or "no such file" in pre_enabled:
+                pre_not_found = True
+                break
 
         try:
             current = ""
@@ -3003,6 +3013,25 @@ def _restore_knob_once(knob_id: str) -> dict:
                 restored.append("(systemd effects)")
         except Exception as exc:
             errors.append(f"Failed to restore systemd effects: {exc}")
+
+        # If the service didn't exist when this knob was applied (unit not found),
+        # a later package install can leave the unit enabled. Offer a force reset
+        # path so the GUI can disable it on request.
+        if not errors and pre_not_found and unit:
+            try:
+                r = subprocess.run(["systemctl", "is-enabled", unit], capture_output=True, text=True)
+                enabled = (r.stdout or r.stderr or "").strip()
+                if enabled in ("enabled", "static", "indirect"):
+                    return {
+                        "schema": 1,
+                        "success": False,
+                        "knob_id": knob_id,
+                        "txid": txid,
+                        "scope": scope,
+                        "error": f"Force reset available: reset did not disable {unit}",
+                    }
+            except Exception:
+                pass
 
         return {
             "schema": 1,

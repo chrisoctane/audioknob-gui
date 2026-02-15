@@ -96,8 +96,8 @@ def test_reset_file_to_default_package_strategy_prefers_backup():
         assert test_file.read_text(encoding="utf-8") == "GOVERNOR=powersave\n"
 
 
-def test_rtirq_status_not_partial_when_config_absent_even_if_service_enabled(monkeypatch, tmp_path):
-    """rtirq_enable should not report partial solely because the service is enabled/failed."""
+def test_rtirq_status_partial_when_service_enabled_without_config(monkeypatch, tmp_path):
+    """rtirq_enable should report partial when the service is enabled/failed but config is absent."""
     from audioknob_gui.core.runner import RunResult
     from audioknob_gui.registry import Capabilities, Impl, Knob
     from audioknob_gui.worker.ops import check_knob_status
@@ -139,7 +139,73 @@ def test_rtirq_status_not_partial_when_config_absent_even_if_service_enabled(mon
 
     monkeypatch.setattr("audioknob_gui.worker.ops.run", _fake_run)
 
-    assert check_knob_status(knob) == "not_applied"
+    assert check_knob_status(knob) == "partial"
+
+
+def test_restore_rtirq_suggests_force_reset_when_unit_was_missing(monkeypatch, tmp_path):
+    """restore-knob should offer force reset when the rtirq unit was not present in the original state."""
+    import subprocess
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="rtirq_enable",
+        title="RT IRQ",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind="rtirq_config", params={"unit": "rtirq.service"}),
+    )
+
+    manifest = {
+        "schema": 1,
+        "txid": "tx1",
+        "applied": ["rtirq_enable"],
+        "backups": [],
+        "effects": [
+            {
+                "kind": "systemd_unit_toggle",
+                "unit": "rtirq.service",
+                "pre": {"enabled": "not-found", "active": "inactive"},
+                "result": {"returncode": 1, "stdout": "", "stderr": "Unit rtirq.service does not exist"},
+            },
+        ],
+    }
+
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(cli, "_find_transaction_for_knob", lambda _kid: ("tx1", manifest, "user"))
+    monkeypatch.setattr(cli, "_knob_restore_targets", lambda _k: ([], ["rtirq.service"], []))
+    monkeypatch.setattr(cli, "_filter_manifest_backups_for_knob", lambda *_a, **_kw: [])
+
+    def _effects_filter(effects, **_kw):
+        return list(effects)
+
+    monkeypatch.setattr(cli, "_filter_manifest_effects_for_knob", _effects_filter)
+    monkeypatch.setattr(cli.worker_ops, "systemd_restore", lambda _e: None)
+    monkeypatch.setattr("audioknob_gui.worker.ops.read_os_release", lambda: {"ID": "test"})
+    monkeypatch.setattr(
+        "audioknob_gui.worker.ops.resolve_rtirq_config_path",
+        lambda _distro_id: str(tmp_path / "rtirq.conf"),
+    )
+
+    def _fake_run(argv, *args, **kwargs):
+        if argv[:2] == ["systemctl", "is-enabled"] and argv[-1] == "rtirq.service":
+            return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout="enabled\n", stderr="")
+        return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli.subprocess, "run", _fake_run)
+
+    result = cli._restore_knob_once("rtirq_enable")
+    assert result.get("success") is False
+    assert "force reset available" in (result.get("error") or "").lower()
+    assert "reset did not disable" in (result.get("error") or "").lower()
 
 
 def test_list_pending_filters_nonexistent_files():

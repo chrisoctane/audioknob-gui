@@ -1115,7 +1115,7 @@ class TableMixin:
                 else:
                     # Normal knob: show Apply or Reset based on current status
                     status = self._knob_statuses.get(k.id, "unknown")
-                    if status in ("applied", "pending_reboot"):
+                    if status in ("applied", "pending_reboot", "partial"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
                         self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)

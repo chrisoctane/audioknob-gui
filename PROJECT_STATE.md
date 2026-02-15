@@ -39,6 +39,7 @@
 - **Partial status notes** - Status/Check view includes a brief reason line when partial
 - **Partial reason specificity** - partial states now report concrete causes (for example: masked service counts, group activation gaps, sysfs match/mismatch counts, and WirePlumber/PipeWire config drift) instead of generic fallback text.
 - **Status tooltips** - Status column remains operational-only (applied/not_applied/partial/etc.).
+- **Partial reset UX** - partial knobs queue **Reset** by default so mixed states are reversible (apply again after reset to re-enable).
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Privileged execution hardening** - root knob/system operations use only `/usr/libexec/audioknob-gui-worker`; direct GUI pkexec maintenance commands are centralized in `worker_api` and allowlisted.
