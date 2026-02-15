@@ -67,6 +67,81 @@ def test_reset_defaults_scope_user_output_shape():
     assert "needs_root_reset" in output
 
 
+def test_reset_file_to_default_package_strategy_prefers_backup():
+    """reset_file_to_default must restore file content from our backup even when reset_strategy=package.
+
+    Older transactions recorded package-owned files with reset_strategy=package,
+    but package-manager restore mechanisms can be metadata-only (e.g. rpm --restore).
+    """
+    from audioknob_gui.core.transaction import RESET_PACKAGE, backup_file, new_tx, reset_file_to_default
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        test_file = root / "cpupower-service.conf"
+        test_file.write_text("GOVERNOR=powersave\n", encoding="utf-8")
+
+        tx = new_tx(tmpdir)
+        meta = backup_file(tx, str(test_file))
+
+        # Mutate file.
+        test_file.write_text("GOVERNOR=performance\n", encoding="utf-8")
+
+        meta = dict(meta)
+        meta["reset_strategy"] = RESET_PACKAGE
+        meta["package"] = "fakepkg"
+
+        ok, msg = reset_file_to_default(meta, tx)
+        assert ok is True
+        assert "backup" in msg.lower()
+        assert test_file.read_text(encoding="utf-8") == "GOVERNOR=powersave\n"
+
+
+def test_rtirq_status_not_partial_when_config_absent_even_if_service_enabled(monkeypatch, tmp_path):
+    """rtirq_enable should not report partial solely because the service is enabled/failed."""
+    from audioknob_gui.core.runner import RunResult
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker.ops import check_knob_status
+
+    knob = Knob(
+        id="rtirq_enable",
+        title="RT IRQ",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="rtirq_config",
+            params={
+                "name_list": ["snd", "usb"],
+                "high_list": ["snd", "usb"],
+                "prio_high": 90,
+                "prio_decr": 5,
+                "unit": "rtirq.service",
+            },
+        ),
+    )
+
+    # Ensure the config path doesn't exist, so cfg_ok stays false.
+    cfg_path = str(tmp_path / "rtirq.conf")
+    monkeypatch.setattr("audioknob_gui.worker.ops.resolve_rtirq_config_path", lambda _distro_id: cfg_path)
+
+    def _fake_run(argv, *, check=False, timeout=None):
+        if argv[:2] == ["systemctl", "is-enabled"] and argv[-1] == "rtirq.service":
+            return RunResult(argv=list(argv), returncode=0, stdout="enabled\n", stderr="")
+        if argv[:2] == ["systemctl", "is-active"] and argv[-1] == "rtirq.service":
+            return RunResult(argv=list(argv), returncode=0, stdout="failed\n", stderr="")
+        return RunResult(argv=list(argv), returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("audioknob_gui.worker.ops.run", _fake_run)
+
+    assert check_knob_status(knob) == "not_applied"
+
+
 def test_list_pending_filters_nonexistent_files():
     """Test that list-pending only shows files that still exist."""
     from audioknob_gui.core.transaction import new_tx, write_manifest, backup_file

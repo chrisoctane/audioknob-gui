@@ -1876,11 +1876,15 @@ def check_knob_status(knob: Any) -> str:
         except Exception:
             service_partial = True
 
-        if cfg_ok and service_ok:
+        # RTIRQ status is primarily based on the presence of the audioknob config
+        # block. The service can be enabled by distro packaging without our
+        # config being present; that should not produce a persistent "partial"
+        # state after a factory reset.
+        if not cfg_ok:
+            return "not_applied"
+        if service_ok:
             return "applied"
-        if cfg_ok or service_ok or service_partial:
-            return "partial"
-        return "not_applied"
+        return "partial"
 
     if kind == "irq_affinity":
         from audioknob_gui.core.irq import (
@@ -2042,9 +2046,6 @@ def check_knob_status(knob: Any) -> str:
 
         # Special case: persistent CPU governor should also be persisted in cpupower config + service.
         if knob.id == "cpu_governor_performance_persistent":
-            if base != "applied":
-                return base
-
             os_release = read_os_release()
             distro_id = os_release.get("ID", "")
             cfg_path = resolve_cpupower_config_path(distro_id)
@@ -2066,15 +2067,14 @@ def check_knob_status(knob: Any) -> str:
                 except Exception:
                     svc_ok = False
 
+            # This knob is about persistence. A runtime-only governor match is
+            # not sufficient evidence that the knob is applied (many systems
+            # default to "performance", and tuned can override runtime state).
             if cfg_ok and svc_ok:
-                return "applied"
-            # If tuned is active, it may be setting the runtime governor to
-            # performance even when this knob's persistence mechanism is not
-            # configured. Treat that case as not_applied to avoid a false
-            # "partial" state (and resulting conflicts) after a reset.
-            if _systemd_is_active("tuned.service") and (not cfg_ok) and (not svc_ok):
-                return "not_applied"
-            return "partial"
+                return "applied" if base == "applied" else "partial"
+            if cfg_ok or svc_ok:
+                return "partial"
+            return "not_applied"
 
         return base
     

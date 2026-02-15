@@ -83,15 +83,20 @@ def backup_file(tx: Transaction, abs_path: str, *, we_created: bool = False) -> 
         # Assume system file in this case
         pass
     
+    # Record package ownership for diagnostics, but prefer restoring from our backup.
+    #
+    # Package-manager "restore" mechanisms are not a reliable content reset for
+    # config files (and e.g. `rpm --restore` only restores metadata). The
+    # transaction backup is the source of truth for "leave no trace" resets.
     if existed and not is_user_file:
         try:
             from audioknob_gui.platform.packages import get_package_owner
+
             pkg_info = get_package_owner(abs_path)
-            if pkg_info.owned and pkg_info.can_restore:
-                meta["reset_strategy"] = RESET_PACKAGE
+            if pkg_info.owned:
                 meta["package"] = pkg_info.package
         except Exception:
-            pass  # Fall back to backup strategy
+            pass  # Backups remain the source of truth.
 
     if existed:
         st = p.stat()
@@ -168,18 +173,26 @@ def reset_file_to_default(meta: dict, tx: Transaction | None = None) -> tuple[bo
             return False, f"Failed to delete {abs_path}: {e}"
     
     elif strategy == RESET_PACKAGE:
-        # Restore from package manager
+        # Prefer restoring from our backup. This is the only reliable way to
+        # revert content for package-owned config files without clobbering
+        # user customizations. (Example: rpm --restore restores metadata only.)
+        if tx is not None:
+            try:
+                restore_file(tx, meta)
+                return True, f"Restored {abs_path} from backup (package-owned)"
+            except Exception:
+                # Fall through to best-effort package restore when backup is missing.
+                pass
+
         package = meta.get("package")
-        if not package:
-            # Fall back to backup
-            strategy = RESET_BACKUP
-        else:
+        if package:
             try:
                 from audioknob_gui.platform.packages import (
                     PackageInfo,
                     detect_package_manager,
                     restore_package_file,
                 )
+
                 pkg_info = PackageInfo(
                     path=abs_path,
                     owned=True,
@@ -190,7 +203,8 @@ def reset_file_to_default(meta: dict, tx: Transaction | None = None) -> tuple[bo
                 return restore_package_file(pkg_info)
             except Exception as e:
                 return False, f"Failed to restore from package: {e}"
-    
+        strategy = RESET_BACKUP
+
     if strategy == RESET_BACKUP:
         # Restore from our backup
         if tx is None:

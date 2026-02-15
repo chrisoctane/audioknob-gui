@@ -1903,8 +1903,9 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
     
     This uses the reset_strategy stored in each backup:
     - Files we created: delete them
-    - Package-owned files: restore from package manager
-    - User files: restore from our backup
+    - Modified files: restore from our backup (transaction baseline)
+      - Package ownership is recorded for diagnostics only; package-manager
+        "restore" mechanisms are not a reliable content reset for config files.
     
     Use --scope to filter:
     - 'user': only user-scope transactions (no root needed); silently skips root txs

@@ -91,7 +91,7 @@
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
 - **Power profile status fallback** - if the backend service is inactive, status shows not_applied; unknown is reserved for read errors.
 - **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
-- **CPU governor partial reason** - Status/Check reports explicit persistence mismatch causes (runtime governor match vs cpupower config and service enablement) instead of a generic partial note. When tuned is active and persistence is not configured, it reports not_applied (to avoid a false partial/conflict state after a reset).
+- **CPU governor status semantics** - Status/Check treats *persistence* (cpupower config + service enablement) as the source of truth. A runtime-only match (some systems default to `performance`, and tuned can override runtime state) is not sufficient evidence that the knob is applied; in that case it reports `not_applied` to avoid false `partial`/conflict states after a reset.
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup, nosmt
 - **Kernel isolation status fallback** - isolation cmdline knobs (`isolcpus`/`nohz_full`/`rcu_nocbs`) report applied/not_applied by key presence even before per-core config is set, avoiding false unknown on default installs.
@@ -796,7 +796,7 @@ audioknob-gui/
    c. Based on reset_strategy:
       - "delete": Remove the file we created
       - "backup": Copy backup file back to original location
-      - "package": Restore via package manager (best-effort; see notes below)
+      - "package": treated as "backup" for content restore (package-manager restore is not a reliable config content reset)
    d. For effects (sysfs, systemd): restore previous state
    e. For kernel cmdline knobs with UI-configured params (isolcpus/nohz_full/rcu_nocbs/irqaffinity),
       resolve the applied param from the transaction effects (fallback to current GUI state)
@@ -1487,14 +1487,16 @@ sudo sdbootutil update-all-entries
 # Install package
 sudo zypper install -y <package>
 
-# Restore package file to default
+# Restore package file metadata (owner/mode/mtime/caps)
 sudo rpm --restore <package-name>
 
 # Query file owner
 rpm -qf /path/to/file
 ```
 
-**NOTE:** `rpm --restore` primarily restores file attributes; verify config contents for packages using `%config(noreplace)`.
+**NOTE:** `rpm --restore` is metadata-only and does *not* reliably reset modified config
+contents. Audioknob resets modified files using its transaction backups to avoid clobbering
+pre-existing user customizations.
 
 #### System Files & Permissions
 
