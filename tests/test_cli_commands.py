@@ -224,6 +224,90 @@ def test_find_transaction_for_knob_returns_oldest():
                 assert manifest is not None
 
 
+def test_restore_knob_is_surgical_for_batched_transactions(monkeypatch):
+    """restore-knob must not restore unrelated files from the same transaction."""
+    from unittest.mock import MagicMock
+
+    from audioknob_gui.core.transaction import backup_file, new_tx, write_manifest
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        user_state = root / "user"
+        var_lib = root / "var"
+        user_state.mkdir(parents=True, exist_ok=True)
+        var_lib.mkdir(parents=True, exist_ok=True)
+
+        # Two files, backed up as part of a single tx (simulating a batched root/user apply).
+        file_a = root / "a.conf"
+        file_b = root / "b.conf"
+        file_a.write_text("A0\n", encoding="utf-8")
+        file_b.write_text("B0\n", encoding="utf-8")
+
+        tx = new_tx(str(user_state))
+        meta_a = backup_file(tx, str(file_a))
+        meta_b = backup_file(tx, str(file_b))
+
+        # Mutate both files after backing up.
+        file_a.write_text("A1\n", encoding="utf-8")
+        file_b.write_text("B1\n", encoding="utf-8")
+
+        write_manifest(
+            tx,
+            {
+                "schema": 1,
+                "txid": tx.txid,
+                "applied": ["knob_a", "knob_b"],
+                "backups": [meta_a, meta_b],
+                "effects": [],
+            },
+        )
+
+        knob_a = Knob(
+            id="knob_a",
+            title="A",
+            description="",
+            category="test",
+            risk_level="low",
+            requires_root=False,
+            requires_reboot=False,
+            requires_groups=(),
+            requires_commands=(),
+            depends_on=(),
+            capabilities=Capabilities(read=True, apply=True, restore=True),
+            impl=Impl(kind="sysctl_conf", params={"path": str(file_a), "lines": ["x=1"]}),
+        )
+        knob_b = Knob(
+            id="knob_b",
+            title="B",
+            description="",
+            category="test",
+            risk_level="low",
+            requires_root=False,
+            requires_reboot=False,
+            requires_groups=(),
+            requires_commands=(),
+            depends_on=(),
+            capabilities=Capabilities(read=True, apply=True, restore=True),
+            impl=Impl(kind="sysctl_conf", params={"path": str(file_b), "lines": ["y=1"]}),
+        )
+
+        monkeypatch.setattr(cli, "load_registry", lambda _path: [knob_a, knob_b])
+        monkeypatch.setattr(
+            cli,
+            "default_paths",
+            lambda: MagicMock(var_lib_dir=str(var_lib), user_state_dir=str(user_state)),
+        )
+
+        result = cli._restore_knob_once("knob_a")
+        assert result.get("success") is True
+
+        # Only file_a should be restored.
+        assert file_a.read_text(encoding="utf-8") == "A0\n"
+        assert file_b.read_text(encoding="utf-8") == "B1\n"
+
+
 def test_kernel_cmdline_status_param_fallback_for_dynamic_knobs():
     """Status checks should use key-name fallback when dynamic cores are unset."""
     from audioknob_gui.worker.cli import _kernel_cmdline_status_param

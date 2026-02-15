@@ -1271,7 +1271,10 @@ class MainWindow(TableMixin, QMainWindow):
             if knob.id not in simple_mode.ORDERED_QUEUE_KNOBS:
                 continue
             status = self._knob_statuses.get(knob.id, "unknown")
-            if status in ("applied", "pending_reboot"):
+            if status in ("applied", "pending_reboot", "not_applicable"):
+                skip.add(knob.id)
+                continue
+            if not self._knob_commands_ok(knob):
                 skip.add(knob.id)
         return skip
 
@@ -1279,10 +1282,12 @@ class MainWindow(TableMixin, QMainWindow):
         non_queue_knob_ids = self._simple_non_queue_knob_ids()
         skip_apply_knob_ids = self._simple_skip_apply_knob_ids()
         reasons: dict[str, str] = {}
+        by_id = {k.id: k for k in self.registry}
         for kid, action in actions.items():
             if action != "apply":
                 continue
             status = self._knob_statuses.get(kid, "unknown")
+            knob = by_id.get(kid)
             if kid in non_queue_knob_ids:
                 if status in ("applied", "pending_reboot"):
                     reasons[kid] = "already active"
@@ -1290,6 +1295,16 @@ class MainWindow(TableMixin, QMainWindow):
                     reasons[kid] = "manual action"
                 else:
                     reasons[kid] = "not queued"
+                continue
+            if knob is not None and not self._knob_commands_ok(knob):
+                missing = self._knob_missing_commands(knob)
+                if missing:
+                    reasons[kid] = f"install: {', '.join(missing)}"
+                else:
+                    reasons[kid] = "missing commands"
+                continue
+            if status == "not_applicable":
+                reasons[kid] = "not available"
                 continue
             if kid in skip_apply_knob_ids:
                 reasons[kid] = "already active"

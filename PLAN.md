@@ -150,7 +150,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - `disable_tracker` and `disable_baloo` are excluded from simple mode due non-audio desktop usability impact.
 - Simple mode auto-queues dependency bundles (for example RT setup also queues its required RT limits/module pieces).
 - Simple mode normalizes queue actions before apply: non-queue kinds (for example `group_membership`) are removed and already-active knobs are skipped to avoid duplicate apply attempts.
-- Simple-mode queue preview still shows filtered apply/reset items in the list, dimmed with reason labels (for example `manual action`, `already active`, `set outside AudioKnob`) so intent remains visible.
+- Simple-mode queue preview still shows filtered apply/reset items in the list, dimmed with reason labels (for example `manual action`, `already active`, `set outside AudioKnob`, `install: ...`, `not available`) so intent remains visible.
 - At dial level `0`, the reset preview lists all simple knobs and explains non-reset entries (for example `manual action` or `already off`) so turn-down intent is explicit.
 - If a knob was applied by AudioKnob, the same knob row in Full mode is locked as **Managed by AudioKnob** to prevent mixed-workflow edits.
 - If a simple queue contains knobs that require audio groups, Apply first enforces the same group prerequisite flow as Full mode (Join action first, then reboot/logout-login if pending).

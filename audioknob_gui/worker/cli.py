@@ -550,11 +550,33 @@ def _kernel_cmdline_param_from_manifest(manifest: dict, knob_id: str) -> str | N
     return None
 
 
-def _backup_once(tx, backups: list[dict], path: str, *, we_created: bool = False) -> dict:
+def _backup_once(
+    tx,
+    backups: list[dict],
+    path: str,
+    *,
+    we_created: bool = False,
+    knob_id: str | None = None,
+) -> dict:
+    """Backup a path at most once per transaction.
+
+    The worker batches multiple knob applies into a single transaction. To keep
+    per-knob restore surgical, we annotate each backup with the knob(s) that
+    touched it.
+    """
     for meta in backups:
         if meta.get("path") == path:
+            if knob_id:
+                knob_ids = meta.get("knob_ids")
+                if not isinstance(knob_ids, list):
+                    knob_ids = []
+                if knob_id not in knob_ids:
+                    knob_ids.append(knob_id)
+                meta["knob_ids"] = knob_ids
             return meta
     meta = backup_file(tx, path, we_created=we_created)
+    if knob_id:
+        meta["knob_ids"] = [knob_id]
     backups.append(meta)
     return meta
 
@@ -720,7 +742,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 )
             path_str = str(params.get("path", "~/.config/rncbc.org/QjackCtl.conf"))
             path = Path(path_str).expanduser()
-            _backup_once(tx, backups, str(path))
+            _backup_once(tx, backups, str(path), knob_id=kid)
 
             from audioknob_gui.core.qjackctl import (
                 build_post_start_script,
@@ -742,7 +764,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             post_script_path = default_post_start_script_path()
             if cpu_cores_norm:
                 script_body = build_post_start_script(cpu_cores_norm)
-                _backup_once(tx, backups, str(post_script_path))
+                _backup_once(tx, backups, str(post_script_path), knob_id=kid)
                 post_script_path.parent.mkdir(parents=True, exist_ok=True)
                 post_script_path.write_text(script_body, encoding="utf-8")
                 try:
@@ -753,7 +775,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 post_startup_shell = str(post_script_path)
             else:
                 if post_script_path.exists():
-                    _backup_once(tx, backups, str(post_script_path))
+                    _backup_once(tx, backups, str(post_script_path), knob_id=kid)
                     try:
                         post_script_path.unlink()
                     except Exception:
@@ -785,13 +807,13 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             if cpu_cores_norm:
                 try:
                     result = apply_jackd_affinity(cpu_cores_norm)
-                    effects.append({"kind": "jackd_affinity", "result": result})
+                    effects.append({"kind": "jackd_affinity", "knob_id": kid, "result": result})
                     if result.get("status") == "not_running":
                         warnings.append("JACK is not running; CPU pinning will apply the next time you start it.")
                     elif result.get("status") in ("partial", "invalid_cpu_list"):
                         warnings.append("Failed to update running jackd CPU affinity; see logs for details.")
                 except Exception as e:
-                    effects.append({"kind": "jackd_affinity", "error": str(e)})
+                    effects.append({"kind": "jackd_affinity", "knob_id": kid, "error": str(e)})
                     warnings.append("Failed to update running jackd CPU affinity; see logs for details.")
 
         elif kind == "pipewire_conf":
@@ -803,7 +825,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
 
             path_str = str(params.get("path", "~/.config/pipewire/pipewire.conf.d/99-audioknob.conf"))
             path = Path(path_str).expanduser()
-            _backup_once(tx, backups, str(path))
+            _backup_once(tx, backups, str(path), knob_id=kid)
 
             content = worker_ops.build_pipewire_conf_content(params)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -822,11 +844,12 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 effects.append(
                     {
                         "kind": "pipewire_restart",
+                        "knob_id": kid,
                         "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
                     }
                 )
             except Exception as e:
-                effects.append({"kind": "pipewire_restart", "error": str(e)})
+                effects.append({"kind": "pipewire_restart", "knob_id": kid, "error": str(e)})
 
         elif kind == "wireplumber_conf":
             import subprocess
@@ -842,7 +865,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 )
             )
             path = Path(path_str).expanduser()
-            _backup_once(tx, backups, str(path))
+            _backup_once(tx, backups, str(path), knob_id=kid)
             content = worker_ops.build_wireplumber_conf_content(params)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
@@ -858,11 +881,12 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 effects.append(
                     {
                         "kind": "wireplumber_restart",
+                        "knob_id": kid,
                         "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
                     }
                 )
             except Exception as e:
-                effects.append({"kind": "wireplumber_restart", "error": str(e)})
+                effects.append({"kind": "wireplumber_restart", "knob_id": kid, "error": str(e)})
 
         elif kind == "wpctl_profile":
             import subprocess
@@ -974,6 +998,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                         effects.append(
                             {
                                 "kind": "pactl_profile",
+                                "knob_id": kid,
                                 "card": str(card_name),
                                 "before": current,
                                 "after": str(target),
@@ -998,6 +1023,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                 effects.append(
                     {
                         "kind": "wpctl_profile",
+                        "knob_id": kid,
                         "device_id": str(device_id),
                         "before": current,
                         "after": str(target),
@@ -1040,6 +1066,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
             if masked_services:
                 effects.append({
                     "kind": "user_service_mask",
+                    "knob_id": kid,
                     "services": masked_services,
                 })
 
@@ -1067,6 +1094,7 @@ def cmd_apply_user(args: argparse.Namespace) -> int:
                     pass
                 effects.append({
                     "kind": "baloo_disable",
+                    "knob_id": kid,
                     "result": {"returncode": result.returncode},
                 })
             else:
@@ -1180,7 +1208,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         if kind == "pam_limits_audio_group":
             path = str(params["path"])
-            _backup_once(tx, backups, path)
+            _backup_once(tx, backups, path, knob_id=kid)
 
             want_lines = [str(x) for x in params.get("lines", [])]
             before = ""
@@ -1199,7 +1227,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
         elif kind == "sysctl_conf":
             path = str(params["path"])
-            _backup_once(tx, backups, path)
+            _backup_once(tx, backups, path, knob_id=kid)
 
             want_lines = [str(x) for x in params.get("lines", [])]
             before = ""
@@ -1222,15 +1250,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
             unit = str(params["unit"])
             action = str(params.get("action", ""))
             if action == "disable_now":
-                effects.append(systemd_disable_now(unit))
+                effect = systemd_disable_now(unit)
             elif action == "enable_now":
-                effects.append(systemd_enable_now(unit))
+                effect = systemd_enable_now(unit)
             elif action == "enable":
-                effects.append(systemd_enable_now(unit, start=False))
+                effect = systemd_enable_now(unit, start=False)
             elif action == "disable":
-                effects.append(systemd_disable_now(unit))
+                effect = systemd_disable_now(unit)
             else:
                 raise SystemExit(f"Unsupported systemd action: {action}")
+            effect["knob_id"] = kid
+            effects.append(effect)
 
         elif kind == "rtirq_config":
             from audioknob_gui.core.rtirq import apply_rtirq_block, normalize_rtirq_list
@@ -1244,6 +1274,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
             high_list = normalize_rtirq_list(params.get("high_list", name_list))
             prio_high = int(params.get("prio_high", 90))
             prio_decr = int(params.get("prio_decr", 5))
+            unit = str(params.get("unit", "rtirq.service"))
+            if not worker_ops._systemd_unit_exists(unit):
+                warnings.append(
+                    f"{k.title}: systemd unit not found ({unit}). Install rtirq and try again."
+                )
+                continue
 
             before = ""
             try:
@@ -1258,12 +1294,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 prio_decr=prio_decr,
             )
             if before != after:
-                _backup_once(tx, backups, str(path), we_created=not path.exists())
+                _backup_once(tx, backups, str(path), we_created=not path.exists(), knob_id=kid)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(after, encoding="utf-8")
 
-            unit = str(params.get("unit", "rtirq.service"))
             effect = systemd_enable_now(unit)
+            effect["knob_id"] = kid
             effects.append(effect)
             if effect.get("pre", {}).get("active") == "active":
                 try:
@@ -1343,7 +1379,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     errors.append(f"Failed to write {path}: {exc}")
                     continue
                 effects.append(
-                    {"kind": "irq_affinity", "irq": irq, "before": before, "after": cpu_cores}
+                    {"kind": "irq_affinity", "knob_id": kid, "irq": irq, "before": before, "after": cpu_cores}
                 )
 
             if errors:
@@ -1374,7 +1410,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                         warnings.append(f"Failed to move IRQ {irq} to housekeeping cores: {exc}")
                         continue
                     effects.append(
-                        {"kind": "irq_affinity", "irq": irq, "before": current, "after": housekeeping_list}
+                        {"kind": "irq_affinity", "knob_id": kid, "irq": irq, "before": current, "after": housekeeping_list}
                     )
                 if readonly_irqs:
                     preview = ",".join(str(x) for x in readonly_irqs[:12])
@@ -1391,7 +1427,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 unit_path = Path(persist_unit_path) if persist_unit_path else Path("/etc/systemd/system") / persist_unit
 
                 try:
-                    _backup_once(tx, backups, str(state_path), we_created=not state_path.exists())
+                    _backup_once(tx, backups, str(state_path), we_created=not state_path.exists(), knob_id=kid)
                     state_payload: dict[str, Any] = {}
                     if state_path.exists():
                         try:
@@ -1416,13 +1452,15 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     warnings.append(f"Failed to persist IRQ pinning config: {exc}")
 
                 try:
-                    _backup_once(tx, backups, str(unit_path), we_created=not unit_path.exists())
+                    _backup_once(tx, backups, str(unit_path), we_created=not unit_path.exists(), knob_id=kid)
                     unit_content = build_irq_pinning_unit(str(state_path.parent))
                     unit_path.parent.mkdir(parents=True, exist_ok=True)
                     unit_path.write_text(unit_content, encoding="utf-8")
                     subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True, text=True)
                     from audioknob_gui.worker.ops import systemd_enable_now
-                    effects.append(systemd_enable_now(persist_unit))
+                    effect = systemd_enable_now(persist_unit)
+                    effect["knob_id"] = kid
+                    effects.append(effect)
                 except Exception as exc:
                     warnings.append(f"Failed to enable IRQ pinning service: {exc}")
 
@@ -1433,6 +1471,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
             sysfs_effects = write_sysfs_values(glob_pat, str(params["value"]))
             if not sysfs_effects:
                 raise SystemExit(f"No sysfs entries found for: {glob_pat}")
+            for e in sysfs_effects:
+                if isinstance(e, dict):
+                    e["knob_id"] = kid
             effects.extend(sysfs_effects)
 
             # Special case: persistent CPU governor requires additional config to survive reboot.
@@ -1448,7 +1489,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 cfg_path = resolve_cpupower_config_path(distro_id)
                 key = "GOVERNOR"
 
-                _backup_once(tx, backups, cfg_path)
+                _backup_once(tx, backups, cfg_path, knob_id=kid)
 
                 before = ""
                 try:
@@ -1478,7 +1519,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 service = resolve_cpu_governor_service(distro_id)
                 if service:
                     # Best-effort: enable service so the setting persists.
-                    effects.append(systemd_enable_now(service))
+                    effect = systemd_enable_now(service)
+                    effect["knob_id"] = kid
+                    effects.append(effect)
                 else:
                     warnings.append(
                         "No cpupower/cpufrequtils systemd service found; "
@@ -1495,6 +1538,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             service = backend.get("service")
             if service:
                 svc_effect = systemd_enable_now(service)
+                svc_effect["knob_id"] = kid
                 effects.append(svc_effect)
                 if svc_effect.get("result", {}).get("returncode") not in (0, None):
                     detail = svc_effect.get("result", {}).get("stderr") or svc_effect.get("result", {}).get("stdout")
@@ -1542,6 +1586,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             effects.append(
                 {
                     "kind": "power_profile",
+                    "knob_id": kid,
                     "backend": backend["backend"],
                     "before": current,
                     "after": target,
@@ -1556,7 +1601,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         elif kind == "udev_rule":
             path = str(params["path"])
             content = str(params["content"])
-            _backup_once(tx, backups, path)
+            _backup_once(tx, backups, path, knob_id=kid)
             
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(content.rstrip("\n") + "\n", encoding="utf-8")
@@ -1577,7 +1622,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 raise SystemExit(f"Unknown boot system for {distro.distro_id}; cannot modify kernel cmdline")
             
             cmdline_file = distro.kernel_cmdline_file
-            _backup_once(tx, backups, cmdline_file)
+            _backup_once(tx, backups, cmdline_file, knob_id=kid)
             
             before = ""
             try:
@@ -1644,6 +1689,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 result = subprocess.run(distro.kernel_cmdline_update_cmd, capture_output=True, text=True)
                 effects.append({
                     "kind": "kernel_cmdline",
+                    "knob_id": kid,
                     "param": param,
                     "file": cmdline_file,
                     "update_cmd": distro.kernel_cmdline_update_cmd,
@@ -2549,6 +2595,134 @@ def _find_transaction_for_knob(knob_id: str) -> tuple[str | None, dict | None, s
     return None, None, None
 
 
+def _knob_restore_targets(knob: Any) -> tuple[set[str], set[str], list[str]]:
+    """Return (paths, systemd_units, sysfs_globs) for a knob restore filter.
+
+    We intentionally avoid restoring the full transaction manifest, since root
+    apply batches multiple knobs into one transaction. These targets are used
+    to select only the files/effects that belong to the requested knob.
+    """
+    if not getattr(knob, "impl", None):
+        return set(), set(), []
+
+    try:
+        profile = worker_ops.scan_system_profile(knobs=[knob])
+        knob_paths = profile.get("knob_paths") or {}
+        entry = knob_paths.get(getattr(knob, "id", "")) or {}
+        targets = entry.get("targets") or []
+    except Exception:
+        targets = []
+
+    paths: set[str] = set()
+    units: set[str] = set()
+    sysfs_globs: list[str] = []
+
+    for t in targets:
+        if not isinstance(t, dict):
+            continue
+        t_type = str(t.get("type", "")).strip()
+        value = t.get("value")
+        if not value:
+            continue
+        if t_type in ("path", "kernel_cmdline_file") and isinstance(value, str):
+            paths.add(value)
+        elif t_type == "systemd_unit" and isinstance(value, str):
+            units.add(value)
+        elif t_type == "sysfs_glob" and isinstance(value, str):
+            sysfs_globs.append(value)
+
+    return paths, units, sysfs_globs
+
+
+def _filter_manifest_backups_for_knob(
+    backups: object,
+    *,
+    knob_id: str,
+    target_paths: set[str],
+) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(backups, list):
+        return out
+    for meta in backups:
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("knob_id") == knob_id:
+            out.append(meta)
+            continue
+        knob_ids = meta.get("knob_ids")
+        if isinstance(knob_ids, list) and knob_id in knob_ids:
+            out.append(meta)
+            continue
+        path = str(meta.get("path", "")).strip()
+        if path and path in target_paths:
+            out.append(meta)
+    return out
+
+
+def _filter_manifest_effects_for_knob(
+    effects: object,
+    *,
+    knob_id: str,
+    knob: Any,
+    target_units: set[str],
+    sysfs_globs: list[str],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if not isinstance(effects, list):
+        return out
+
+    knob_kind = ""
+    try:
+        knob_kind = str(knob.impl.kind) if getattr(knob, "impl", None) else ""
+    except Exception:
+        knob_kind = ""
+
+    sysfs_paths: set[str] = set()
+    if knob_kind == "sysfs_glob_kv":
+        try:
+            # Prefer the knob's own glob spec when available.
+            raw = knob.impl.params.get("glob") if getattr(knob, "impl", None) else None
+            globs = raw if raw is not None else sysfs_globs
+            sysfs_paths = set(worker_ops._expand_sysfs_globs(globs))
+        except Exception:
+            sysfs_paths = set()
+
+    for e in effects:
+        if not isinstance(e, dict):
+            continue
+        if e.get("knob_id") == knob_id:
+            out.append(e)
+            continue
+        kind = e.get("kind")
+        if kind == "systemd_unit_toggle":
+            unit = str(e.get("unit", "")).strip()
+            if unit and unit in target_units:
+                out.append(e)
+            continue
+        if kind == "sysfs_write" and sysfs_paths:
+            path = str(e.get("path", "")).strip()
+            if path and path in sysfs_paths:
+                out.append(e)
+            continue
+        if kind == "irq_affinity" and knob_kind == "irq_affinity":
+            out.append(e)
+            continue
+        if kind == "power_profile" and knob_kind == "power_profile":
+            out.append(e)
+            continue
+        if kind == "user_service_mask" and knob_kind == "user_service_mask":
+            out.append(e)
+            continue
+        if kind == "baloo_disable" and knob_kind == "baloo_disable":
+            out.append(e)
+            continue
+        if kind in ("pactl_profile", "wpctl_profile") and knob_kind == "wpctl_profile":
+            out.append(e)
+            continue
+
+    return out
+
+
 def _restore_knob_once(knob_id: str) -> dict:
     from audioknob_gui.core.paths import get_registry_path
     knob = None
@@ -2575,6 +2749,20 @@ def _restore_knob_once(knob_id: str) -> dict:
             "knob_id": knob_id,
             "error": f"Knob {knob_id} was applied as root; run with pkexec to restore",
         }
+
+    target_paths, target_units, sysfs_globs = _knob_restore_targets(knob)
+    backups_for_knob = _filter_manifest_backups_for_knob(
+        manifest.get("backups", []),
+        knob_id=knob_id,
+        target_paths=target_paths,
+    )
+    effects_for_knob = _filter_manifest_effects_for_knob(
+        manifest.get("effects", []),
+        knob_id=knob_id,
+        knob=knob,
+        target_units=target_units,
+        sysfs_globs=sysfs_globs,
+    )
 
     if knob and knob.impl and knob.impl.kind == "kernel_cmdline":
         from audioknob_gui.worker.ops import detect_distro
@@ -2806,12 +2994,11 @@ def _restore_knob_once(knob_id: str) -> dict:
         except Exception as exc:
             errors.append(f"Failed to update rtirq config: {exc}")
 
-        effects = manifest.get("effects", [])
         try:
-            for e in effects:
+            for e in effects_for_knob:
                 if e.get("kind") == "systemd_unit_toggle":
                     worker_ops.systemd_restore(e)
-            if any(e.get("kind") == "systemd_unit_toggle" for e in effects):
+            if any(e.get("kind") == "systemd_unit_toggle" for e in effects_for_knob):
                 restored.append("(systemd effects)")
         except Exception as exc:
             errors.append(f"Failed to restore systemd effects: {exc}")
@@ -2837,7 +3024,7 @@ def _restore_knob_once(knob_id: str) -> dict:
     restored = []
     errors = []
     seen_paths: set[str] = set()
-    for meta in manifest.get("backups", []):
+    for meta in backups_for_knob:
         file_path = meta.get("path", "")
         if not file_path or file_path in seen_paths:
             continue
@@ -2849,7 +3036,7 @@ def _restore_knob_once(knob_id: str) -> dict:
             errors.append(message)
 
     # Also restore effects if present
-    effects = manifest.get("effects", [])
+    effects = effects_for_knob
 
     if scope == "root" and os.geteuid() == 0:
         sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]

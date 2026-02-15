@@ -16,7 +16,7 @@
 - **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
 - **Group membership special-case contract** - `audio_group_membership` remains an immediate Join/Leave workflow (explicit confirmation), intentionally outside worker preview/apply/reset/force-reset transaction paths
 - **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible action queue (apply/reset)
-- **Simple queue normalization** - simple apply strips non-queue kinds (for example `group_membership`) and skips duplicate apply actions for knobs already active
+- **Simple queue normalization** - simple apply strips non-queue kinds (for example `group_membership`), skips duplicate apply actions for knobs already active, and skips apply actions for knobs that are not available or missing required commands (while still showing them in the simple list as skipped with a reason).
 - **Simple queue preview visibility** - simple view keeps the full planned apply/reset intent visible and dims filtered entries with explicit reason labels (`manual action`, `already active`, `set outside AudioKnob`)
 - **Simple level-0 reset visibility** - off position preview includes all simple knobs and explains non-reset rows (`manual action`, `set outside AudioKnob`, `already off`)
 - **Simple mode title** - home view heading is `AudioKnob`
@@ -91,7 +91,7 @@
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
 - **Power profile status fallback** - if the backend service is inactive, status shows not_applied; unknown is reserved for read errors.
 - **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
-- **CPU governor partial reason** - Status/Check now reports explicit persistence mismatch causes (runtime governor match vs cpupower config and service enablement) instead of a generic partial note.
+- **CPU governor partial reason** - Status/Check reports explicit persistence mismatch causes (runtime governor match vs cpupower config and service enablement) instead of a generic partial note. When tuned is active and persistence is not configured, it reports not_applied (to avoid a false partial/conflict state after a reset).
 - **CPU C-state limiters** - kernel cmdline knobs for processor.max_cstate=1 and intel_idle.max_cstate=1
 - **Kernel RT extras (dev)** - kernel cmdline knobs for preempt=full, clocksource=tsc, tsc=reliable, nmi_watchdog=0, nosoftlockup, nosmt
 - **Kernel isolation status fallback** - isolation cmdline knobs (`isolcpus`/`nohz_full`/`rcu_nocbs`) report applied/not_applied by key presence even before per-core config is set, avoiding false unknown on default installs.
@@ -791,7 +791,8 @@ audioknob-gui/
 2. GUI calls worker with restore-knob command
 3. Worker:
    a. Finds transaction that applied this knob
-   b. Reads backup metadata from manifest (uses the oldest entry per file path)
+   b. Reads backup/effect metadata from manifest and filters it to the requested knob
+      (so resetting one knob does not revert unrelated knobs from the same batched transaction).
    c. Based on reset_strategy:
       - "delete": Remove the file we created
       - "backup": Copy backup file back to original location

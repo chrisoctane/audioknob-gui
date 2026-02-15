@@ -2068,6 +2068,12 @@ def check_knob_status(knob: Any) -> str:
 
             if cfg_ok and svc_ok:
                 return "applied"
+            # If tuned is active, it may be setting the runtime governor to
+            # performance even when this knob's persistence mechanism is not
+            # configured. Treat that case as not_applied to avoid a false
+            # "partial" state (and resulting conflicts) after a reset.
+            if _systemd_is_active("tuned.service") and (not cfg_ok) and (not svc_ok):
+                return "not_applied"
             return "partial"
 
         return base

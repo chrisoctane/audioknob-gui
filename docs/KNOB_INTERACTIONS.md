@@ -23,6 +23,9 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ### CPU Performance (persistent governor)
 - Conflicts with tuned profiles that manage CPU governor.
 - Persistence depends on cpupower/cpufrequtils service presence.
+- If tuned is active, the runtime governor may already be `performance` even when
+  cpupower persistence is not configured; the app treats that case as not applied
+  (to avoid false partial/conflict state after a reset).
 
 ### CPU C-States / Intel C-States limiters
 - Conflicts with tuned profiles that manage C-states or power policy.
@@ -37,6 +40,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
   - RT kernel, or kernel cmdline "threadirqs".
 - Without threaded IRQs, RTIRQ will not take effect (partial).
 - The app warns when RTIRQ is enabled without Threaded IRQs.
+- RTIRQ requires the `rtirq` package (including `rtirq.service`). If the unit is
+  missing, the knob cannot apply until RTIRQ is installed.
 
 ### IRQ Pinning + IRQ Balance
 - irqbalance can override IRQ pinning and undo affinity changes.
