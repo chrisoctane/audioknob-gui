@@ -4,6 +4,17 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.5] - 2026-02-16
+
+### Changed
+- Reset workflows now restore knob-owned state from transaction backups/effects with surgical semantics, reducing unintended drift across unrelated knobs.
+- Full-table action behavior now treats `Partial` status as resettable, so mixed-state knobs queue `Reset` directly.
+
+### Fixed
+- CPU Performance vs Power Profile conflict handling now remains stable after reset by treating CPU governor persistence (config + service) as the status source of truth.
+- RT IRQ mixed states (`config`/`service` mismatch) now expose a direct reset path, and reset surfaces a force-reset handoff when baseline service state cannot be reconstructed from transaction history.
+- Factory reset no longer relies on package reinstall side effects; package-owned files are restored from captured transaction backups.
+
 ## [0.7.4] - 2026-02-14
 
 ### Added
