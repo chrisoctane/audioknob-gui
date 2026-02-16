@@ -46,6 +46,7 @@ from audioknob_gui.gui.dialogs.jitter_monitor import JitterMonitorDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
 from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
 from audioknob_gui.gui.conflicts import (
+    CONFLICT_MAP,
     build_conflict_details,
     filtered_active_conflicts,
     find_conflicts,
@@ -114,6 +115,7 @@ class MainWindow(TableMixin, QMainWindow):
                 for dep in getattr(knob, "depends_on", ()):
                     index.setdefault(dep, []).append(knob.id)
             self._dependency_index = index
+        self._prune_dependency_conflicts()
         _get_gui_logger().info("gui started")
         self._ensure_system_profile()
         self._baseline_ready = self._baseline_available()
@@ -2352,6 +2354,79 @@ class MainWindow(TableMixin, QMainWindow):
                 index.setdefault(dep, []).append(knob.id)
         return index
 
+    def _prune_dependency_conflicts(self) -> None:
+        """A dependency pair cannot also be an interactive conflict pair."""
+        removed_pairs = 0
+        for knob in self.registry:
+            for dep in getattr(knob, "depends_on", ()) or ():
+                targets = CONFLICT_MAP.get(knob.id)
+                if targets and dep in targets:
+                    targets.discard(dep)
+                    removed_pairs += 1
+                reverse = CONFLICT_MAP.get(dep)
+                if reverse and knob.id in reverse:
+                    reverse.discard(knob.id)
+                    removed_pairs += 1
+        if removed_pairs:
+            _get_gui_logger().info("pruned dependency conflicts pairs=%s", removed_pairs // 2)
+
+    def _missing_dependencies(self, k) -> list[str]:
+        depends = getattr(k, "depends_on", ()) or ()
+        if not depends:
+            return []
+        queued_actions = getattr(self, "_queued_actions", {}) or {}
+        missing: list[str] = []
+        for dep in depends:
+            if queued_actions.get(dep) == "apply":
+                continue
+            status = self._knob_statuses.get(dep, "unknown")
+            if status in ("applied", "pending_reboot"):
+                continue
+            missing.append(dep)
+        return missing
+
+    def _order_apply_ids_by_dependency(self, apply_ids: list[str]) -> list[str]:
+        """Topologically order queued apply IDs so dependencies run before dependents."""
+        if len(apply_ids) < 2:
+            return list(apply_ids)
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for kid in apply_ids:
+            if kid not in seen:
+                seen.add(kid)
+                ordered.append(kid)
+        by_id = {k.id: k for k in self.registry}
+        apply_set = set(ordered)
+        dependents: dict[str, set[str]] = {kid: set() for kid in ordered}
+        indegree: dict[str, int] = {kid: 0 for kid in ordered}
+        for kid in ordered:
+            knob = by_id.get(kid)
+            if knob is None:
+                continue
+            for dep in getattr(knob, "depends_on", ()) or ():
+                if dep not in apply_set or dep == kid:
+                    continue
+                if kid in dependents[dep]:
+                    continue
+                dependents[dep].add(kid)
+                indegree[kid] += 1
+        index = {kid: pos for pos, kid in enumerate(ordered)}
+        ready = [kid for kid in ordered if indegree[kid] == 0]
+        out: list[str] = []
+        while ready:
+            ready.sort(key=lambda kid: index.get(kid, 0))
+            kid = ready.pop(0)
+            out.append(kid)
+            for child in dependents.get(kid, set()):
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    ready.append(child)
+        if len(out) == len(ordered):
+            return out
+        # Defensive fallback for unexpected cycles: preserve original relative order.
+        remaining = [kid for kid in ordered if kid not in out]
+        return out + remaining
+
     def _collect_dependent_resets(self, knob_ids: list[str]) -> list[str]:
         dependents: list[str] = []
         pending = list(knob_ids)
@@ -3997,6 +4072,7 @@ class MainWindow(TableMixin, QMainWindow):
         self._populate()
 
         apply_ids = [kid for kid, action in queued if action == "apply"]
+        apply_ids = self._order_apply_ids_by_dependency(apply_ids)
         reset_ids = [kid for kid, action in queued if action == "reset"]
         apply_root_ids = [kid for kid in apply_ids if by_id[kid].requires_root]
         apply_user_ids = [kid for kid in apply_ids if not by_id[kid].requires_root]

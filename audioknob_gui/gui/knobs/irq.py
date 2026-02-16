@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QPushButton
+from PySide6.QtWidgets import QDialog, QMessageBox, QPushButton
 
 from audioknob_gui.gui.dialogs.irq_pinning import IrqPinningDialog
 from audioknob_gui.gui.state import save_state
@@ -42,7 +42,7 @@ def configure_dialog(ui) -> None:
         selected_devices=selected_devices,
         parent=ui,
     )
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.DialogCode.Accepted:
         return
 
     chosen_devices = dialog.selected_device_keys()

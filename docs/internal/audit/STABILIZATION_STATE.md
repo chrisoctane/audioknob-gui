@@ -6,7 +6,7 @@ Purpose:
 
 Mode: ON
 Batch ID: STAB-006
-Objective: Prepare and publish release v0.7.4 (code/docs sync + changelog + checklist + tag).
+Objective: Prepare and publish release v0.7.6 (code/docs sync + changelog + checklist + tag).
 Max changed files: 16
 
 Allowed paths:
@@ -23,6 +23,9 @@ Allowed paths:
 - `audioknob_gui/gui/main_window.py`
 - `audioknob_gui/gui/simple_mode.py`
 - `audioknob_gui/gui/app_info.py`
+- `audioknob_gui/gui/knobs/irq.py`
+- `audioknob_gui/gui/knobs/kernel.py`
+- `audioknob_gui/gui/knobs/qjackctl.py`
 - `audioknob_gui/__init__.py`
 - `scripts/check_repo_consistency.py`
 - `tests/test_gate_scripts.py`

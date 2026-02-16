@@ -9,10 +9,12 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.5
+- **Release version**: 0.7.6
 - **48 knobs defined** (ALL 48 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
+- **Dependency-aware queue gating** - knobs with `depends_on` unlock when their dependency is already applied or queued for apply in the current queue.
+- **Dependency-aware apply ordering** - queued apply actions are dependency-sorted before execution so prerequisites run before dependent knobs.
 - **Queue clear action** - Tools → `Clear Queue` removes all queued apply/reset actions with confirmation
 - **Group membership special-case contract** - `audio_group_membership` remains an immediate Join/Leave workflow (explicit confirmation), intentionally outside worker preview/apply/reset/force-reset transaction paths
 - **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible action queue (apply/reset)
@@ -84,7 +86,7 @@
 - **Conflict action precision** - row-level `Conflict` buttons use the same active/queued + backend filtering as the header conflict counter, preventing mismatch between row badges and header count.
 - **Conflict prompt clarity** - conflict dialogs include per-knob active/queued state labels so the reason for each conflict pair is explicit.
 - **Conflict gating** - conflicting knobs show a red Conflict action that queues a reset for that knob.
-- **Conflict coverage** - power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches surface as warnings.
+- **Conflict coverage** - power profile vs governor/C-states, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches surface as warnings.
 - **Simple conflict gate** - simple queue composition skips CPU governor when power-profile backend resolves to tuned
 - **Combo wheel safety** - combo-box settings ignore mouse-wheel input unless their dropdown menu is open, preventing accidental changes while scrolling.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling

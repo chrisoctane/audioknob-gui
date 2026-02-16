@@ -4,6 +4,16 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.6] - 2026-02-16
+
+### Changed
+- Queue dependency handling now treats queued dependency applies as satisfying dependency locks, so dependent knobs can be applied together in one run.
+- Queue apply execution is now dependency-ordered, so prerequisite knobs are applied before dependent knobs in the same queue.
+
+### Fixed
+- IRQ Pinning no longer shows a conflict against the `irqbalance_disable` dependency knob.
+- Configure dialogs for IRQ Pinning, QjackCtl RT cores, and kernel core selectors now use the PySide6 dialog result enum correctly (fixes `AttributeError: ... has no attribute 'Accepted'`).
+
 ## [0.7.5] - 2026-02-16
 
 ### Changed

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox, QPushButton
+from PySide6.QtWidgets import QDialog, QMessageBox, QPushButton
 
 from audioknob_gui.gui.dialogs.cpu_cores import CpuCoreDialog
 from audioknob_gui.gui.state import save_state
@@ -29,7 +29,7 @@ def configure_dialog(ui) -> None:
     if smt_line:
         lines.append(smt_line)
     dialog = CpuCoreDialog(cpu_count=cpu_count, selected=selected, lines=lines, parent=ui)
-    if dialog.exec() != dialog.Accepted:
+    if dialog.exec() != QDialog.DialogCode.Accepted:
         return
 
     chosen = dialog.selected_cores()

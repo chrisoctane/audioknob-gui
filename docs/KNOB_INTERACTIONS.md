@@ -45,6 +45,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 
 ### IRQ Pinning + IRQ Balance
 - irqbalance can override IRQ pinning and undo affinity changes.
+- The `irqbalance_disable` knob is a prerequisite for `irq_pinning` and is not
+  treated as a conflict with it.
 - IRQ pinning moves audio device IRQs to audio cores and sweeps other IRQs off.
 - Some IRQs are kernel-managed (read-only) and cannot be moved.
 

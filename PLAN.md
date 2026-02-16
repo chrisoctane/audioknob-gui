@@ -317,7 +317,7 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - Status labels include a conflict indicator when a knob is currently conflicting.
 - Conflict indicator counts only active/queued knobs (applied/pending/running/partial or queued apply), so idle defaults do not appear as conflicts.
 - The row-level **Conflict** button uses the same active/queued rules as the header counter, so row badges and header counts stay consistent.
-- Conflict warnings cover power profile vs governor/C-states, irqbalance vs IRQ pinning, PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
+- Conflict warnings cover power profile vs governor/C-states, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
 - In simple mode, when power profile resolves to `tuned`, the queue skips CPU governor to avoid the tuned/governor conflict path.
 - Combo-box settings ignore mouse-wheel changes unless the dropdown menu is open, preventing accidental value flips while scrolling.
 - Simple mode shows one plain-text list on the left with **Apply queue** and **Reset queue** sections (no pane, no separate selected-settings list).
@@ -439,7 +439,7 @@ In `gui/app.py` → `_populate()`:
 **Sorting**: Click any column header to sort. Category/Status sorts show grouped headers; Req./Risk grouping is available when Technical columns are shown.
 
 **Req. column** (Technical columns on): Shows A/R/D markers for Advanced/Reboot/Depends-on; tooltip includes the key and any group/dependency details when present.
-**Dependency gating**: If a knob depends on another, it stays locked until the dependency is applied; tooltip shows the required knob name(s).
+**Dependency gating**: If a knob depends on another, it stays locked until the dependency is applied or queued for apply; tooltip shows the required knob name(s).
 
 **CLI column** (Technical columns on): Shows the target command/file/parameter shorthand for each knob.
 
