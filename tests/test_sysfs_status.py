@@ -2,6 +2,10 @@
 
 import re
 import pytest
+from pathlib import Path
+
+from audioknob_gui.registry import Capabilities, Impl, Knob
+from audioknob_gui.worker.ops import check_knob_status
 
 
 def _extract_sysfs_selector(content: str) -> str | None:
@@ -72,3 +76,58 @@ class TestSysfsSelectorParsing:
         """Whitespace is stripped."""
         content = "  always [madvise] never  \n"
         assert _extract_sysfs_selector(content) == "madvise"
+
+
+def _cpumask_knob(value: str) -> Knob:
+    return Knob(
+        id="kernel_workqueue_cpumask",
+        title="Workqueue cpumask",
+        description="",
+        category="kernel",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysfs_glob_kv",
+            params={
+                "glob": "/sys/devices/virtual/workqueue/cpumask",
+                "value": value,
+            },
+        ),
+    )
+
+
+def test_check_knob_status_cpumask_compares_equivalent_formats(monkeypatch) -> None:
+    knob = _cpumask_knob("2-3")
+
+    monkeypatch.setattr(
+        "audioknob_gui.worker.ops._expand_sysfs_globs",
+        lambda _glob: ["/sys/devices/virtual/workqueue/cpumask"],
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda _self, encoding="utf-8": "2,3\n",
+    )
+
+    assert check_knob_status(knob) == "applied"
+
+
+def test_check_knob_status_cpumask_detects_mismatch(monkeypatch) -> None:
+    knob = _cpumask_knob("2-3")
+
+    monkeypatch.setattr(
+        "audioknob_gui.worker.ops._expand_sysfs_globs",
+        lambda _glob: ["/sys/devices/virtual/workqueue/cpumask"],
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda _self, encoding="utf-8": "4-5\n",
+    )
+
+    assert check_knob_status(knob) == "not_applied"

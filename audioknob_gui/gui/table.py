@@ -788,12 +788,56 @@ class TableMixin:
                         "pipewire_rlimits_enabled",
                         "pipewire_rtkit_enabled",
                         "pipewire_rtportal_enabled",
+                        "pipewire_uclamp_min",
+                        "pipewire_uclamp_max",
+                        "pipewire_cpu_zero_denormals",
                     )
                     requires_config = not any(self.state.get(key) is not None for key in state_keys)
+                elif k.id == "pipewire_pulse_latency":
+                    requires_config = not (
+                        isinstance(self.state.get("pipewire_pulse_min_req"), str)
+                        and bool(str(self.state.get("pipewire_pulse_min_req")).strip())
+                        or isinstance(self.state.get("pipewire_pulse_default_req"), str)
+                        and bool(str(self.state.get("pipewire_pulse_default_req")).strip())
+                        or isinstance(self.state.get("pipewire_pulse_min_quantum"), str)
+                        and bool(str(self.state.get("pipewire_pulse_min_quantum")).strip())
+                    )
+                elif k.id == "pipewire_pulse_app_rules":
+                    raw_rules = self.state.get("pipewire_pulse_app_rules")
+                    requires_config = not (
+                        isinstance(raw_rules, list)
+                        and any(isinstance(item, dict) for item in raw_rules)
+                    )
                 elif k.id == "pipewire_data_loop_affinity":
                     requires_config = not (
                         isinstance(self.state.get("pipewire_num_data_loops"), int)
                         or isinstance(self.state.get("pipewire_data_loops"), list)
+                    )
+            if status not in ("applied", "pending_reboot"):
+                if k.id == "kernel_workqueue_cpumask":
+                    cores = self.state.get("kernel_workqueue_cpumask_cores")
+                    requires_config = not (
+                        isinstance(cores, list) and any(isinstance(x, int) for x in cores)
+                    )
+                elif k.id == "cgroup_user_slice_allowed_cpus":
+                    cores = self.state.get("cgroup_user_slice_allowed_cores")
+                    requires_config = not (
+                        isinstance(cores, list) and any(isinstance(x, int) for x in cores)
+                    )
+                elif k.id == "irqbalance_banned_cpulist":
+                    cores = self.state.get("irqbalance_banned_cpulist_cores")
+                    requires_config = not (
+                        isinstance(cores, list) and any(isinstance(x, int) for x in cores)
+                    )
+                elif k.id in ("systemd_pipewire_service_rt", "systemd_wireplumber_service_rt"):
+                    prefix = k.id
+                    requires_config = not any(
+                        self.state.get(key) is not None
+                        for key in (
+                            f"{prefix}_policy",
+                            f"{prefix}_priority",
+                            f"{prefix}_cpus",
+                        )
                     )
 
             conflict_ids = set()

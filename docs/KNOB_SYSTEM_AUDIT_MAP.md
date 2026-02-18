@@ -43,7 +43,7 @@ Each finding should include all of the following:
    - cross-system parity batch
 
 ## Current inventory snapshot (for audit baseline)
-- Knobs: `48`
+- Knobs: `56`
 - Categories: `10`
 - Implementation kinds: `17`
 - Conflict-map source families: `4`

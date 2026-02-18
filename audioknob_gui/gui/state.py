@@ -35,11 +35,21 @@ def load_state() -> dict:
         "kernel_nohz_full_cores": None,  # list[int] or None
         "kernel_rcu_nocbs_cores": None,  # list[int] or None
         "kernel_irqaffinity_cores": None,  # list[int] or None
+        "kernel_workqueue_cpumask_cores": None,  # list[int] or None
+        "cgroup_user_slice_allowed_cores": None,  # list[int] or None
+        "irqbalance_banned_cpulist_cores": None,  # list[int] or None
         "irq_housekeeping_auto": True,  # bool
         "irq_pinning_devices": [],  # list[str]
         "irq_pinning_cpu_cores": None,  # list[int] or None
+        "systemd_pipewire_service_rt_policy": None,  # str | None
+        "systemd_pipewire_service_rt_priority": None,  # int | None
+        "systemd_pipewire_service_rt_cpus": None,  # list[int] | None
+        "systemd_wireplumber_service_rt_policy": None,  # str | None
+        "systemd_wireplumber_service_rt_priority": None,  # int | None
+        "systemd_wireplumber_service_rt_cpus": None,  # list[int] | None
         "audio_core_plan_count": 4,  # int
         "audio_core_plan_expanded": True,  # bool
+        "core_plan_linked": True,  # bool
         "view_tab": "all",  # str
         "advanced_mode_enabled": False,  # bool
         "show_technical_columns": False,  # bool (Req/Risk/CLI)
@@ -62,6 +72,13 @@ def load_state() -> dict:
         "pipewire_rlimits_enabled": None,  # bool | None
         "pipewire_rtkit_enabled": None,  # bool | None
         "pipewire_rtportal_enabled": None,  # bool | None
+        "pipewire_uclamp_min": None,  # int | None
+        "pipewire_uclamp_max": None,  # int | None
+        "pipewire_cpu_zero_denormals": None,  # bool | None
+        "pipewire_pulse_min_req": None,  # str | None
+        "pipewire_pulse_default_req": None,  # str | None
+        "pipewire_pulse_min_quantum": None,  # str | None
+        "pipewire_pulse_app_rules": None,  # list[dict] | None
         "pipewire_num_data_loops": None,  # int | None
         "pipewire_data_loops": None,  # list[dict] | None
         "wireplumber_alsa_period_size": None,  # int | None
@@ -111,6 +128,12 @@ def load_state() -> dict:
             data["kernel_rcu_nocbs_cores"] = None
         if "kernel_irqaffinity_cores" not in data:
             data["kernel_irqaffinity_cores"] = None
+        if "kernel_workqueue_cpumask_cores" not in data:
+            data["kernel_workqueue_cpumask_cores"] = None
+        if "cgroup_user_slice_allowed_cores" not in data:
+            data["cgroup_user_slice_allowed_cores"] = None
+        if "irqbalance_banned_cpulist_cores" not in data:
+            data["irqbalance_banned_cpulist_cores"] = None
         if "irq_housekeeping_auto" not in data:
             manual = data.get("kernel_irqaffinity_cores")
             has_manual = isinstance(manual, list) and any(isinstance(x, int) for x in manual)
@@ -119,10 +142,24 @@ def load_state() -> dict:
             data["irq_pinning_devices"] = []
         if "irq_pinning_cpu_cores" not in data:
             data["irq_pinning_cpu_cores"] = None
+        if "systemd_pipewire_service_rt_policy" not in data:
+            data["systemd_pipewire_service_rt_policy"] = None
+        if "systemd_pipewire_service_rt_priority" not in data:
+            data["systemd_pipewire_service_rt_priority"] = None
+        if "systemd_pipewire_service_rt_cpus" not in data:
+            data["systemd_pipewire_service_rt_cpus"] = None
+        if "systemd_wireplumber_service_rt_policy" not in data:
+            data["systemd_wireplumber_service_rt_policy"] = None
+        if "systemd_wireplumber_service_rt_priority" not in data:
+            data["systemd_wireplumber_service_rt_priority"] = None
+        if "systemd_wireplumber_service_rt_cpus" not in data:
+            data["systemd_wireplumber_service_rt_cpus"] = None
         if "audio_core_plan_count" not in data:
             data["audio_core_plan_count"] = 4
         if "audio_core_plan_expanded" not in data:
             data["audio_core_plan_expanded"] = True
+        if "core_plan_linked" not in data:
+            data["core_plan_linked"] = True
         if "view_tab" not in data:
             data["view_tab"] = "all"
         if "advanced_mode_enabled" not in data:
@@ -169,6 +206,20 @@ def load_state() -> dict:
             data["pipewire_rtkit_enabled"] = None
         if "pipewire_rtportal_enabled" not in data:
             data["pipewire_rtportal_enabled"] = None
+        if "pipewire_uclamp_min" not in data:
+            data["pipewire_uclamp_min"] = None
+        if "pipewire_uclamp_max" not in data:
+            data["pipewire_uclamp_max"] = None
+        if "pipewire_cpu_zero_denormals" not in data:
+            data["pipewire_cpu_zero_denormals"] = None
+        if "pipewire_pulse_min_req" not in data:
+            data["pipewire_pulse_min_req"] = None
+        if "pipewire_pulse_default_req" not in data:
+            data["pipewire_pulse_default_req"] = None
+        if "pipewire_pulse_min_quantum" not in data:
+            data["pipewire_pulse_min_quantum"] = None
+        if "pipewire_pulse_app_rules" not in data:
+            data["pipewire_pulse_app_rules"] = None
         if "pipewire_num_data_loops" not in data:
             data["pipewire_num_data_loops"] = None
         if "pipewire_data_loops" not in data:
@@ -293,6 +344,8 @@ def load_state() -> dict:
                 data["irq_pinning_cpu_cores"] = None
         if data.get("audio_core_plan_count") is not None and not isinstance(data.get("audio_core_plan_count"), int):
             data["audio_core_plan_count"] = 4
+        if data.get("core_plan_linked") is not None and not isinstance(data.get("core_plan_linked"), bool):
+            data["core_plan_linked"] = True
         if data.get("view_tab") not in ("all", "cores", "dev"):
             data["view_tab"] = "all"
         for key in (
@@ -300,6 +353,11 @@ def load_state() -> dict:
             "kernel_nohz_full_cores",
             "kernel_rcu_nocbs_cores",
             "kernel_irqaffinity_cores",
+            "kernel_workqueue_cpumask_cores",
+            "cgroup_user_slice_allowed_cores",
+            "irqbalance_banned_cpulist_cores",
+            "systemd_pipewire_service_rt_cpus",
+            "systemd_wireplumber_service_rt_cpus",
         ):
             if data.get(key) is not None and not isinstance(data.get(key), list):
                 data[key] = None
@@ -382,10 +440,14 @@ def load_state() -> dict:
             "pipewire_rt_time_soft",
             "pipewire_rt_time_hard",
             "pipewire_nice_level",
+            "pipewire_uclamp_min",
+            "pipewire_uclamp_max",
             "pipewire_num_data_loops",
             "wireplumber_alsa_period_size",
             "wireplumber_alsa_period_num",
             "wireplumber_alsa_headroom",
+            "systemd_pipewire_service_rt_priority",
+            "systemd_wireplumber_service_rt_priority",
         ):
             raw = data.get(key)
             if raw is None:
@@ -401,6 +463,7 @@ def load_state() -> dict:
             "pipewire_rlimits_enabled",
             "pipewire_rtkit_enabled",
             "pipewire_rtportal_enabled",
+            "pipewire_cpu_zero_denormals",
             "wireplumber_alsa_disable_batch",
         ):
             raw = data.get(key)
@@ -416,6 +479,27 @@ def load_state() -> dict:
         loops = data.get("pipewire_data_loops")
         if loops is not None and not (isinstance(loops, list) and all(isinstance(x, dict) for x in loops)):
             data["pipewire_data_loops"] = None
+        pulse_rules = data.get("pipewire_pulse_app_rules")
+        if pulse_rules is not None and not (
+            isinstance(pulse_rules, list) and all(isinstance(x, dict) for x in pulse_rules)
+        ):
+            data["pipewire_pulse_app_rules"] = None
+        for key in ("pipewire_pulse_min_req", "pipewire_pulse_default_req", "pipewire_pulse_min_quantum"):
+            raw = data.get(key)
+            if raw is not None and not isinstance(raw, str):
+                data[key] = None
+        for key in ("systemd_pipewire_service_rt_policy", "systemd_wireplumber_service_rt_policy"):
+            policy = data.get(key)
+            if policy is None:
+                continue
+            if not isinstance(policy, str):
+                data[key] = None
+                continue
+            policy_norm = policy.strip().lower()
+            if policy_norm not in ("fifo", "rr", "other"):
+                data[key] = None
+            else:
+                data[key] = policy_norm
         device_id = data.get("pipewire_pro_audio_device_id")
         if device_id is not None and not isinstance(device_id, (str, int)):
             data["pipewire_pro_audio_device_id"] = None

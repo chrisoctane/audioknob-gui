@@ -4,6 +4,20 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.7] - 2026-02-18
+
+### Added
+- New Dev-tab knobs for advanced partitioning and stack policy: `irqbalance_banned_cpulist`, `kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`, `pipewire_pulse_latency`, `pipewire_pulse_app_rules`, and `pipewire_profiler_enable`.
+- New regression coverage for linked core-plan behavior and newly added config-required knob flows.
+
+### Changed
+- Cores & IRQ now defaults to a linked core-plan model where audio-role selectors share one core set and housekeeping-role selectors use its inverse.
+- Clearing core selections and applying now performs explicit reset semantics for core-policy knobs instead of silently reusing defaults.
+- Dev config-required knobs stay locked on Apply until configured, while Configure remains available.
+
+### Fixed
+- Conflict/status handling now reports audio isolation mismatches consistently across `isolcpus`, `nohz_full`, and `rcu_nocbs`.
+
 ## [0.7.6] - 2026-02-16
 
 ### Changed

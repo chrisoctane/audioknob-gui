@@ -162,6 +162,18 @@ def resolve_rtirq_config_path(distro_id: str) -> str:
     return candidates[0]
 
 
+def resolve_irqbalance_config_path(distro_id: str) -> str:
+    deb_like = distro_id in ("debian", "ubuntu", "linuxmint", "pop")
+    if deb_like:
+        candidates = ["/etc/default/irqbalance", "/etc/sysconfig/irqbalance"]
+    else:
+        candidates = ["/etc/sysconfig/irqbalance", "/etc/default/irqbalance"]
+    for path in candidates:
+        if Path(path).exists():
+            return path
+    return candidates[0]
+
+
 def _systemd_is_active(unit: str) -> bool:
     try:
         result = run(["systemctl", "is-active", unit])
@@ -779,19 +791,49 @@ def _pam_limits_preview(params: dict[str, Any]) -> list[FileChange]:
 def _sysctl_conf_preview(params: dict[str, Any]) -> list[FileChange]:
     # Implemented as a simple sysctl.d drop-in file. We only ensure lines exist.
     path = str(params["path"])
+    path_obj = Path(path)
     wanted_lines = [str(x) for x in params.get("lines", [])]
+    replace_file = bool(params.get("replace_file", False))
+    replace_prefixes = [
+        str(prefix).strip()
+        for prefix in params.get("replace_prefixes", [])
+        if str(prefix).strip()
+    ]
+    clear_prefixes = [
+        str(prefix).strip()
+        for prefix in params.get("clear_prefixes", [])
+        if str(prefix).strip()
+    ]
+    clear_file = bool(params.get("clear_file", False))
 
     before = _read_text(path)
-    before_lines = before.splitlines()
-    after_lines = list(before_lines)
+    if clear_file:
+        if not path_obj.exists():
+            return []
+        return [FileChange(path=path, action="delete", diff=unified_diff(path, before, ""))]
 
-    for line in wanted_lines:
-        if line not in after_lines:
-            after_lines.append(line)
+    if replace_file:
+        after_lines = [line for line in wanted_lines if line.strip()]
+    else:
+        before_lines = before.splitlines()
+        after_lines = list(before_lines)
+        for prefix in replace_prefixes:
+            should_remove = any(line.strip().startswith(prefix) for line in wanted_lines)
+            if not should_remove and prefix in clear_prefixes:
+                should_remove = True
+            if should_remove:
+                after_lines = [line for line in after_lines if not line.strip().startswith(prefix)]
+        for prefix in clear_prefixes:
+            if prefix in replace_prefixes:
+                continue
+            after_lines = [line for line in after_lines if not line.strip().startswith(prefix)]
+        for line in wanted_lines:
+            if line not in after_lines:
+                after_lines.append(line)
 
     after = "\n".join(after_lines).rstrip("\n") + "\n"
 
-    action = "create" if (before == "" and not Path(path).exists()) else "modify"
+    action = "create" if (before == "" and not path_obj.exists()) else "modify"
     return [FileChange(path=path, action=action, diff=unified_diff(path, before, after))]
 
 
@@ -1042,9 +1084,12 @@ def _kernel_cmdline_preview(params: dict[str, Any]) -> tuple[list[FileChange], l
     
     Returns (file_changes, notes) tuple.
     """
-    param = str(params.get("param", ""))
-    if not param:
+    param = str(params.get("param", "")).strip()
+    remove_param = str(params.get("remove_param", "")).strip()
+    if not param and not remove_param:
         return [], ["No kernel parameter specified"]
+    effect_param = remove_param or param
+    remove_mode = bool(remove_param)
     
     distro = detect_distro()
     notes: list[str] = []
@@ -1090,67 +1135,98 @@ def _kernel_cmdline_preview(params: dict[str, Any]) -> tuple[list[FileChange], l
             return any(t == param for t in tokens)
         # also treat foo=bar as satisfying "foo" presence
         return any(t == param or t.startswith(param + "=") for t in tokens)
+
+    def _remove_param(tokens: list[str], param_value: str) -> list[str]:
+        if "=" in param_value:
+            return [t for t in tokens if t != param_value]
+        return [t for t in tokens if t != param_value and not t.startswith(param_value + "=")]
     
     tokens = _cmdline_tokens_for_file(before, distro.boot_system)
+    after = before
 
     if distro.boot_system == "grub2-bls" or distro.boot_system == "bls":
         # BLS style: /etc/kernel/cmdline contains the full cmdline
-        if _param_present(param, tokens):
-            notes.append(f"Parameter '{param}' already present in {cmdline_file}")
-            return [], notes
-        
-        # Add param to the end of the line (single line file)
-        after = before.strip() + " " + param + "\n" if before.strip() else param + "\n"
-        
-        notes.append(f"Will run: {' '.join(distro.kernel_cmdline_update_cmd)}")
-        notes.append("Requires reboot to take effect")
+        if remove_mode:
+            if not _param_present(effect_param, tokens):
+                notes.append(f"Parameter '{effect_param}' already absent in {cmdline_file}")
+                return [], notes
+            after_tokens = _remove_param(tokens, effect_param)
+            after = " ".join(after_tokens).strip()
+            if after:
+                after += "\n"
+        else:
+            if _param_present(effect_param, tokens):
+                notes.append(f"Parameter '{effect_param}' already present in {cmdline_file}")
+                return [], notes
+
+            # Add param to the end of the line (single line file)
+            after = before.strip() + " " + effect_param + "\n" if before.strip() else effect_param + "\n"
         
     elif distro.boot_system == "grub2":
         # GRUB2 style: /etc/default/grub has GRUB_CMDLINE_LINUX_DEFAULT="..."
-        if _param_present(param, tokens):
-            notes.append(f"Parameter '{param}' already present in {cmdline_file}")
+        if remove_mode and not _param_present(effect_param, tokens):
+            notes.append(f"Parameter '{effect_param}' already absent in {cmdline_file}")
             return [], notes
-        
+        if not remove_mode and _param_present(effect_param, tokens):
+            notes.append(f"Parameter '{effect_param}' already present in {cmdline_file}")
+            return [], notes
+
         # Find and modify GRUB_CMDLINE_LINUX_DEFAULT line
         after_lines = before.splitlines() if before else []
         found = False
         for i, line in enumerate(after_lines):
             if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
-                # Extract current value and add param
-                # Format: GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
-                if '="' in line and line.rstrip().endswith('"'):
-                    # Add before the closing quote
-                    after_lines[i] = line.rstrip()[:-1] + " " + param + '"'
+                _, _, rhs = line.partition("=")
+                rhs = rhs.strip()
+                if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                    inner = rhs[1:-1]
                 else:
-                    # Fallback: append to line
-                    after_lines[i] = line.rstrip() + " " + param
+                    inner = rhs
+                try:
+                    line_tokens = shlex.split(inner)
+                except Exception:
+                    line_tokens = inner.split()
+                if remove_mode:
+                    new_tokens = _remove_param(line_tokens, effect_param)
+                else:
+                    new_tokens = list(line_tokens)
+                    new_tokens.append(effect_param)
+                after_lines[i] = f'GRUB_CMDLINE_LINUX_DEFAULT="{" ".join(new_tokens)}"'
                 found = True
                 break
-        
-        if not found:
-            # Add the line if missing
-            after_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{param}"')
-        
+
+        if not found and not remove_mode:
+            after_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{effect_param}"')
+
         after = "\n".join(after_lines)
         if after and not after.endswith("\n"):
             after += "\n"
-        
-        notes.append(f"Will run: {' '.join(distro.kernel_cmdline_update_cmd)}")
-        notes.append("Requires reboot to take effect")
     
     elif distro.boot_system == "systemd-boot":
         # systemd-boot: similar to BLS
-        if _param_present(param, tokens):
-            notes.append(f"Parameter '{param}' already present in {cmdline_file}")
-            return [], notes
-        
-        after = before.strip() + " " + param + "\n" if before.strip() else param + "\n"
-        notes.append(f"Will run: {' '.join(distro.kernel_cmdline_update_cmd)}")
-        notes.append("Requires reboot to take effect")
+        if remove_mode:
+            if not _param_present(effect_param, tokens):
+                notes.append(f"Parameter '{effect_param}' already absent in {cmdline_file}")
+                return [], notes
+            after_tokens = _remove_param(tokens, effect_param)
+            after = " ".join(after_tokens).strip()
+            if after:
+                after += "\n"
+        else:
+            if _param_present(effect_param, tokens):
+                notes.append(f"Parameter '{effect_param}' already present in {cmdline_file}")
+                return [], notes
+            after = before.strip() + " " + effect_param + "\n" if before.strip() else effect_param + "\n"
     
     else:
         notes.append(f"Unsupported boot system: {distro.boot_system}")
         return [], notes
+
+    if after == before:
+        return [], notes
+    if distro.kernel_cmdline_update_cmd:
+        notes.append(f"Will run: {' '.join(distro.kernel_cmdline_update_cmd)}")
+    notes.append("Requires reboot to take effect")
     
     action = "modify" if Path(cmdline_file).exists() else "create"
     return [FileChange(path=cmdline_file, action=action, diff=unified_diff(cmdline_file, before, after))], notes
@@ -1183,6 +1259,78 @@ def _pipewire_clean_mapping(mapping: dict[str, Any] | None) -> dict[str, Any]:
     return {str(k): v for k, v in mapping.items() if v is not None}
 
 
+def _pipewire_clean_modules(modules: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not isinstance(modules, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for module in modules:
+        if not isinstance(module, dict):
+            continue
+        name = str(module.get("name") or "").strip()
+        if not name:
+            continue
+        entry: dict[str, Any] = {"name": name}
+        args = _pipewire_clean_mapping(module.get("args"))
+        if args:
+            entry["args"] = args
+        flags_raw = module.get("flags")
+        if isinstance(flags_raw, list):
+            flags = [str(flag).strip() for flag in flags_raw if str(flag).strip()]
+            if flags:
+                entry["flags"] = flags
+        out.append(entry)
+    return out
+
+
+def _pipewire_clean_rules(rules: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not isinstance(rules, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        matches: list[dict[str, Any]] = []
+        matches_raw = rule.get("matches")
+        if isinstance(matches_raw, list):
+            for match in matches_raw:
+                clean_match = _pipewire_clean_mapping(match)
+                if clean_match:
+                    matches.append(clean_match)
+        elif isinstance(rule.get("match"), dict):
+            clean_match = _pipewire_clean_mapping(rule.get("match"))
+            if clean_match:
+                matches.append(clean_match)
+        if not matches:
+            continue
+
+        actions_raw = rule.get("actions")
+        if not isinstance(actions_raw, dict):
+            props = _pipewire_clean_mapping(rule.get("props"))
+            actions_raw = {"update-props": props} if props else {}
+
+        clean_actions: dict[str, Any] = {}
+        for action_name, action_value in actions_raw.items():
+            key = str(action_name).strip()
+            if not key:
+                continue
+            if isinstance(action_value, dict):
+                clean_map = _pipewire_clean_mapping(action_value)
+                if clean_map:
+                    clean_actions[key] = clean_map
+                continue
+            if isinstance(action_value, list):
+                values = [v for v in action_value if v is not None]
+                if values:
+                    clean_actions[key] = values
+                continue
+            if action_value is not None:
+                clean_actions[key] = action_value
+        if not clean_actions:
+            continue
+        out.append({"matches": matches, "actions": clean_actions})
+    return out
+
+
 def _pipewire_has_settings(params: dict[str, Any]) -> bool:
     if params.get("quantum") is not None or params.get("rate") is not None:
         return True
@@ -1191,6 +1339,10 @@ def _pipewire_has_settings(params: dict[str, Any]) -> bool:
     if _pipewire_clean_mapping(params.get("context")):
         return True
     if _pipewire_clean_mapping(params.get("module_rt_args")):
+        return True
+    if _pipewire_clean_modules(params.get("context_modules")):
+        return True
+    if _pipewire_clean_rules(params.get("rules")):
         return True
     return False
 
@@ -1203,12 +1355,63 @@ def _pipewire_append_mapping(lines: list[str], mapping: dict[str, Any], indent: 
         lines.append(f"{pad}{key} = {_pipewire_format_value(val)}")
 
 
+def _pipewire_append_modules(lines: list[str], modules: list[dict[str, Any]]) -> None:
+    lines.append("context.modules = [")
+    for module in modules:
+        lines.append("  {")
+        lines.append(f"    name = {_pipewire_format_value(module['name'])}")
+        args = module.get("args")
+        if isinstance(args, dict) and args:
+            lines.append("    args = {")
+            _pipewire_append_mapping(lines, args, indent=6)
+            lines.append("    }")
+        flags = module.get("flags")
+        if isinstance(flags, list) and flags:
+            lines.append(f"    flags = {_pipewire_format_value(flags)}")
+        lines.append("  }")
+    lines.append("]")
+
+
+def _pipewire_append_rules(lines: list[str], rules: list[dict[str, Any]], section: str) -> None:
+    lines.append(f"{section} = [")
+    for rule in rules:
+        lines.append("  {")
+        lines.append("    matches = [")
+        for match in rule.get("matches", []):
+            if not isinstance(match, dict) or not match:
+                continue
+            lines.append("      {")
+            _pipewire_append_mapping(lines, match, indent=8)
+            lines.append("      }")
+        lines.append("    ]")
+        lines.append("    actions = {")
+        actions = rule.get("actions", {})
+        if isinstance(actions, dict):
+            for action_name, action_value in actions.items():
+                key = str(action_name).strip()
+                if not key:
+                    continue
+                if isinstance(action_value, dict):
+                    lines.append(f"      {key} = {{")
+                    _pipewire_append_mapping(lines, action_value, indent=8)
+                    lines.append("      }")
+                else:
+                    lines.append(f"      {key} = {_pipewire_format_value(action_value)}")
+        lines.append("    }")
+        lines.append("  }")
+    lines.append("]")
+
+
 def build_pipewire_conf_content(params: dict[str, Any]) -> str:
     lines: list[str] = ["# audioknob-gui PipeWire configuration"]
 
+    properties_section = str(params.get("properties_section") or "context.properties").strip()
     properties = _pipewire_clean_mapping(params.get("properties"))
     context = _pipewire_clean_mapping(params.get("context"))
     module_rt_args = _pipewire_clean_mapping(params.get("module_rt_args"))
+    context_modules = _pipewire_clean_modules(params.get("context_modules"))
+    rules = _pipewire_clean_rules(params.get("rules"))
+    rules_section = str(params.get("rules_section") or "").strip()
 
     quantum = params.get("quantum")
     rate = params.get("rate")
@@ -1219,8 +1422,8 @@ def build_pipewire_conf_content(params: dict[str, Any]) -> str:
     if rate is not None:
         properties.setdefault("default.clock.rate", rate)
 
-    if properties:
-        lines.append("context.properties = {")
+    if properties and properties_section:
+        lines.append(f"{properties_section} = {{")
         _pipewire_append_mapping(lines, properties, indent=4)
         lines.append("}")
 
@@ -1242,6 +1445,12 @@ def build_pipewire_conf_content(params: dict[str, Any]) -> str:
         lines.append("module.rt.args = {")
         _pipewire_append_mapping(lines, module_rt_args, indent=4)
         lines.append("}")
+
+    if context_modules:
+        _pipewire_append_modules(lines, context_modules)
+
+    if rules:
+        _pipewire_append_rules(lines, rules, rules_section or "pulse.rules")
 
     return "\n".join(lines) + "\n"
 
@@ -1794,15 +2003,37 @@ def check_knob_status(knob: Any) -> str:
     if kind == "sysctl_conf":
         path = Path(str(params.get("path", "")))
         wanted_lines = [str(x) for x in params.get("lines", [])]
+        clear_prefixes = [
+            str(prefix).strip()
+            for prefix in params.get("clear_prefixes", [])
+            if str(prefix).strip()
+        ]
+        clear_file = bool(params.get("clear_file", False))
+        if clear_file:
+            return "applied" if not path.exists() else "not_applied"
         if not path.exists():
+            if clear_prefixes and not wanted_lines:
+                return "applied"
             return "not_applied"
-        content = path.read_text(encoding="utf-8")
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            return "unknown"
+        file_lines = content.splitlines()
         found = sum(1 for line in wanted_lines if line in content)
-        if found == len(wanted_lines):
-            return "applied"
-        elif found > 0:
-            return "partial"
-        return "not_applied"
+        has_blocked_prefix = any(
+            any(line.strip().startswith(prefix) for line in file_lines)
+            for prefix in clear_prefixes
+        )
+        if wanted_lines:
+            if found == len(wanted_lines) and not has_blocked_prefix:
+                return "applied"
+            if found > 0 or has_blocked_prefix:
+                return "partial"
+            return "not_applied"
+        if clear_prefixes:
+            return "not_applied" if has_blocked_prefix else "applied"
+        return "unknown"
 
     if kind == "power_profile":
         backend = select_power_profile_backend(params)
@@ -2010,6 +2241,17 @@ def check_knob_status(knob: Any) -> str:
         matches = _expand_sysfs_globs(glob_pat)
         if not matches:
             return "not_applicable"
+        cpuset_compare = knob.id == "kernel_workqueue_cpumask"
+        if not cpuset_compare:
+            cpuset_compare = "cpumask" in glob_pat
+        parse_cpu_list = None
+        if cpuset_compare:
+            try:
+                from audioknob_gui.core.irq import parse_cpu_list as _parse_cpu_list
+
+                parse_cpu_list = _parse_cpu_list
+            except Exception:
+                parse_cpu_list = None
         applied_count = 0
         saw_selector = False
         for p in matches:
@@ -2028,8 +2270,11 @@ def check_knob_status(knob: Any) -> str:
                 else:
                     # Plain value (no selector format)
                     current = content
-                
-                if current == wanted:
+
+                if parse_cpu_list is not None:
+                    if parse_cpu_list(str(current)) == parse_cpu_list(wanted):
+                        applied_count += 1
+                elif current == wanted:
                     applied_count += 1
             except Exception:
                 pass

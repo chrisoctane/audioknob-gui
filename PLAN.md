@@ -233,9 +233,15 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - Use the **Cores & IRQ** tab to focus on core/IRQ tuning plus RT throttling and C-state limiters.
-- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, kernel RT extras including preempt=full and nosmt, RTKit placeholder). These are optional and may require manual configuration.
-- PipeWire **RT Setup** includes a Safe RT preset (RTKit/portal only) and an RT limits toggle for safer setups.
+- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, PipeWire pulse latency/rules, PipeWire profiler module, systemd service RT drop-ins, kernel RT extras including preempt=full and nosmt, RTKit placeholder). These are optional and may require manual configuration.
+- PipeWire **RT Setup** includes a Safe RT preset (RTKit/portal only), an RT limits toggle, and module-rt fields including uclamp and denormal handling toggles.
+- Several Dev knobs are intentionally config-required before Apply (workqueue cpumask, user.slice AllowedCPUs, irqbalance banned CPUs, PipeWire/WirePlumber systemd RT, PipeWire pulse latency/rules).
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
+- **Linked core plan** is enabled by default and ties core-selection knobs to one shared model:
+  - audio-role knobs use the selected audio cores
+  - housekeeping-role knobs use the inverse set
+- Clearing cores and applying now performs an explicit clear/reset for core-policy knobs instead of reusing default values (kernel core cmdline params are removed, IRQ pinning resets to kernel defaults, irqbalance banned CPU policy line is removed, `user.slice` cpuset drop-in is removed, and workqueue cpumask resets to all present CPUs).
+- Disable linked mode only for expert per-knob overrides.
 - The **Audio Core Plan** panel is collapsible to save space in the Cores & IRQ view.
 - The **IRQ Overview** button sits in the Audio Core Plan header (to the right of the title), so it stays available even when the plan body is collapsed.
 - Auto-set keeps SMT/Hyper-Threading sibling cores together so physical cores stay intact.

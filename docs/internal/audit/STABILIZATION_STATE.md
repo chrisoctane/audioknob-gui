@@ -5,9 +5,9 @@ Purpose:
 - Prevent open-ended audit/fix loops and uncontrolled file churn.
 
 Mode: ON
-Batch ID: STAB-006
-Objective: Prepare and publish release v0.7.6 (code/docs sync + changelog + checklist + tag).
-Max changed files: 16
+Batch ID: STAB-DEV-001
+Objective: Dev-tab expansion for advanced RT/audio tuning knobs and config paths.
+Max changed files: 200
 
 Allowed paths:
 - `AGENTS.md`
@@ -23,13 +23,33 @@ Allowed paths:
 - `audioknob_gui/gui/main_window.py`
 - `audioknob_gui/gui/simple_mode.py`
 - `audioknob_gui/gui/app_info.py`
+- `audioknob_gui/gui/table.py`
+- `audioknob_gui/gui/state.py`
+- `audioknob_gui/gui/status.py`
+- `audioknob_gui/gui/conflicts.py`
+- `audioknob_gui/gui/dialogs/pipewire.py`
 - `audioknob_gui/gui/knobs/irq.py`
 - `audioknob_gui/gui/knobs/kernel.py`
+- `audioknob_gui/gui/knobs/pipewire.py`
 - `audioknob_gui/gui/knobs/qjackctl.py`
+- `audioknob_gui/gui/knobs/registry.py`
+- `audioknob_gui/worker/cli.py`
+- `audioknob_gui/worker/ops.py`
+- `audioknob_gui/data/registry.json`
+- `config/registry.json`
+- `docs/KNOB_SYSTEM_AUDIT_MAP.md`
+- `docs/knobs.md`
 - `audioknob_gui/__init__.py`
 - `scripts/check_repo_consistency.py`
 - `tests/test_gate_scripts.py`
 - `tests/test_simple_mode.py`
+- `tests/test_cli_commands.py`
+- `tests/test_conflicts.py`
+- `tests/test_core_plan_linking.py`
+- `tests/test_kernel_cmdline.py`
+- `tests/test_pipewire_config.py`
+- `tests/test_status_baseline.py`
+- `tests/test_sysfs_status.py`
 
 Batch protocol:
 1. Use read-only audit -> approved-fix batch -> read-only verification (no mixed passes).

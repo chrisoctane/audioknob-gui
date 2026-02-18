@@ -213,6 +213,18 @@ def _state_int_list(state: dict, key: str) -> list[int] | None:
     return out or None
 
 
+def _state_cpu_list(state: dict, key: str) -> str | None:
+    cores = _state_int_list(state, key)
+    if not cores:
+        return None
+    try:
+        from audioknob_gui.core.irq import cpu_list_from_cores
+
+        return cpu_list_from_cores(cores)
+    except Exception:
+        return None
+
+
 def _pipewire_clock_constraints_override(state: dict) -> dict[str, Any]:
     props: dict[str, Any] = {}
     allowed_rates = _state_int_list(state, "pipewire_clock_allowed_rates")
@@ -270,7 +282,61 @@ def _pipewire_rt_module_override(state: dict) -> dict[str, Any]:
     rtportal = _state_bool(state, "pipewire_rtportal_enabled")
     if rtportal is not None:
         args["rtportal.enabled"] = rtportal
+    uclamp_min = _state_int(state, "pipewire_uclamp_min")
+    if uclamp_min is not None:
+        args["uclamp.min"] = uclamp_min
+    uclamp_max = _state_int(state, "pipewire_uclamp_max")
+    if uclamp_max is not None:
+        args["uclamp.max"] = uclamp_max
+    zero_denormals = _state_bool(state, "pipewire_cpu_zero_denormals")
+    if zero_denormals is not None:
+        args["cpu.zero.denormals"] = zero_denormals
     return args
+
+
+def _pipewire_pulse_latency_override(state: dict) -> dict[str, Any]:
+    props: dict[str, Any] = {}
+    for prop, state_key in (
+        ("pulse.min.req", "pipewire_pulse_min_req"),
+        ("pulse.default.req", "pipewire_pulse_default_req"),
+        ("pulse.min.quantum", "pipewire_pulse_min_quantum"),
+    ):
+        raw = state.get(state_key)
+        if isinstance(raw, str) and raw.strip():
+            props[prop] = raw.strip()
+    return props
+
+
+def _pipewire_pulse_rules_override(state: dict) -> list[dict[str, Any]]:
+    profiles = state.get("pipewire_pulse_app_rules")
+    if not isinstance(profiles, list):
+        return []
+    rules: list[dict[str, Any]] = []
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        match_raw = profile.get("match")
+        if not isinstance(match_raw, dict):
+            continue
+        match = {str(k): v for k, v in match_raw.items() if isinstance(k, str) and v is not None}
+        if not match:
+            continue
+        latency = profile.get("latency")
+        if not (isinstance(latency, str) and latency.strip()):
+            continue
+        props: dict[str, Any] = {"pulse.min.req": latency.strip()}
+        default_req = profile.get("default_req")
+        if isinstance(default_req, str) and default_req.strip():
+            props["pulse.default.req"] = default_req.strip()
+        min_quantum = profile.get("min_quantum")
+        if isinstance(min_quantum, str) and min_quantum.strip():
+            props["pulse.min.quantum"] = min_quantum.strip()
+        rule = {
+            "matches": [match],
+            "actions": {"update-props": props},
+        }
+        rules.append(rule)
+    return rules
 
 
 def _pipewire_data_loops_override(state: dict) -> dict[str, Any]:
@@ -306,6 +372,44 @@ def _pipewire_limits_group_override(state: dict) -> str | None:
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
     return None
+
+
+def _systemd_service_policy(state: dict, prefix: str) -> str:
+    raw = str(state.get(f"{prefix}_policy") or "").strip().lower()
+    if raw in ("fifo", "rr", "other"):
+        return raw
+    return "fifo"
+
+
+def _systemd_service_priority(state: dict, prefix: str, *, fallback: int) -> int:
+    value = _state_int(state, f"{prefix}_priority")
+    if value is None:
+        return fallback
+    return max(1, min(99, value))
+
+
+def _systemd_service_lines(state: dict, prefix: str, *, fallback_prio: int) -> list[str]:
+    policy = _systemd_service_policy(state, prefix)
+    prio = _systemd_service_priority(state, prefix, fallback=fallback_prio)
+    lines = [
+        "[Service]",
+        f"CPUSchedulingPolicy={policy}",
+    ]
+    if policy in ("fifo", "rr"):
+        lines.append(f"CPUSchedulingPriority={prio}")
+    cpu_list = _state_cpu_list(state, f"{prefix}_cpus")
+    if cpu_list:
+        lines.append(f"CPUAffinity={cpu_list.replace(',', ' ')}")
+    return lines
+
+
+def _user_slice_allowed_cpus_lines(state: dict) -> list[str]:
+    lines = ["[Slice]"]
+    cpu_list = _state_cpu_list(state, "cgroup_user_slice_allowed_cores")
+    if cpu_list:
+        lines.append(f"AllowedCPUs={cpu_list.replace(',', ' ')}")
+    lines.append("CPUWeight=100")
+    return lines
 
 
 def _resolve_existing_group(preferred: str | None, candidates: list[str]) -> str | None:
@@ -376,6 +480,16 @@ def _apply_pipewire_state_overrides(kid: str, params: dict[str, Any], state: dic
         props = dict(new_params.get("properties") or {})
         props.update(_pipewire_mlock_override(state))
         new_params["properties"] = props
+    elif kid == "pipewire_pulse_latency":
+        props = dict(new_params.get("properties") or {})
+        props.update(_pipewire_pulse_latency_override(state))
+        new_params["properties"] = props
+        new_params["properties_section"] = "pulse.properties"
+    elif kid == "pipewire_pulse_app_rules":
+        rules = _pipewire_pulse_rules_override(state)
+        if rules:
+            new_params["rules"] = rules
+        new_params["rules_section"] = "pulse.rules"
     elif kid == "pipewire_rt_module_tuning":
         args = dict(new_params.get("module_rt_args") or {})
         args.update(_pipewire_rt_module_override(state))
@@ -422,6 +536,48 @@ def _irq_pinning_override(state: dict) -> tuple[list[str] | None, str | None]:
 
         cpu_list = cpu_list_from_cores(cores_raw)
     return devices, cpu_list
+
+
+def _state_int_list_with_presence(state: dict, key: str) -> tuple[list[int] | None, bool]:
+    raw = state.get(key)
+    if raw is None:
+        return None, False
+    if not isinstance(raw, list):
+        return None, False
+    out: list[int] = []
+    for item in raw:
+        if isinstance(item, bool):
+            return None, False
+        try:
+            out.append(int(item))
+        except Exception:
+            return None, False
+    return out, True
+
+
+def _kernel_cmdline_clear_param(state: dict, knob_id: str) -> str | None:
+    """Return param prefix for an explicit clear request, else None."""
+    prefix_map = {
+        "kernel_isolcpus": ("kernel_isolcpus_cores", "isolcpus"),
+        "kernel_nohz_full": ("kernel_nohz_full_cores", "nohz_full"),
+        "kernel_rcu_nocbs": ("kernel_rcu_nocbs_cores", "rcu_nocbs"),
+        "kernel_irqaffinity": ("kernel_irqaffinity_cores", "irqaffinity"),
+    }
+    meta = prefix_map.get(knob_id)
+    if not meta:
+        return None
+    key, prefix = meta
+
+    if knob_id == "kernel_irqaffinity" and state.get("irq_housekeeping_auto", True):
+        audio_raw, audio_configured = _state_int_list_with_presence(state, "irq_pinning_cpu_cores")
+        if audio_configured and _kernel_cmdline_override(state, knob_id) is None:
+            return prefix
+        return None
+
+    cores_raw, configured = _state_int_list_with_presence(state, key)
+    if configured and not cores_raw:
+        return prefix
+    return None
 
 
 def _resolve_housekeeping_cores(state: dict, audio_set: set[int], warnings: list[str] | None = None) -> set[int] | None:
@@ -521,12 +677,101 @@ def _kernel_cmdline_status_param(state: dict, knob_id: str) -> str | None:
     override = _kernel_cmdline_override(state, knob_id)
     if override:
         return override
+    clear_param = _kernel_cmdline_clear_param(state, knob_id)
+    if clear_param:
+        return clear_param
     fallback = {
         "kernel_isolcpus": "isolcpus",
         "kernel_nohz_full": "nohz_full",
         "kernel_rcu_nocbs": "rcu_nocbs",
     }
     return fallback.get(knob_id)
+
+
+def _apply_root_state_overrides(kid: str, params: dict[str, Any], state: dict) -> dict[str, Any]:
+    new_params = dict(params)
+    if kid == "kernel_workqueue_cpumask":
+        cores_raw, configured = _state_int_list_with_presence(state, "kernel_workqueue_cpumask_cores")
+        if configured and not cores_raw:
+            try:
+                from audioknob_gui.core.irq import cpu_list_from_cores, read_cpu_present
+
+                all_cores = sorted(read_cpu_present())
+                if all_cores:
+                    new_params["value"] = cpu_list_from_cores(all_cores)
+            except Exception:
+                pass
+            return new_params
+        cpu_list = _state_cpu_list(state, "kernel_workqueue_cpumask_cores")
+        if cpu_list:
+            new_params["value"] = cpu_list
+        return new_params
+
+    if kid == "irqbalance_banned_cpulist":
+        distro_id = worker_ops.read_os_release().get("ID", "")
+        new_params["path"] = worker_ops.resolve_irqbalance_config_path(distro_id)
+        cores_raw, configured = _state_int_list_with_presence(state, "irqbalance_banned_cpulist_cores")
+        if configured and not cores_raw:
+            new_params["lines"] = []
+            new_params["clear_prefixes"] = ["IRQBALANCE_BANNED_CPULIST="]
+        else:
+            cpu_list = _state_cpu_list(state, "irqbalance_banned_cpulist_cores")
+            if cpu_list:
+                new_params["lines"] = [f"IRQBALANCE_BANNED_CPULIST={cpu_list}"]
+        new_params["replace_prefixes"] = ["IRQBALANCE_BANNED_CPULIST="]
+        new_params["post_apply"] = [["systemctl", "try-restart", "irqbalance.service"]]
+        return new_params
+
+    if kid == "cgroup_user_slice_allowed_cpus":
+        cores_raw, configured = _state_int_list_with_presence(state, "cgroup_user_slice_allowed_cores")
+        if configured and not cores_raw:
+            new_params["clear_file"] = True
+            new_params["post_apply"] = [["systemctl", "daemon-reload"]]
+            new_params.pop("replace_file", None)
+            return new_params
+        cpu_list = _state_cpu_list(state, "cgroup_user_slice_allowed_cores")
+        if cpu_list:
+            new_params["lines"] = _user_slice_allowed_cpus_lines(state)
+            new_params["replace_file"] = True
+            new_params.pop("clear_file", None)
+            new_params["post_apply"] = [["systemctl", "daemon-reload"]]
+        return new_params
+
+    if kid == "systemd_pipewire_service_rt":
+        has_override = any(
+            state.get(key) is not None
+            for key in (
+                "systemd_pipewire_service_rt_policy",
+                "systemd_pipewire_service_rt_priority",
+                "systemd_pipewire_service_rt_cpus",
+            )
+        )
+        if has_override:
+            new_params["lines"] = _systemd_service_lines(
+                state, "systemd_pipewire_service_rt", fallback_prio=88
+            )
+            new_params["replace_file"] = True
+            new_params["post_apply"] = [["systemctl", "daemon-reload"]]
+        return new_params
+
+    if kid == "systemd_wireplumber_service_rt":
+        has_override = any(
+            state.get(key) is not None
+            for key in (
+                "systemd_wireplumber_service_rt_policy",
+                "systemd_wireplumber_service_rt_priority",
+                "systemd_wireplumber_service_rt_cpus",
+            )
+        )
+        if has_override:
+            new_params["lines"] = _systemd_service_lines(
+                state, "systemd_wireplumber_service_rt", fallback_prio=80
+            )
+            new_params["replace_file"] = True
+            new_params["post_apply"] = [["systemctl", "daemon-reload"]]
+        return new_params
+
+    return new_params
 
 
 def _kernel_cmdline_param_from_manifest(manifest: dict, knob_id: str) -> str | None:
@@ -659,10 +904,17 @@ def cmd_preview(args: argparse.Namespace) -> int:
             new_params["backend"] = power_profile_backend
             k = replace(k, impl=replace(k.impl, params=new_params))
         kernel_override = _kernel_cmdline_override(state, k.id)
-        if kernel_override and k.impl is not None and k.impl.kind == "kernel_cmdline":
-            new_params = dict(k.impl.params)
-            new_params["param"] = kernel_override
-            k = replace(k, impl=replace(k.impl, params=new_params))
+        if k.impl is not None and k.impl.kind == "kernel_cmdline":
+            if kernel_override:
+                new_params = dict(k.impl.params)
+                new_params["param"] = kernel_override
+                k = replace(k, impl=replace(k.impl, params=new_params))
+            else:
+                clear_param = _kernel_cmdline_clear_param(state, k.id)
+                if clear_param:
+                    new_params = dict(k.impl.params)
+                    new_params["remove_param"] = clear_param
+                    k = replace(k, impl=replace(k.impl, params=new_params))
         if (
             (irq_devices_override or irq_cpu_override)
             and k.impl is not None
@@ -674,6 +926,10 @@ def cmd_preview(args: argparse.Namespace) -> int:
             if irq_cpu_override is not None:
                 new_params["cpu_cores"] = irq_cpu_override
             k = replace(k, impl=replace(k.impl, params=new_params))
+        if k.impl is not None:
+            new_params = _apply_root_state_overrides(k.id, k.impl.params, state)
+            if new_params != k.impl.params:
+                k = replace(k, impl=replace(k.impl, params=new_params))
         items.append(preview(k, action=args.action))
 
     payload = {
@@ -1177,11 +1433,18 @@ def cmd_apply(args: argparse.Namespace) -> int:
             "kernel_rcu_nocbs",
             "kernel_irqaffinity",
         ):
-            if not kernel_override:
-                raise SystemExit(f"{k.title} requires CPU cores. Configure cores first.")
-            new_params = dict(k.impl.params)
-            new_params["param"] = kernel_override
-            params = new_params
+            if kernel_override:
+                new_params = dict(k.impl.params)
+                new_params["param"] = kernel_override
+                params = new_params
+            else:
+                clear_param = _kernel_cmdline_clear_param(state, k.id)
+                if clear_param:
+                    new_params = dict(k.impl.params)
+                    new_params["remove_param"] = clear_param
+                    params = new_params
+                else:
+                    raise SystemExit(f"{k.title} requires CPU cores. Configure cores first.")
 
         if (
             (irq_devices_override or irq_cpu_override)
@@ -1205,6 +1468,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             params = new_params
         if k.impl is not None and k.id == "pipewire_rt_limits_group" and k.impl.kind == "pam_limits_audio_group":
             params = _apply_pipewire_state_overrides(k.id, params, state)
+        params = _apply_root_state_overrides(k.id, params, state)
 
         if kind == "pam_limits_audio_group":
             path = str(params["path"])
@@ -1230,19 +1494,99 @@ def cmd_apply(args: argparse.Namespace) -> int:
             _backup_once(tx, backups, path, knob_id=kid)
 
             want_lines = [str(x) for x in params.get("lines", [])]
+            replace_file = bool(params.get("replace_file", False))
+            replace_prefixes = [
+                str(prefix).strip()
+                for prefix in params.get("replace_prefixes", [])
+                if str(prefix).strip()
+            ]
+            clear_prefixes = [
+                str(prefix).strip()
+                for prefix in params.get("clear_prefixes", [])
+                if str(prefix).strip()
+            ]
+            clear_file = bool(params.get("clear_file", False))
             before = ""
             try:
                 before = Path(path).read_text(encoding="utf-8")
             except FileNotFoundError:
                 before = ""
-            before_lines = before.splitlines()
-            after_lines = list(before_lines)
-            for line in want_lines:
-                if line not in after_lines:
-                    after_lines.append(line)
+            if clear_file:
+                if Path(path).exists():
+                    try:
+                        Path(path).unlink()
+                    except Exception as exc:
+                        raise SystemExit(f"Failed to delete {path}: {exc}")
+                post_apply = params.get("post_apply")
+                if isinstance(post_apply, list):
+                    for command in post_apply:
+                        if not (
+                            isinstance(command, list)
+                            and command
+                            and all(isinstance(x, str) and x.strip() for x in command)
+                        ):
+                            continue
+                        try:
+                            result = subprocess.run(command, capture_output=True, text=True)
+                        except Exception as exc:
+                            warnings.append(f"Post-apply command failed ({' '.join(command)}): {exc}")
+                            continue
+                        if result.returncode != 0:
+                            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                            warnings.append(
+                                f"Post-apply command failed ({' '.join(command)}): {detail}"
+                            )
+                effects.append(
+                    {
+                        "kind": "sysctl_conf_clear",
+                        "knob_id": kid,
+                        "path": path,
+                        "message": f"Deleted {path}" if before else f"Missing {path} (already default)",
+                    }
+                )
+                applied.append(kid)
+                continue
+            if replace_file:
+                after_lines = [line for line in want_lines if line.strip()]
+            else:
+                before_lines = before.splitlines()
+                after_lines = list(before_lines)
+                for prefix in replace_prefixes:
+                    should_remove = any(line.strip().startswith(prefix) for line in want_lines)
+                    if not should_remove and prefix in clear_prefixes:
+                        should_remove = True
+                    if should_remove:
+                        after_lines = [
+                            line for line in after_lines if not line.strip().startswith(prefix)
+                        ]
+                for prefix in clear_prefixes:
+                    if prefix in replace_prefixes:
+                        continue
+                    after_lines = [
+                        line for line in after_lines if not line.strip().startswith(prefix)
+                    ]
+                for line in want_lines:
+                    if line not in after_lines:
+                        after_lines.append(line)
             after = "\n".join(after_lines).rstrip("\n") + "\n"
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(after, encoding="utf-8")
+
+            post_apply = params.get("post_apply")
+            if isinstance(post_apply, list):
+                for command in post_apply:
+                    if not (isinstance(command, list) and command and all(isinstance(x, str) and x.strip() for x in command)):
+                        continue
+                    try:
+                        result = subprocess.run(command, capture_output=True, text=True)
+                    except Exception as exc:
+                        warnings.append(f"Post-apply command failed ({' '.join(command)}): {exc}")
+                        continue
+                    if result.returncode != 0:
+                        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                        warnings.append(
+                            f"Post-apply command failed ({' '.join(command)}): {detail}"
+                        )
 
         elif kind == "systemd_unit_toggle":
             from audioknob_gui.worker.ops import systemd_disable_now, systemd_enable_now
@@ -1318,6 +1662,95 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 read_irq_affinity_list,
                 resolve_selected_devices,
             )
+
+            irq_cores_raw, irq_cores_configured = _state_int_list_with_presence(state, "irq_pinning_cpu_cores")
+            if irq_cores_configured and not irq_cores_raw:
+                persist_state_path = str(params.get("persist_state_path", "")).strip()
+                state_path = (
+                    Path(persist_state_path)
+                    if persist_state_path
+                    else Path(default_paths().var_lib_dir) / "state.json"
+                )
+                persist_unit = str(params.get("persist_unit", "")).strip() or "audioknob-irq-pinning.service"
+                persist_unit_path = str(params.get("persist_unit_path", "")).strip()
+                unit_path = (
+                    Path(persist_unit_path)
+                    if persist_unit_path
+                    else Path("/etc/systemd/system") / persist_unit
+                )
+                if state_path.exists():
+                    _backup_once(tx, backups, str(state_path), knob_id=kid)
+                if unit_path.exists():
+                    _backup_once(tx, backups, str(unit_path), knob_id=kid)
+
+                def _read_unit_state(state_cmd: str) -> str:
+                    try:
+                        result = subprocess.run(
+                            ["systemctl", state_cmd, persist_unit],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        return result.stdout.strip() or result.stderr.strip()
+                    except Exception:
+                        return ""
+
+                pre_enabled = _read_unit_state("is-enabled")
+                pre_active = _read_unit_state("is-active")
+
+                pre_irq_affinity: dict[int, str] = {}
+                for irq in list_irqs():
+                    path_list = Path(f"/proc/irq/{irq}/smp_affinity_list")
+                    if not path_list.exists():
+                        continue
+                    try:
+                        pre_irq_affinity[irq] = path_list.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        continue
+
+                ok, message = _force_reset_irq_affinity(params)
+                if not ok:
+                    raise SystemExit("IRQ pinning clear failed: " + message)
+                effects.append(
+                    {
+                        "kind": "systemd_unit_toggle",
+                        "knob_id": kid,
+                        "unit": persist_unit,
+                        "pre": {
+                            "enabled": pre_enabled,
+                            "active": pre_active,
+                        },
+                        "result": {"returncode": 0, "stdout": "", "stderr": ""},
+                    }
+                )
+                for irq, before in pre_irq_affinity.items():
+                    path_list = Path(f"/proc/irq/{irq}/smp_affinity_list")
+                    if not path_list.exists():
+                        continue
+                    try:
+                        after = path_list.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        continue
+                    if before == after:
+                        continue
+                    effects.append(
+                        {
+                            "kind": "irq_affinity",
+                            "knob_id": kid,
+                            "irq": irq,
+                            "before": before,
+                            "after": after,
+                        }
+                    )
+                effects.append(
+                    {
+                        "kind": "irq_affinity_clear",
+                        "knob_id": kid,
+                        "message": message,
+                    }
+                )
+                applied.append(kid)
+                continue
 
             device_keys = params.get("device_keys") or []
             cpu_cores = str(params.get("cpu_cores", "")).strip()
@@ -1468,7 +1901,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
             from audioknob_gui.worker.ops import write_sysfs_values
 
             glob_pat = params["glob"]
-            sysfs_effects = write_sysfs_values(glob_pat, str(params["value"]))
+            value = str(params["value"])
+            if kid == "kernel_workqueue_cpumask":
+                cores_raw, configured = _state_int_list_with_presence(state, "kernel_workqueue_cpumask_cores")
+                if configured and not cores_raw:
+                    from audioknob_gui.core.irq import cpu_list_from_cores, read_cpu_present
+
+                    all_cores = sorted(read_cpu_present())
+                    if not all_cores:
+                        raise SystemExit("Failed to read CPU topology for workqueue cpumask reset.")
+                    value = cpu_list_from_cores(all_cores)
+            sysfs_effects = write_sysfs_values(glob_pat, value)
             if not sysfs_effects:
                 raise SystemExit(f"No sysfs entries found for: {glob_pat}")
             for e in sysfs_effects:
@@ -1613,8 +2056,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
         elif kind == "kernel_cmdline":
             from audioknob_gui.worker.ops import detect_distro
             
-            param = str(params.get("param", ""))
-            if not param:
+            param = str(params.get("param", "")).strip()
+            remove_param = str(params.get("remove_param", "")).strip()
+            if not param and not remove_param:
                 raise SystemExit("No kernel parameter specified")
             
             distro = detect_distro()
@@ -1655,8 +2099,53 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     return any(t == param_str for t in tokens)
                 return any(t == param_str or t.startswith(param_str + "=") for t in tokens)
 
+            def _remove_param(tokens: list[str], param_str: str) -> list[str]:
+                if not param_str:
+                    return list(tokens)
+                if "=" in param_str:
+                    return [t for t in tokens if t != param_str]
+                return [t for t in tokens if t != param_str and not t.startswith(param_str + "=")]
+
             tokens = _tokens_for_existing(before, distro.boot_system)
-            if _param_present(param, tokens):
+            effect_param = param
+            effect_mode = "add"
+            if remove_param:
+                effect_param = remove_param
+                effect_mode = "remove"
+                if distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
+                    after_tokens = _remove_param(tokens, remove_param)
+                    after = " ".join(after_tokens).strip()
+                    if after:
+                        after += "\n"
+                    Path(cmdline_file).parent.mkdir(parents=True, exist_ok=True)
+                    Path(cmdline_file).write_text(after, encoding="utf-8")
+                elif distro.boot_system == "grub2":
+                    before_lines = before.splitlines() if before else []
+                    after_lines: list[str] = []
+                    found = False
+                    for line in before_lines:
+                        if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT="):
+                            _, _, rhs = line.partition("=")
+                            rhs = rhs.strip()
+                            if rhs.startswith('"') and rhs.endswith('"') and len(rhs) >= 2:
+                                inner = rhs[1:-1]
+                            else:
+                                inner = rhs
+                            try:
+                                line_tokens = shlex.split(inner)
+                            except Exception:
+                                line_tokens = inner.split()
+                            new_tokens = _remove_param(line_tokens, remove_param)
+                            after_lines.append(f'GRUB_CMDLINE_LINUX_DEFAULT="{" ".join(new_tokens)}"')
+                            found = True
+                        else:
+                            after_lines.append(line)
+                    if found:
+                        after = "\n".join(after_lines)
+                        if after and not after.endswith("\n"):
+                            after += "\n"
+                        Path(cmdline_file).write_text(after, encoding="utf-8")
+            elif _param_present(param, tokens):
                 # Already present, skip
                 pass
             elif distro.boot_system in ("grub2-bls", "bls", "systemd-boot"):
@@ -1690,7 +2179,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 effects.append({
                     "kind": "kernel_cmdline",
                     "knob_id": kid,
-                    "param": param,
+                    "param": effect_param,
+                    "mode": effect_mode,
                     "file": cmdline_file,
                     "update_cmd": distro.kernel_cmdline_update_cmd,
                     "result": {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
@@ -2492,6 +2982,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             if housekeeping_override:
                 new_params["housekeeping_cores"] = housekeeping_override
             k = replace(k, impl=replace(k.impl, params=new_params))
+        if k.impl is not None:
+            new_params = _apply_root_state_overrides(k.id, k.impl.params, state)
+            if new_params != k.impl.params:
+                k = replace(k, impl=replace(k.impl, params=new_params))
         status = check_knob_status(k)
         statuses.append({
             "knob_id": k.id,
@@ -3214,7 +3708,12 @@ def _force_reset_systemd(unit: str, action: str) -> tuple[bool, str]:
     return False, f"Unsupported systemd action: {action}"
 
 
-def _force_reset_remove_lines(path_str: str, remove_lines: list[str]) -> tuple[bool, str]:
+def _force_reset_remove_lines(
+    path_str: str,
+    remove_lines: list[str],
+    *,
+    remove_prefixes: list[str] | None = None,
+) -> tuple[bool, str]:
     path = Path(path_str).expanduser()
     if not path.exists():
         return True, f"Missing {path} (already default)"
@@ -3225,10 +3724,17 @@ def _force_reset_remove_lines(path_str: str, remove_lines: list[str]) -> tuple[b
         return False, f"Failed to read {path}: {e}"
 
     wanted = [str(x) for x in remove_lines if str(x).strip() != ""]
-    if not wanted:
+    prefixes = [str(x).strip() for x in (remove_prefixes or []) if str(x).strip()]
+    if not wanted and not prefixes:
         return False, "No reset lines provided"
 
-    new_lines = [line for line in lines if line not in wanted]
+    new_lines: list[str] = []
+    for line in lines:
+        if line in wanted:
+            continue
+        if any(line.strip().startswith(prefix) for prefix in prefixes):
+            continue
+        new_lines.append(line)
     removed = len(lines) - len(new_lines)
     if removed == 0:
         return True, f"No matching lines in {path}"
@@ -4020,6 +4526,7 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
         new_params = dict(params)
         new_params["backend"] = power_profile_backend
         params = new_params
+    params = _apply_root_state_overrides(knob_id, params, state)
     success = False
     message = ""
 
@@ -4034,7 +4541,12 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     elif kind == "sysctl_conf":
         path = str(params.get("path", ""))
         lines = params.get("lines", [])
-        success, message = _force_reset_remove_lines(path, lines)
+        replace_prefixes = params.get("replace_prefixes", [])
+        success, message = _force_reset_remove_lines(
+            path,
+            lines,
+            remove_prefixes=list(replace_prefixes) if isinstance(replace_prefixes, list) else None,
+        )
     elif kind == "udev_rule":
         path = str(params.get("path", ""))
         content = str(params.get("content", ""))

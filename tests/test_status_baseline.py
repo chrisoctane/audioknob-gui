@@ -56,3 +56,28 @@ def test_apply_baseline_statuses_ignores_partial_reference() -> None:
 
     assert ui._knob_preset_matches == {}
     assert ui._knob_preset_flags == {}
+
+
+def test_baseline_config_keys_include_new_dev_rt_keys() -> None:
+    from audioknob_gui.gui.status import _baseline_config_keys
+
+    keys = set(_baseline_config_keys())
+    assert {
+        "kernel_workqueue_cpumask_cores",
+        "cgroup_user_slice_allowed_cores",
+        "irqbalance_banned_cpulist_cores",
+        "systemd_pipewire_service_rt_policy",
+        "systemd_pipewire_service_rt_priority",
+        "systemd_pipewire_service_rt_cpus",
+        "systemd_wireplumber_service_rt_policy",
+        "systemd_wireplumber_service_rt_priority",
+        "systemd_wireplumber_service_rt_cpus",
+        "core_plan_linked",
+        "pipewire_uclamp_min",
+        "pipewire_uclamp_max",
+        "pipewire_cpu_zero_denormals",
+        "pipewire_pulse_min_req",
+        "pipewire_pulse_default_req",
+        "pipewire_pulse_min_quantum",
+        "pipewire_pulse_app_rules",
+    }.issubset(keys)

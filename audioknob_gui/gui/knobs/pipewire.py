@@ -6,12 +6,15 @@ from audioknob_gui.gui.dialogs.pipewire import (
     PipeWireClockConstraintsDialog,
     PipeWireDataLoopsDialog,
     PipeWireMlockDialog,
+    PipeWirePulseLatencyDialog,
+    PipeWirePulseRulesDialog,
     PipeWireQuantumDialog,
     PipeWireRtLimitsGroupDialog,
     PipeWireRtSetupDialog,
     PipeWireRtModuleDialog,
     PipeWireSampleRateDialog,
     ProAudioProfileDialog,
+    SystemdServiceRtDialog,
     WirePlumberAlsaDialog,
 )
 from audioknob_gui.gui.state import save_state
@@ -183,6 +186,9 @@ def configure_rt_module_dialog(ui) -> None:
         "rlimits_enabled": ui.state.get("pipewire_rlimits_enabled"),
         "rtkit_enabled": ui.state.get("pipewire_rtkit_enabled"),
         "rtportal_enabled": ui.state.get("pipewire_rtportal_enabled"),
+        "uclamp_min": ui.state.get("pipewire_uclamp_min"),
+        "uclamp_max": ui.state.get("pipewire_uclamp_max"),
+        "cpu_zero_denormals": ui.state.get("pipewire_cpu_zero_denormals"),
     }
     dialog = PipeWireRtModuleDialog(current=current, parent=ui)
     if dialog.exec() != QDialog.Accepted:
@@ -199,8 +205,78 @@ def configure_rt_module_dialog(ui) -> None:
     ui.state["pipewire_rlimits_enabled"] = values.get("rlimits_enabled")
     ui.state["pipewire_rtkit_enabled"] = values.get("rtkit_enabled")
     ui.state["pipewire_rtportal_enabled"] = values.get("rtportal_enabled")
+    ui.state["pipewire_uclamp_min"] = values.get("uclamp_min")
+    ui.state["pipewire_uclamp_max"] = values.get("uclamp_max")
+    ui.state["pipewire_cpu_zero_denormals"] = values.get("cpu_zero_denormals")
     save_state(ui.state)
     QMessageBox.information(ui, "Saved", "Saved RT module tuning. Apply to take effect.")
+
+
+def configure_pulse_latency_dialog(ui) -> None:
+    current = {
+        "min_req": ui.state.get("pipewire_pulse_min_req"),
+        "default_req": ui.state.get("pipewire_pulse_default_req"),
+        "min_quantum": ui.state.get("pipewire_pulse_min_quantum"),
+    }
+    dialog = PipeWirePulseLatencyDialog(current=current, parent=ui)
+    if dialog.exec() != QDialog.Accepted:
+        return
+    values = dialog.values()
+    ui.state["pipewire_pulse_min_req"] = values.get("min_req")
+    ui.state["pipewire_pulse_default_req"] = values.get("default_req")
+    ui.state["pipewire_pulse_min_quantum"] = values.get("min_quantum")
+    save_state(ui.state)
+    QMessageBox.information(ui, "Saved", "Saved PipeWire pulse latency settings. Apply to take effect.")
+
+
+def configure_pulse_rules_dialog(ui) -> None:
+    current = ui.state.get("pipewire_pulse_app_rules")
+    dialog = PipeWirePulseRulesDialog(current=current if isinstance(current, list) else None, parent=ui)
+    if dialog.exec() != QDialog.Accepted:
+        return
+    try:
+        values = dialog.values()
+    except ValueError as exc:
+        QMessageBox.warning(ui, "Invalid values", str(exc))
+        return
+    ui.state["pipewire_pulse_app_rules"] = values
+    save_state(ui.state)
+    QMessageBox.information(ui, "Saved", "Saved PipeWire pulse app rules. Apply to take effect.")
+
+
+def configure_systemd_service_rt_dialog(ui, knob_id: str) -> None:
+    mapping = {
+        "systemd_pipewire_service_rt": (
+            "PipeWire",
+            "systemd_pipewire_service_rt",
+        ),
+        "systemd_wireplumber_service_rt": (
+            "WirePlumber",
+            "systemd_wireplumber_service_rt",
+        ),
+    }
+    meta = mapping.get(knob_id)
+    if not meta:
+        return
+    service_label, prefix = meta
+    current = {
+        "policy": ui.state.get(f"{prefix}_policy"),
+        "priority": ui.state.get(f"{prefix}_priority"),
+        "cpus": ui.state.get(f"{prefix}_cpus"),
+    }
+    dialog = SystemdServiceRtDialog(service_label=service_label, current=current, parent=ui)
+    if dialog.exec() != QDialog.Accepted:
+        return
+    try:
+        values = dialog.values()
+    except ValueError as exc:
+        QMessageBox.warning(ui, "Invalid values", str(exc))
+        return
+    ui.state[f"{prefix}_policy"] = values.get("policy")
+    ui.state[f"{prefix}_priority"] = values.get("priority")
+    ui.state[f"{prefix}_cpus"] = values.get("cpus")
+    save_state(ui.state)
+    QMessageBox.information(ui, "Saved", f"Saved {service_label} systemd tuning. Apply to take effect.")
 
 
 def configure_rt_setup_dialog(ui) -> None:
@@ -234,6 +310,9 @@ def configure_rt_setup_dialog(ui) -> None:
             if ui.state.get("pipewire_rtportal_enabled") is not None
             else True
         ),
+        "uclamp_min": ui.state.get("pipewire_uclamp_min"),
+        "uclamp_max": ui.state.get("pipewire_uclamp_max"),
+        "cpu_zero_denormals": ui.state.get("pipewire_cpu_zero_denormals"),
     }
     dialog = PipeWireRtSetupDialog(
         limits_current=limits_current,
@@ -262,6 +341,9 @@ def configure_rt_setup_dialog(ui) -> None:
     ui.state["pipewire_rlimits_enabled"] = module.get("rlimits_enabled")
     ui.state["pipewire_rtkit_enabled"] = module.get("rtkit_enabled")
     ui.state["pipewire_rtportal_enabled"] = module.get("rtportal_enabled")
+    ui.state["pipewire_uclamp_min"] = module.get("uclamp_min")
+    ui.state["pipewire_uclamp_max"] = module.get("uclamp_max")
+    ui.state["pipewire_cpu_zero_denormals"] = module.get("cpu_zero_denormals")
 
     ui.state["pipewire_rt_setup_dirty"] = True
     ui._knob_statuses["pipewire_rt_limits_group"] = "not_applied"
@@ -389,6 +471,8 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
             ("rt.time.soft", "pipewire_rt_time_soft"),
             ("rt.time.hard", "pipewire_rt_time_hard"),
             ("nice.level", "pipewire_nice_level"),
+            ("uclamp.min", "pipewire_uclamp_min"),
+            ("uclamp.max", "pipewire_uclamp_max"),
         ):
             val = ui.state.get(state_key)
             if isinstance(val, int):
@@ -397,11 +481,50 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
             ("rlimits.enabled", "pipewire_rlimits_enabled"),
             ("rtkit.enabled", "pipewire_rtkit_enabled"),
             ("rtportal.enabled", "pipewire_rtportal_enabled"),
+            ("cpu.zero.denormals", "pipewire_cpu_zero_denormals"),
         ):
             val = ui.state.get(state_key)
             if isinstance(val, bool):
                 args[key] = val
         params["module_rt_args"] = args
+    if knob.id == "pipewire_pulse_latency":
+        props = dict(params.get("properties") or {})
+        for prop, state_key in (
+            ("pulse.min.req", "pipewire_pulse_min_req"),
+            ("pulse.default.req", "pipewire_pulse_default_req"),
+            ("pulse.min.quantum", "pipewire_pulse_min_quantum"),
+        ):
+            raw = ui.state.get(state_key)
+            if isinstance(raw, str) and raw.strip():
+                props[prop] = raw.strip()
+        params["properties"] = props
+        params["properties_section"] = "pulse.properties"
+    if knob.id == "pipewire_pulse_app_rules":
+        raw_rules = ui.state.get("pipewire_pulse_app_rules")
+        if isinstance(raw_rules, list):
+            rules: list[dict] = []
+            for item in raw_rules:
+                if not isinstance(item, dict):
+                    continue
+                match = item.get("match")
+                latency = item.get("latency")
+                if not isinstance(match, dict) or not isinstance(latency, str) or not latency.strip():
+                    continue
+                props: dict[str, object] = {"pulse.min.req": latency.strip()}
+                default_req = item.get("default_req")
+                if isinstance(default_req, str) and default_req.strip():
+                    props["pulse.default.req"] = default_req.strip()
+                min_quantum = item.get("min_quantum")
+                if isinstance(min_quantum, str) and min_quantum.strip():
+                    props["pulse.min.quantum"] = min_quantum.strip()
+                rules.append(
+                    {
+                        "matches": [{str(k): v for k, v in match.items() if isinstance(k, str) and v is not None}],
+                        "actions": {"update-props": props},
+                    }
+                )
+            params["rules"] = rules
+        params["rules_section"] = "pulse.rules"
     if knob.id == "pipewire_data_loop_affinity":
         context = dict(params.get("context") or {})
         num = ui.state.get("pipewire_num_data_loops")
@@ -513,10 +636,28 @@ def info_extra_html(ui, knob) -> str:
         return (
             "<h4>How it works</h4>"
             "<ul>"
-            "<li>Sets PipeWire module-rt arguments (rt.prio, nice.level, RTKit/portal).</li>"
+            "<li>Sets PipeWire module-rt arguments (rt.prio, nice.level, uclamp, RTKit/portal).</li>"
             "<li>Only the fields you set are applied.</li>"
             "</ul>"
             "<p><b>Tip:</b> Configure first, then Apply. Empty fields mean no change.</p>"
+        )
+    if kid == "pipewire_pulse_latency":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Writes pulse.properties latency defaults for pipewire-pulse.</li>"
+            "<li>Use conservative values first, then step down while monitoring XRUNs.</li>"
+            "</ul>"
+            "<p><b>Tip:</b> Configure first, then Apply.</p>"
+        )
+    if kid == "pipewire_pulse_app_rules":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Writes pulse.rules for per-application latency properties.</li>"
+            "<li>Rules are best-effort and depend on client metadata matching.</li>"
+            "</ul>"
+            "<p><b>Tip:</b> Configure JSON rules first, then Apply.</p>"
         )
     if kid == "pipewire_data_loop_affinity":
         return (
@@ -543,6 +684,33 @@ def info_extra_html(ui, knob) -> str:
             f"<li>Current state: {status}</li>"
             "</ul>"
         )
+    if kid == "pipewire_profiler_enable":
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Enables the PipeWire profiler module in a user drop-in.</li>"
+            "<li>Used by pw-top/pw-profiler for ERR and timing metrics.</li>"
+            "</ul>"
+        )
+    if kid in ("systemd_pipewire_service_rt", "systemd_wireplumber_service_rt"):
+        policy = ui.state.get(f"{kid}_policy") or "fifo"
+        prio = ui.state.get(f"{kid}_priority")
+        cpus = ui.state.get(f"{kid}_cpus")
+        cpus_text = ",".join(str(x) for x in cpus) if isinstance(cpus, list) and cpus else "unset"
+        prio_text = str(prio) if isinstance(prio, int) else "default"
+        return (
+            "<h4>How it works</h4>"
+            "<ul>"
+            "<li>Writes a systemd user-unit drop-in with RT scheduling and CPU affinity.</li>"
+            "<li>Applies on service restart / next login after daemon reload.</li>"
+            "</ul>"
+            "<p><b>Configured:</b></p>"
+            "<ul>"
+            f"<li>Policy: {policy}</li>"
+            f"<li>Priority: {prio_text}</li>"
+            f"<li>CPUs: {cpus_text}</li>"
+            "</ul>"
+        )
     return ""
 
 
@@ -555,6 +723,9 @@ def _rt_module_configured(ui) -> bool:
         "pipewire_rlimits_enabled",
         "pipewire_rtkit_enabled",
         "pipewire_rtportal_enabled",
+        "pipewire_uclamp_min",
+        "pipewire_uclamp_max",
+        "pipewire_cpu_zero_denormals",
     )
     return any(ui.state.get(key) is not None for key in state_keys)
 

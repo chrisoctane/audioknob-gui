@@ -396,18 +396,26 @@ class MainWindow(TableMixin, QMainWindow):
                 "kernel_nohz_full",
                 "kernel_rcu_nocbs",
                 "kernel_irqaffinity",
+                "kernel_workqueue_cpumask",
+                "cgroup_user_slice_allowed_cpus",
                 "kernel_preempt_full",
                 "kernel_clocksource_tsc",
                 "kernel_tsc_reliable",
                 "kernel_nmi_watchdog_off",
                 "kernel_nosoftlockup",
                 "kernel_nosmt",
+                "systemd_pipewire_service_rt",
+                "systemd_wireplumber_service_rt",
+                "irqbalance_banned_cpulist",
                 "pipewire_clock_constraints",
                 "pipewire_mlock_policy",
                 "pipewire_rt_setup",
                 "pipewire_data_loop_affinity",
                 "wireplumber_alsa_usb_tuning",
                 "pipewire_pro_audio_profile",
+                "pipewire_pulse_latency",
+                "pipewire_pulse_app_rules",
+                "pipewire_profiler_enable",
                 "rtkit_daemon_tuning",
             ]
         )
@@ -420,11 +428,19 @@ class MainWindow(TableMixin, QMainWindow):
             "kernel_nmi_watchdog_off",
             "kernel_nosoftlockup",
             "kernel_nosmt",
+            "kernel_workqueue_cpumask",
+            "cgroup_user_slice_allowed_cpus",
+            "systemd_pipewire_service_rt",
+            "systemd_wireplumber_service_rt",
+            "irqbalance_banned_cpulist",
             "pipewire_clock_constraints",
             "pipewire_mlock_policy",
             "pipewire_data_loop_affinity",
             "wireplumber_alsa_usb_tuning",
             "pipewire_pro_audio_profile",
+            "pipewire_pulse_latency",
+            "pipewire_pulse_app_rules",
+            "pipewire_profiler_enable",
             "rtkit_daemon_tuning",
         }
 
@@ -495,7 +511,10 @@ class MainWindow(TableMixin, QMainWindow):
         self.core_plan_body = QWidget()
         body = QVBoxLayout(self.core_plan_body)
 
-        hint = QLabel("Auto-set chooses audio cores and updates per-knob core selections. Apply knobs to take effect.")
+        hint = QLabel(
+            "Auto-set chooses audio cores and updates per-knob core selections. "
+            "With Linked core plan enabled, audio-role and housekeeping-role core knobs stay in sync."
+        )
         hint.setWordWrap(True)
         body.addWidget(hint)
 
@@ -519,6 +538,15 @@ class MainWindow(TableMixin, QMainWindow):
         )
         self.core_plan_auto_housekeeping.toggled.connect(self._on_housekeeping_auto_toggled)
         body.addWidget(self.core_plan_auto_housekeeping)
+
+        self.core_plan_linked = QCheckBox("Linked core plan (recommended)")
+        self.core_plan_linked.setChecked(bool(self.state.get("core_plan_linked", True)))
+        self.core_plan_linked.setToolTip(
+            "Keep all audio-role core knobs on one shared audio core set and "
+            "derive housekeeping knobs as the inverse."
+        )
+        self.core_plan_linked.toggled.connect(self._on_core_plan_linked_toggled)
+        body.addWidget(self.core_plan_linked)
 
         self.core_plan_summary = QLabel("")
         self.core_plan_summary.setWordWrap(True)
@@ -556,6 +584,124 @@ class MainWindow(TableMixin, QMainWindow):
             "Saved",
             "Saved IRQ housekeeping mode. Apply IRQ Housekeeping (irqaffinity) to take effect.",
         )
+
+    def _on_core_plan_linked_toggled(self, enabled: bool) -> None:
+        self.state["core_plan_linked"] = bool(enabled)
+        if enabled:
+            audio_seed = self._core_plan_audio_from_state()
+            if audio_seed:
+                self._apply_linked_core_plan(source="audio", cores=audio_seed)
+        save_state(self.state)
+        self._sync_core_plan_controls()
+        self._refresh_statuses()
+        self._populate()
+
+    def _audio_core_state_keys(self) -> tuple[str, ...]:
+        return (
+            "irq_pinning_cpu_cores",
+            "qjackctl_cpu_cores",
+            "kernel_isolcpus_cores",
+            "kernel_nohz_full_cores",
+            "kernel_rcu_nocbs_cores",
+            "irqbalance_banned_cpulist_cores",
+        )
+
+    def _housekeeping_core_state_keys(self) -> tuple[str, ...]:
+        return (
+            "kernel_irqaffinity_cores",
+            "kernel_workqueue_cpumask_cores",
+            "cgroup_user_slice_allowed_cores",
+        )
+
+    def _core_plan_role_for_knob(self, knob_id: str) -> str | None:
+        if knob_id in (
+            "irq_pinning",
+            "qjackctl_server_prefix_rt",
+            "kernel_isolcpus",
+            "kernel_nohz_full",
+            "kernel_rcu_nocbs",
+            "irqbalance_banned_cpulist",
+        ):
+            return "audio"
+        if knob_id in (
+            "kernel_irqaffinity",
+            "kernel_workqueue_cpumask",
+            "cgroup_user_slice_allowed_cpus",
+        ):
+            return "housekeeping"
+        return None
+
+    def _cpu_core_universe(self) -> list[int]:
+        try:
+            from audioknob_gui.core.irq import read_cpu_present
+
+            cores = sorted(read_cpu_present())
+            if cores:
+                return cores
+        except Exception:
+            pass
+        try:
+            from audioknob_gui.platform.detect import get_cpu_count
+
+            count = max(1, int(get_cpu_count()))
+        except Exception:
+            count = 1
+        return list(range(count))
+
+    def _sanitize_core_plan_list(self, cores: list[int] | None) -> list[int]:
+        if not isinstance(cores, list):
+            return []
+        allowed = set(self._cpu_core_universe())
+        return sorted({int(core) for core in cores if isinstance(core, int) and int(core) in allowed})
+
+    def _invert_core_selection(self, selected: list[int]) -> list[int]:
+        all_cores = set(self._cpu_core_universe())
+        return sorted(all_cores - set(selected))
+
+    def _core_plan_audio_from_state(self) -> list[int]:
+        for key in self._audio_core_state_keys():
+            raw = self.state.get(key)
+            if not isinstance(raw, list):
+                continue
+            cores = self._sanitize_core_plan_list(raw)
+            if cores:
+                return cores
+        for key in self._housekeeping_core_state_keys():
+            raw = self.state.get(key)
+            if not isinstance(raw, list):
+                continue
+            housekeeping = self._sanitize_core_plan_list(raw)
+            if housekeeping:
+                return self._invert_core_selection(housekeeping)
+        return self._sanitize_core_plan_list(self._irq_pinning_cpu_cores_from_state() or [])
+
+    def _linked_core_plan_enabled(self) -> bool:
+        return bool(self.state.get("core_plan_linked", True))
+
+    def _apply_linked_core_plan(self, *, source: str, cores: list[int]) -> bool:
+        if not self._linked_core_plan_enabled():
+            return False
+        source_norm = str(source).strip().lower()
+        if source_norm not in ("audio", "housekeeping"):
+            return False
+        selected = self._sanitize_core_plan_list(cores)
+        if source_norm == "audio":
+            audio = selected
+            housekeeping = self._invert_core_selection(audio)
+        else:
+            housekeeping = selected
+            audio = self._invert_core_selection(housekeeping)
+
+        changed = False
+        for key in self._audio_core_state_keys():
+            if self.state.get(key) != audio:
+                self.state[key] = list(audio)
+                changed = True
+        for key in self._housekeeping_core_state_keys():
+            if self.state.get(key) != housekeeping:
+                self.state[key] = list(housekeeping)
+                changed = True
+        return changed
 
     def _suggest_audio_cores(self, count: int) -> list[int]:
         from audioknob_gui.core.irq import (
@@ -624,22 +770,38 @@ class MainWindow(TableMixin, QMainWindow):
             return
         audio_cores = sorted(set(audio_cores))
         selected_count = len(audio_cores)
-        self.state["irq_pinning_cpu_cores"] = audio_cores
-        self.state["qjackctl_cpu_cores"] = audio_cores
-        self.state["kernel_isolcpus_cores"] = audio_cores
-        self.state["kernel_nohz_full_cores"] = audio_cores
-        self.state["kernel_rcu_nocbs_cores"] = audio_cores
+        if self._linked_core_plan_enabled():
+            self._apply_linked_core_plan(source="audio", cores=audio_cores)
+        else:
+            self.state["irq_pinning_cpu_cores"] = audio_cores
+            self.state["qjackctl_cpu_cores"] = audio_cores
+            self.state["kernel_isolcpus_cores"] = audio_cores
+            self.state["kernel_nohz_full_cores"] = audio_cores
+            self.state["kernel_rcu_nocbs_cores"] = audio_cores
         self.state["irq_housekeeping_auto"] = True
         save_state(self.state)
 
-        affected = [
-            "irq_pinning",
-            "qjackctl_server_prefix_rt",
-            "kernel_isolcpus",
-            "kernel_nohz_full",
-            "kernel_rcu_nocbs",
-            "kernel_irqaffinity",
-        ]
+        if self._linked_core_plan_enabled():
+            affected = [
+                "irq_pinning",
+                "qjackctl_server_prefix_rt",
+                "kernel_isolcpus",
+                "kernel_nohz_full",
+                "kernel_rcu_nocbs",
+                "kernel_irqaffinity",
+                "kernel_workqueue_cpumask",
+                "cgroup_user_slice_allowed_cpus",
+                "irqbalance_banned_cpulist",
+            ]
+        else:
+            affected = [
+                "irq_pinning",
+                "qjackctl_server_prefix_rt",
+                "kernel_isolcpus",
+                "kernel_nohz_full",
+                "kernel_rcu_nocbs",
+                "kernel_irqaffinity",
+            ]
         by_id = {k.id: k for k in self.registry}
         queued: list[str] = []
         skipped: list[str] = []
@@ -684,6 +846,12 @@ class MainWindow(TableMixin, QMainWindow):
                 self.core_plan_auto_housekeeping.blockSignals(True)
                 self.core_plan_auto_housekeeping.setChecked(auto)
                 self.core_plan_auto_housekeeping.blockSignals(False)
+        linked = self._linked_core_plan_enabled()
+        if hasattr(self, "core_plan_linked") and self.core_plan_linked is not None:
+            if self.core_plan_linked.isChecked() != linked:
+                self.core_plan_linked.blockSignals(True)
+                self.core_plan_linked.setChecked(linked)
+                self.core_plan_linked.blockSignals(False)
         self._refresh_core_plan_summary()
 
     def _refresh_core_plan_summary(self) -> None:
@@ -691,20 +859,22 @@ class MainWindow(TableMixin, QMainWindow):
             return
         try:
             from audioknob_gui.core.irq import read_cpu_present, read_thread_sibling_groups
-            from audioknob_gui.platform.detect import get_cpu_count
         except Exception:
             return
-        cpu_count = get_cpu_count()
-        audio = sorted(set(self._irq_pinning_cpu_cores_from_state() or []))
+        audio = sorted(set(self._core_plan_audio_from_state() or []))
         audio_text = ",".join(str(c) for c in audio) if audio else "unset"
         auto = bool(self.state.get("irq_housekeeping_auto", True))
         if auto:
-            housekeeping = sorted(set(range(cpu_count)) - set(audio))
+            housekeeping = sorted(set(self._cpu_core_universe()) - set(audio))
         else:
             housekeeping = sorted(set(self._kernel_cores_from_state("kernel_irqaffinity") or []))
         hk_text = ",".join(str(c) for c in housekeeping) if housekeeping else "unset"
+        linked_mode = "on" if self._linked_core_plan_enabled() else "off"
         mode = "auto" if auto else "manual"
-        summary = f"Audio cores: {audio_text} | Housekeeping ({mode}): {hk_text}"
+        summary = (
+            f"Audio cores: {audio_text} | Housekeeping ({mode}): {hk_text} | "
+            f"Linked core plan: {linked_mode}"
+        )
 
         groups = read_thread_sibling_groups()
         logical = len(read_cpu_present() or [])
@@ -729,7 +899,7 @@ class MainWindow(TableMixin, QMainWindow):
             return
 
         cores = sorted(read_cpu_present())
-        audio = sorted(set(self._irq_pinning_cpu_cores_from_state() or []))
+        audio = sorted(set(self._core_plan_audio_from_state() or []))
         auto = bool(self.state.get("irq_housekeeping_auto", True))
         if auto:
             housekeeping = sorted(set(cores) - set(audio))
@@ -3069,6 +3239,9 @@ class MainWindow(TableMixin, QMainWindow):
             "kernel_nohz_full": "kernel_nohz_full_cores",
             "kernel_rcu_nocbs": "kernel_rcu_nocbs_cores",
             "kernel_irqaffinity": "kernel_irqaffinity_cores",
+            "kernel_workqueue_cpumask": "kernel_workqueue_cpumask_cores",
+            "cgroup_user_slice_allowed_cpus": "cgroup_user_slice_allowed_cores",
+            "irqbalance_banned_cpulist": "irqbalance_banned_cpulist_cores",
         }
         return mapping.get(knob_id)
 
@@ -3093,7 +3266,7 @@ class MainWindow(TableMixin, QMainWindow):
                 from audioknob_gui.core.irq import cpu_list_from_cores, read_cpu_present
             except Exception:
                 return None
-            audio = set(self._irq_pinning_cpu_cores_from_state() or [])
+            audio = set(self._core_plan_audio_from_state() or [])
             housekeeping = read_cpu_present() - audio
             if not housekeeping:
                 return None

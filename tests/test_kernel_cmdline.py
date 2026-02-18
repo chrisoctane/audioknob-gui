@@ -129,3 +129,50 @@ def test_detect_distro_unknown_bls_requires_manual_followup(monkeypatch) -> None
     assert distro.boot_system == "bls"
     assert distro.kernel_cmdline_file == "/etc/kernel/cmdline"
     assert distro.kernel_cmdline_update_cmd == []
+
+
+def test_kernel_cmdline_preview_supports_remove_param(monkeypatch, tmp_path: Path) -> None:
+    from audioknob_gui.worker import ops
+
+    cmdline = tmp_path / "cmdline"
+    cmdline.write_text("quiet splash isolcpus=2-3 threadirqs\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ops,
+        "detect_distro",
+        lambda: SimpleNamespace(
+            distro_id="test",
+            boot_system="bls",
+            kernel_cmdline_file=str(cmdline),
+            kernel_cmdline_update_cmd=["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
+        ),
+    )
+
+    changes, notes = ops._kernel_cmdline_preview({"remove_param": "isolcpus"})
+    assert len(changes) == 1
+    assert changes[0].action == "modify"
+    assert "isolcpus=2-3" in changes[0].diff
+    assert any("Will run: grub2-mkconfig -o /boot/grub2/grub.cfg" == note for note in notes)
+    assert "Requires reboot to take effect" in notes
+
+
+def test_kernel_cmdline_preview_remove_param_noop_when_absent(monkeypatch, tmp_path: Path) -> None:
+    from audioknob_gui.worker import ops
+
+    cmdline = tmp_path / "cmdline"
+    cmdline.write_text("quiet splash threadirqs\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ops,
+        "detect_distro",
+        lambda: SimpleNamespace(
+            distro_id="test",
+            boot_system="bls",
+            kernel_cmdline_file=str(cmdline),
+            kernel_cmdline_update_cmd=["grub2-mkconfig"],
+        ),
+    )
+
+    changes, notes = ops._kernel_cmdline_preview({"remove_param": "isolcpus"})
+    assert changes == []
+    assert notes == [f"Parameter 'isolcpus' already absent in {cmdline}"]

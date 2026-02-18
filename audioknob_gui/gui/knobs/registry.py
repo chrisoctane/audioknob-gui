@@ -41,6 +41,9 @@ _KERNEL_CORE_KNOBS = {
     "kernel_nohz_full",
     "kernel_rcu_nocbs",
     "kernel_irqaffinity",
+    "kernel_workqueue_cpumask",
+    "cgroup_user_slice_allowed_cpus",
+    "irqbalance_banned_cpulist",
 }
 
 
@@ -75,6 +78,10 @@ def get_config_widget_builder(knob_id: str):
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == "pipewire_data_loop_affinity":
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
+    if knob_id == "pipewire_pulse_latency":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
+    if knob_id == "pipewire_pulse_app_rules":
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == "pipewire_rt_limits_group":
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Select Group...")
     if knob_id == "pipewire_rt_setup":
@@ -83,6 +90,8 @@ def get_config_widget_builder(knob_id: str):
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == "pipewire_pro_audio_profile":
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Select Device...")
+    if knob_id in ("systemd_pipewire_service_rt", "systemd_wireplumber_service_rt"):
+        return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == "power_profile_performance":
         return power_profile.build_backend_combo
     if knob_id == "qjackctl_server_prefix_rt":
@@ -102,7 +111,11 @@ def allow_config_when_row_dim(knob_id: str, ctx: RowContext) -> bool:
         "pipewire_mlock_policy",
         "pipewire_rt_module_tuning",
         "pipewire_data_loop_affinity",
+        "pipewire_pulse_latency",
+        "pipewire_pulse_app_rules",
         "pipewire_rt_setup",
+        "systemd_pipewire_service_rt",
+        "systemd_wireplumber_service_rt",
     ):
         return True
     return False
@@ -139,6 +152,15 @@ def handle_configure_knob(ui, knob_id: str) -> bool:
     if knob_id == "pipewire_data_loop_affinity":
         pipewire.configure_data_loops_dialog(ui)
         return True
+    if knob_id == "pipewire_pulse_latency":
+        pipewire.configure_pulse_latency_dialog(ui)
+        return True
+    if knob_id == "pipewire_pulse_app_rules":
+        pipewire.configure_pulse_rules_dialog(ui)
+        return True
+    if knob_id in ("systemd_pipewire_service_rt", "systemd_wireplumber_service_rt"):
+        pipewire.configure_systemd_service_rt_dialog(ui, knob_id)
+        return True
     if knob_id == "pipewire_rt_setup":
         pipewire.configure_rt_setup_dialog(ui)
         return True
@@ -160,8 +182,11 @@ def apply_info_param_overrides(ui, knob, params: dict) -> None:
         "pipewire_rt_limits_group",
         "pipewire_rt_module_tuning",
         "pipewire_data_loop_affinity",
+        "pipewire_pulse_latency",
+        "pipewire_pulse_app_rules",
         "wireplumber_alsa_usb_tuning",
         "pipewire_pro_audio_profile",
+        "pipewire_profiler_enable",
     ):
         pipewire.apply_param_overrides(ui, knob, params)
     if knob.id == "irq_pinning":
@@ -182,8 +207,13 @@ def build_info_extra_html(ui, knob, helpers: InfoHelpers) -> str:
         "pipewire_rt_limits_group",
         "pipewire_rt_module_tuning",
         "pipewire_data_loop_affinity",
+        "pipewire_pulse_latency",
+        "pipewire_pulse_app_rules",
         "pipewire_pro_audio_profile",
         "pipewire_rt_setup",
+        "pipewire_profiler_enable",
+        "systemd_pipewire_service_rt",
+        "systemd_wireplumber_service_rt",
     ):
         parts.append(pipewire.info_extra_html(ui, knob))
     if knob.id == "qjackctl_server_prefix_rt":
@@ -227,9 +257,14 @@ def add_info_buttons(ui, knob, dialog, layout) -> None:
         "pipewire_rt_limits_group",
         "pipewire_rt_module_tuning",
         "pipewire_data_loop_affinity",
+        "pipewire_pulse_latency",
+        "pipewire_pulse_app_rules",
         "wireplumber_alsa_usb_tuning",
         "pipewire_pro_audio_profile",
         "pipewire_rt_setup",
+        "pipewire_profiler_enable",
+        "systemd_pipewire_service_rt",
+        "systemd_wireplumber_service_rt",
     ):
         pipewire.add_info_buttons(ui, knob, dialog, layout)
     if knob.id == "irq_pinning":

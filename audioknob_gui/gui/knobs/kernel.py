@@ -28,6 +28,9 @@ def configure_core_dialog(ui, knob_id: str) -> None:
         "kernel_nohz_full": "Configure nohz_full cores",
         "kernel_rcu_nocbs": "Configure rcu_nocbs cores",
         "kernel_irqaffinity": "Configure irqaffinity cores",
+        "kernel_workqueue_cpumask": "Configure workqueue cpumask cores",
+        "cgroup_user_slice_allowed_cpus": "Configure cgroup user.slice CPUs",
+        "irqbalance_banned_cpulist": "Configure irqbalance banned CPUs",
     }
     lines = {
         "kernel_isolcpus": [
@@ -46,6 +49,18 @@ def configure_core_dialog(ui, knob_id: str) -> None:
             "Select housekeeping cores for default IRQ handling.",
             "Use non-isolated cores to keep IRQs off audio cores.",
         ],
+        "kernel_workqueue_cpumask": [
+            "Select housekeeping CPUs for global unbound workqueues.",
+            "Keep audio CPUs out of this mask when using isolation.",
+        ],
+        "cgroup_user_slice_allowed_cpus": [
+            "Select CPUs allowed for user.slice workloads (systemd/cgroup v2).",
+            "Use this to partition user-session load away from audio CPUs.",
+        ],
+        "irqbalance_banned_cpulist": [
+            "Select CPUs to ban in irqbalance policy.",
+            "irqbalance will avoid moving IRQs onto these CPUs.",
+        ],
     }
     dialog_lines = list(lines.get(knob_id) or [])
     smt_line = ui._smt_hint_line()
@@ -54,7 +69,11 @@ def configure_core_dialog(ui, knob_id: str) -> None:
     auto_hint = None
     auto_label = None
     if allow_auto:
-        audio_cores = set(ui._irq_pinning_cpu_cores_from_state() or [])
+        audio_getter = getattr(ui, "_core_plan_audio_from_state", None)
+        if callable(audio_getter):
+            audio_cores = set(audio_getter() or [])
+        else:
+            audio_cores = set(ui._irq_pinning_cpu_cores_from_state() or [])
         auto_label = "Auto housekeeping (invert audio cores)"
         auto_hint = "Auto uses IRQ Pinning audio cores to remove them from housekeeping."
         if audio_cores:
@@ -86,11 +105,19 @@ def configure_core_dialog(ui, knob_id: str) -> None:
     chosen = dialog.selected_cores()
     if allow_auto:
         ui.state["irq_housekeeping_auto"] = dialog.auto_enabled()
+    role = None
+    role_fn = getattr(ui, "_core_plan_role_for_knob", None)
+    if callable(role_fn):
+        role = role_fn(knob_id)
+    linked = bool(ui.state.get("core_plan_linked", True))
     key = ui._kernel_core_key(knob_id)
-    if key:
+    linked_apply = getattr(ui, "_apply_linked_core_plan", None)
+    if key and linked and role in ("audio", "housekeeping") and callable(linked_apply):
+        linked_apply(source=role, cores=chosen)
+    elif key:
         ui.state[key] = chosen
-        save_state(ui.state)
-        ui._sync_core_plan_controls()
+    save_state(ui.state)
+    ui._sync_core_plan_controls()
 
     status = ui._knob_statuses.get(knob_id)
     if status in ("applied", "pending_reboot"):
@@ -99,6 +126,15 @@ def configure_core_dialog(ui, knob_id: str) -> None:
         return
     if allow_auto and ui.state.get("irq_housekeeping_auto"):
         QMessageBox.information(ui, "Saved", "Saved IRQ housekeeping configuration (auto).")
+        return
+    if linked and role in ("audio", "housekeeping"):
+        role_text = "audio" if role == "audio" else "housekeeping"
+        QMessageBox.information(
+            ui,
+            "Saved",
+            "Saved linked core plan."
+            + (f" Updated {role_text} cores: {','.join(map(str, chosen))}" if chosen else ""),
+        )
         return
     QMessageBox.information(
         ui,

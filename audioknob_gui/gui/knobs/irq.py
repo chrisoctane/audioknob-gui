@@ -48,7 +48,18 @@ def configure_dialog(ui) -> None:
     chosen_devices = dialog.selected_device_keys()
     chosen_cores = dialog.selected_core_list()
     ui.state["irq_pinning_devices"] = chosen_devices
-    ui.state["irq_pinning_cpu_cores"] = chosen_cores
+    role = None
+    role_fn = getattr(ui, "_core_plan_role_for_knob", None)
+    if callable(role_fn):
+        role = role_fn("irq_pinning")
+    linked_apply = getattr(ui, "_apply_linked_core_plan", None)
+    linked = bool(ui.state.get("core_plan_linked", True))
+    linked_used = False
+    if linked and role in ("audio", "housekeeping") and callable(linked_apply):
+        linked_apply(source=role, cores=chosen_cores)
+        linked_used = True
+    else:
+        ui.state["irq_pinning_cpu_cores"] = chosen_cores
     save_state(ui.state)
     ui._sync_core_plan_controls()
 
@@ -60,7 +71,7 @@ def configure_dialog(ui) -> None:
     QMessageBox.information(
         ui,
         "Saved",
-        "Saved IRQ pinning configuration."
+        ("Saved linked core plan from IRQ pinning." if linked_used else "Saved IRQ pinning configuration.")
         + (f" Devices: {len(chosen_devices)}" if chosen_devices else " (no devices)")
         + (f" Cores: {','.join(map(str, chosen_cores))}" if chosen_cores else " (no cores)"),
     )

@@ -65,12 +65,11 @@ SECTION_MAP: dict[str, list[str]] = {
     "irqbalance_disable": ["IRQ Pinning + IRQ Balance"],
 }
 
-_ISOLATION_IDS = ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity")
-_ISOLATION_STATE_KEYS = {
+_AUDIO_ISOLATION_IDS = ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs")
+_AUDIO_ISOLATION_STATE_KEYS = {
     "kernel_isolcpus": "kernel_isolcpus_cores",
     "kernel_nohz_full": "kernel_nohz_full_cores",
     "kernel_rcu_nocbs": "kernel_rcu_nocbs_cores",
-    "kernel_irqaffinity": "kernel_irqaffinity_cores",
 }
 ACTIVE_CONFLICT_STATES = frozenset({"applied", "pending_reboot", "running", "partial"})
 
@@ -117,7 +116,7 @@ def prune_power_profile_conflicts(
 
 
 def _normalized_core_list(state: dict, knob_id: str) -> tuple[int, ...] | None:
-    key = _ISOLATION_STATE_KEYS.get(knob_id)
+    key = _AUDIO_ISOLATION_STATE_KEYS.get(knob_id)
     if not key:
         return None
     raw = state.get(key)
@@ -149,11 +148,11 @@ def find_conflicts(
                 "partial",
             ):
                 conflicts.setdefault(src_id, set()).add(other_id)
-        if state and src_id in _ISOLATION_IDS:
+        if state and src_id in _AUDIO_ISOLATION_IDS:
             src_cores = _normalized_core_list(state, src_id)
             if not src_cores:
                 continue
-            for other_id in _ISOLATION_IDS:
+            for other_id in _AUDIO_ISOLATION_IDS:
                 if other_id == src_id:
                     continue
                 other_action = queued_actions.get(other_id)
@@ -183,10 +182,10 @@ def active_conflicts(
         other_status = statuses.get(other_id, "unknown")
         if other_action == "apply" or other_status in ("applied", "pending_reboot", "running", "partial"):
             conflicts.add(other_id)
-    if state and knob_id in _ISOLATION_IDS:
+    if state and knob_id in _AUDIO_ISOLATION_IDS:
         src_cores = _normalized_core_list(state, knob_id)
         if src_cores:
-            for other_id in _ISOLATION_IDS:
+            for other_id in _AUDIO_ISOLATION_IDS:
                 if other_id == knob_id:
                     continue
                 other_action = queued_actions.get(other_id)

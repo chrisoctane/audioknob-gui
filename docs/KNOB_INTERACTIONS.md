@@ -47,17 +47,43 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - irqbalance can override IRQ pinning and undo affinity changes.
 - The `irqbalance_disable` knob is a prerequisite for `irq_pinning` and is not
   treated as a conflict with it.
+- `irqbalance_banned_cpulist` is a policy knob for irqbalance itself; it is
+  complementary to `irq_pinning` but less strict (irqbalance still manages IRQs
+  on non-banned CPUs).
 - IRQ pinning moves audio device IRQs to audio cores and sweeps other IRQs off.
 - Some IRQs are kernel-managed (read-only) and cannot be moved.
+- Clearing IRQ/core selections and applying now runs reset behavior: empty
+  IRQ pinning cores reset affinities back to kernel default masks; empty
+  `irqbalance_banned_cpulist` removes the banned CPU policy line.
 
 ### IRQ Housekeeping + kernel irqaffinity
 - Housekeeping cores define where non-audio IRQs are pushed.
 - Auto housekeeping is the inverse of audio cores unless manually set.
+- `kernel_irqaffinity` is treated as a housekeeping-role knob; in linked mode
+  it is expected to differ from audio isolation core lists by inversion.
 
-### CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)
-- These knobs should use a consistent audio core set.
+### Workqueue cpumask + user.slice AllowedCPUs
+- `kernel_workqueue_cpumask` and `cgroup_user_slice_allowed_cpus` should align
+  with the same housekeeping/audio-core strategy used by IRQ pinning/isolation.
+- `kernel_workqueue_cpumask` is runtime sysfs state and may be reset by reboot
+  or distro policies.
+- `cgroup_user_slice_allowed_cpus` constrains user-session workloads via
+  systemd/cgroup v2 and can reduce desktop contention on selected audio cores.
+- Clearing core selections and applying is treated as an explicit reset path for
+  these knobs (`kernel_workqueue_cpumask` resets to all present CPUs, and
+  `cgroup_user_slice_allowed_cpus` removes the drop-in file).
+- Mismatched cpuset selections across these knobs can produce partial isolation
+  and unpredictable scheduling pressure.
+- The GUI now defaults to a linked core-plan mode so audio-role knobs and
+  housekeeping-role knobs stay synchronized by inversion unless expert override
+  mode is enabled.
+
+### CPU isolation set (isolcpus / nohz_full / rcu_nocbs)
+- These audio-role isolation knobs should use a consistent audio core set.
 - Mismatched core sets cause partial status and weaker isolation.
-- The app warns when isolation knobs use mismatched core sets.
+- The app warns when these audio isolation knobs use mismatched core sets.
+- `kernel_irqaffinity` is evaluated separately as housekeeping policy (see
+  IRQ Housekeeping section above).
 
 ### Kernel RT extras (clocksource=tsc / tsc=reliable / nmi_watchdog=0 / nosoftlockup / preempt=full)
 - Disables watchdog diagnostics (NMI/soft lockup); reduces visibility into hangs.
@@ -78,11 +104,18 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - These only affect PipeWire sessions; apps can still request overrides.
 - In JACK-only setups, these may not be relevant.
 
-### PipeWire Clock Constraints / Mlock / RT Module / Data Loops
+### PipeWire Clock Constraints / Mlock / RT Module / Pulse / Data Loops / systemd RT
 - Clock constraints and quantum/rate knobs can conflict if ranges disallow the chosen quantum/rate.
 - PW Memory Lock depends on PW RT Limits; low memlock limits can cause failures.
 - RT module tuning depends on RT limits and/or RTKit/portal behavior.
 - PW RT Setup combines RT limits + RT module tuning; if module fields are left blank, only limits are applied.
+- `pipewire_pulse_latency` sets global `pulse.properties` defaults; per-app
+  `pipewire_pulse_app_rules` can intentionally override those defaults.
+- `pipewire_profiler_enable` is complementary to diagnostics (`pw-top`) but can
+  add minor runtime overhead.
+- `systemd_pipewire_service_rt` / `systemd_wireplumber_service_rt` can overlap
+  with module-rt policy; keep scheduling priorities consistent to avoid
+  contradictory policy layers.
 - Data loop affinity should align with CPU isolation/pinning choices to avoid jitter.
 - Simple AudioKnob uses a fixed Safe RT preset bundle (group `audio`, conservative RT-module fields, fixed mlock policy).
 
@@ -126,6 +159,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - Missing commands or packages (e.g., tuned-adm, powerprofilesctl).
 - Missing WirePlumber/wpctl or pw-top for PipeWire dev tools.
 - Services not present or masked (rtirq, irqbalance, cpupower).
+- systemd daemon-reload/service restart not performed after user-unit drop-in edits.
+- Malformed PipeWire pulse rules (ignored by parser, resulting in partial/not_applied status).
 - Kernel cmdline updates not written to bootloader (changes do not take effect).
 - Read-only IRQs (kernel-managed) cannot be reaffined.
 - Missing sysfs entries (feature not present on kernel/hardware).
@@ -138,8 +173,17 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - LinuxMusicians.net threads (see docs/research for captured PDFs).
 - Distro docs for power management:
   - power-profiles-daemon, tuned, cpupower/cpufrequtils.
+- systemd execution/resource controls:
+  - https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html
+  - https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html
+- PipeWire pulse config and rules:
+  - https://docs.pipewire.org/page_man_pipewire-pulse_conf_5.html
 - Kernel parameter reference:
   - https://www.kernel.org/doc/html/latest/admin-guide/kernel-parameters.html
+- Linux workqueue internals and affinity behavior:
+  - https://docs.kernel.org/core-api/workqueue.html
+- irqbalance policy options:
+  - https://manpages.ubuntu.com/manpages/noble/man1/irqbalance.1.html
 - Ubuntu RT kernel tuning parameters:
   - https://documentation.ubuntu.com/real-time/en/latest/tutorial/intel-tcc/kernel-parameters/
 

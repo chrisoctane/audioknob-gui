@@ -242,6 +242,10 @@ class PipeWireRtModuleDialog(QDialog):
         form.addRow("rt.time.hard", self.rt_hard)
         self.nice_level = QLineEdit(str(current.get("nice_level") or ""))
         form.addRow("nice.level", self.nice_level)
+        self.uclamp_min = QLineEdit(str(current.get("uclamp_min") or ""))
+        form.addRow("uclamp.min", self.uclamp_min)
+        self.uclamp_max = QLineEdit(str(current.get("uclamp_max") or ""))
+        form.addRow("uclamp.max", self.uclamp_max)
 
         self.rlimits_enabled = QCheckBox("rlimits.enabled")
         self.rlimits_enabled.setTristate(True)
@@ -257,6 +261,11 @@ class PipeWireRtModuleDialog(QDialog):
         self.rtportal_enabled.setTristate(True)
         self._set_tristate(self.rtportal_enabled, current.get("rtportal_enabled"))
         form.addRow(self.rtportal_enabled)
+
+        self.cpu_zero_denormals = QCheckBox("cpu.zero.denormals")
+        self.cpu_zero_denormals.setTristate(True)
+        self._set_tristate(self.cpu_zero_denormals, current.get("cpu_zero_denormals"))
+        form.addRow(self.cpu_zero_denormals)
 
         root.addLayout(form)
 
@@ -297,9 +306,200 @@ class PipeWireRtModuleDialog(QDialog):
             "rt_time_soft": self._read_int(self.rt_soft, "rt.time.soft"),
             "rt_time_hard": self._read_int(self.rt_hard, "rt.time.hard"),
             "nice_level": self._read_int(self.nice_level, "nice.level"),
+            "uclamp_min": self._read_int(self.uclamp_min, "uclamp.min"),
+            "uclamp_max": self._read_int(self.uclamp_max, "uclamp.max"),
             "rlimits_enabled": self._tri_value(self.rlimits_enabled),
             "rtkit_enabled": self._tri_value(self.rtkit_enabled),
             "rtportal_enabled": self._tri_value(self.rtportal_enabled),
+            "cpu_zero_denormals": self._tri_value(self.cpu_zero_denormals),
+        }
+
+
+class PipeWirePulseLatencyDialog(QDialog):
+    def __init__(self, current: dict[str, object] | None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("PipeWire pulse latency")
+        self.resize(520, 260)
+        current = current or {}
+
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Configure global pipewire-pulse latency properties."))
+        root.addWidget(QLabel("Examples: 64/48000, 128/48000, 256/48000"))
+
+        form = QFormLayout()
+        self.min_req = QLineEdit(str(current.get("min_req") or ""))
+        self.min_req.setPlaceholderText("pulse.min.req (e.g. 64/48000)")
+        form.addRow("pulse.min.req", self.min_req)
+
+        self.default_req = QLineEdit(str(current.get("default_req") or ""))
+        self.default_req.setPlaceholderText("pulse.default.req (optional)")
+        form.addRow("pulse.default.req", self.default_req)
+
+        self.min_quantum = QLineEdit(str(current.get("min_quantum") or ""))
+        self.min_quantum.setPlaceholderText("pulse.min.quantum (optional)")
+        form.addRow("pulse.min.quantum", self.min_quantum)
+        root.addLayout(form)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    def values(self) -> dict[str, object]:
+        def _clean(value: str) -> str | None:
+            raw = value.strip()
+            return raw or None
+
+        return {
+            "min_req": _clean(self.min_req.text()),
+            "default_req": _clean(self.default_req.text()),
+            "min_quantum": _clean(self.min_quantum.text()),
+        }
+
+
+class PipeWirePulseRulesDialog(QDialog):
+    def __init__(self, current: list[dict[str, object]] | None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("PipeWire pulse app rules")
+        self.resize(660, 460)
+
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Configure per-app pipewire-pulse latency rules as JSON."))
+        root.addWidget(QLabel("Each rule needs 'match' (object) and 'latency' (string)."))
+
+        self.rules_edit = QTextEdit()
+        if isinstance(current, list):
+            self.rules_edit.setText(json.dumps(current, indent=2))
+        else:
+            self.rules_edit.setText(
+                json.dumps(
+                    [
+                        {
+                            "match": {"application.process.binary": "reaper"},
+                            "latency": "64/48000",
+                        }
+                    ],
+                    indent=2,
+                )
+            )
+        root.addWidget(self.rules_edit)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    def values(self) -> list[dict[str, object]]:
+        raw = self.rules_edit.toPlainText().strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except Exception as exc:
+            raise ValueError("Invalid JSON in pulse rules") from exc
+        if not isinstance(parsed, list):
+            raise ValueError("Pulse rules must be a JSON list")
+        out: list[dict[str, object]] = []
+        for index, item in enumerate(parsed, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"Rule #{index} must be an object")
+            match = item.get("match")
+            latency = item.get("latency")
+            if not isinstance(match, dict) or not match:
+                raise ValueError(f"Rule #{index} requires non-empty 'match' object")
+            if not isinstance(latency, str) or not latency.strip():
+                raise ValueError(f"Rule #{index} requires non-empty 'latency' string")
+            clean: dict[str, object] = {
+                "match": {str(k): v for k, v in match.items() if isinstance(k, str) and v is not None},
+                "latency": latency.strip(),
+            }
+            for key in ("default_req", "min_quantum"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    clean[key] = value.strip()
+            out.append(clean)
+        return out
+
+
+class SystemdServiceRtDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        service_label: str,
+        current: dict[str, object] | None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Systemd service tuning: {service_label}")
+        self.resize(540, 300)
+        current = current or {}
+
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel("Configure systemd scheduling + affinity drop-in values."))
+
+        form = QFormLayout()
+        self.policy = QComboBox()
+        self.policy.addItem("fifo", "fifo")
+        self.policy.addItem("rr", "rr")
+        self.policy.addItem("other", "other")
+        policy = str(current.get("policy") or "fifo").strip().lower()
+        idx = self.policy.findData(policy)
+        self.policy.setCurrentIndex(idx if idx >= 0 else 0)
+        form.addRow("CPUSchedulingPolicy", self.policy)
+
+        self.priority = QLineEdit(str(current.get("priority") or ""))
+        self.priority.setPlaceholderText("1..99 (empty keeps default)")
+        form.addRow("CPUSchedulingPriority", self.priority)
+
+        self.cpu_list = QLineEdit("")
+        self.cpu_list.setPlaceholderText("e.g. 2-3 or 2,3")
+        cores = current.get("cpus")
+        if isinstance(cores, list) and cores:
+            try:
+                from audioknob_gui.core.irq import cpu_list_from_cores
+
+                self.cpu_list.setText(cpu_list_from_cores([int(x) for x in cores]))
+            except Exception:
+                self.cpu_list.setText(",".join(str(x) for x in cores if isinstance(x, int)))
+        form.addRow("CPUAffinity", self.cpu_list)
+        root.addLayout(form)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    @staticmethod
+    def _read_priority(raw: str) -> int | None:
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            value = int(text)
+        except Exception as exc:
+            raise ValueError(f"Invalid priority: {raw}") from exc
+        if value < 1 or value > 99:
+            raise ValueError("Priority must be between 1 and 99")
+        return value
+
+    @staticmethod
+    def _read_cpus(raw: str) -> list[int] | None:
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            from audioknob_gui.core.irq import parse_cpu_list
+
+            cpus = sorted(parse_cpu_list(text))
+        except Exception as exc:
+            raise ValueError(f"Invalid CPU list: {raw}") from exc
+        return cpus or None
+
+    def values(self) -> dict[str, object]:
+        return {
+            "policy": str(self.policy.currentData() or "fifo"),
+            "priority": self._read_priority(self.priority.text()),
+            "cpus": self._read_cpus(self.cpu_list.text()),
         }
 
 
@@ -371,6 +571,10 @@ class PipeWireRtSetupDialog(QDialog):
         module_layout.addRow("rt.time.hard", self.rt_hard)
         self.nice_level = QLineEdit(str(module_current.get("nice_level") or ""))
         module_layout.addRow("nice.level", self.nice_level)
+        self.uclamp_min = QLineEdit(str(module_current.get("uclamp_min") or ""))
+        module_layout.addRow("uclamp.min", self.uclamp_min)
+        self.uclamp_max = QLineEdit(str(module_current.get("uclamp_max") or ""))
+        module_layout.addRow("uclamp.max", self.uclamp_max)
 
         self.rlimits_enabled = QCheckBox("rlimits.enabled")
         self.rlimits_enabled.setTristate(True)
@@ -396,6 +600,17 @@ class PipeWireRtSetupDialog(QDialog):
             "Allow PipeWire to request realtime via the Realtime portal (best for sandboxed apps)."
         )
         module_layout.addRow(self.rtportal_enabled)
+
+        self.cpu_zero_denormals = QCheckBox("cpu.zero.denormals")
+        self.cpu_zero_denormals.setTristate(True)
+        PipeWireRtModuleDialog._set_tristate(
+            self.cpu_zero_denormals,
+            module_current.get("cpu_zero_denormals"),
+        )
+        self.cpu_zero_denormals.setToolTip(
+            "Set denormal handling hint for module-rt where supported."
+        )
+        module_layout.addRow(self.cpu_zero_denormals)
         root.addWidget(module_box)
 
         root.addWidget(QLabel("Tip: Leave fields blank to keep defaults."))
@@ -427,9 +642,15 @@ class PipeWireRtSetupDialog(QDialog):
         self.rt_soft.setText(str(self._module_defaults.get("rt_time_soft") or ""))
         self.rt_hard.setText(str(self._module_defaults.get("rt_time_hard") or ""))
         self.nice_level.setText(str(self._module_defaults.get("nice_level") or ""))
+        self.uclamp_min.setText(str(self._module_defaults.get("uclamp_min") or ""))
+        self.uclamp_max.setText(str(self._module_defaults.get("uclamp_max") or ""))
         self.rlimits_enabled.setCheckState(Qt.Unchecked)
         self.rtkit_enabled.setCheckState(Qt.Checked)
         self.rtportal_enabled.setCheckState(Qt.Checked)
+        PipeWireRtModuleDialog._set_tristate(
+            self.cpu_zero_denormals,
+            self._module_defaults.get("cpu_zero_denormals"),
+        )
 
     @staticmethod
     def _read_int(field: QLineEdit, label: str) -> int | None:
@@ -457,9 +678,12 @@ class PipeWireRtSetupDialog(QDialog):
             "rt_time_soft": PipeWireRtModuleDialog._read_int(self.rt_soft, "rt.time.soft"),
             "rt_time_hard": PipeWireRtModuleDialog._read_int(self.rt_hard, "rt.time.hard"),
             "nice_level": PipeWireRtModuleDialog._read_int(self.nice_level, "nice.level"),
+            "uclamp_min": PipeWireRtModuleDialog._read_int(self.uclamp_min, "uclamp.min"),
+            "uclamp_max": PipeWireRtModuleDialog._read_int(self.uclamp_max, "uclamp.max"),
             "rlimits_enabled": PipeWireRtModuleDialog._tri_value(self.rlimits_enabled),
             "rtkit_enabled": PipeWireRtModuleDialog._tri_value(self.rtkit_enabled),
             "rtportal_enabled": PipeWireRtModuleDialog._tri_value(self.rtportal_enabled),
+            "cpu_zero_denormals": PipeWireRtModuleDialog._tri_value(self.cpu_zero_denormals),
         }
 
     def _show_status_check(self) -> None:

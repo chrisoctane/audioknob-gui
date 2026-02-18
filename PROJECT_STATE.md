@@ -9,8 +9,8 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.6
-- **48 knobs defined** (ALL 48 IMPLEMENTED, including Dev tab)
+- **Release version**: 0.7.7
+- **56 knobs defined** (ALL 56 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Dependency-aware queue gating** - knobs with `depends_on` unlock when their dependency is already applied or queued for apply in the current queue.
@@ -60,8 +60,10 @@
 - **Preset menu dot markers** - Tools → Presets menu and actions include matching blue/green dot icons for quick identification.
 - **Reference partial handling** - reference status `partial` is treated as non-authoritative for preset-match hints.
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
-- **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity). Separate RT limits/module knobs are hidden in the UI.
+- **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity, pulse latency defaults/rules, profiler module). Separate RT limits/module knobs are hidden in the UI.
 - **PipeWire RT Setup presets** - Safe RT preset (RTKit/portal only) and RT limits toggle in the setup dialog.
+- **Systemd RT service drop-ins (dev)** - PipeWire and WirePlumber per-service scheduling/CPU affinity drop-ins with configurable policy/priority/core lists.
+- **CPU/IRQ partitioning extras (dev)** - workqueue cpumask, `user.slice` AllowedCPUs, and irqbalance banned CPU list knobs now available in Dev.
 - **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in
 - **Pro Audio profile (dev)** - per-device toggle via wpctl with pactl fallback; reset restores prior profile
 - **XRUN monitor** - streams live `pw-top` data into the app (uses the latest batch iteration to avoid zeroed metrics; pw-dump fallback for QUANT/RATE when batch output is blank; ERR summary lists ERR/ID/NAME; Reset Count sets a local baseline)
@@ -69,6 +71,8 @@
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
 - **Cores & IRQ view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), plus RT throttling and C-state limiters; the IRQ Overview button is in the Audio Core Plan header so it remains available while the plan body is collapsed
+- **Linked core plan (default ON)** - core-selection knobs are tied to one shared audio/housekeeping plan by default: audio-role knobs reuse the selected audio cores, housekeeping-role knobs use the inverse set; users can disable linking for expert per-knob overrides.
+- **Core clear-on-apply behavior** - clearing core selections and applying now executes explicit clear/reset behavior for core-policy knobs: kernel core cmdline params are removed, IRQ pinning resets to kernel default masks, irqbalance banned CPU policy entries are removed, `user.slice` AllowedCPUs drop-in is removed, and workqueue cpumask resets to all present CPUs.
 - **IRQ Overview table layout** - IRQ assignments use fixed-width aligned columns (IRQ, Affinity, Mode, per-core count columns `0..N-1`, Description) with horizontal scrolling; per-core counts are separated from description text, core-map cells are fixed-size so larger values do not shift alignment, the IRQ ID column keeps enough width for common 3-4 digit IRQ IDs, IRQ rows use compact heights, very large per-core counts render truncated with tooltip access to full values, header height scales with the overview font so titles do not clip, a hover crosshair guide (click-lock/unlock) helps map IRQ rows to core columns, and a dialog-local font spinner adjusts only this overview
 - **Presets workflow** - Tools → Presets exposes Reference Preset and Factory Preset actions without adding new table columns.
 - **Technical columns toggle** - `Tools -> Locks -> Technical columns` shows/hides Req/Risk/CLI columns; default is hidden for simpler workflow.
@@ -86,7 +90,7 @@
 - **Conflict action precision** - row-level `Conflict` buttons use the same active/queued + backend filtering as the header conflict counter, preventing mismatch between row badges and header count.
 - **Conflict prompt clarity** - conflict dialogs include per-knob active/queued state labels so the reason for each conflict pair is explicit.
 - **Conflict gating** - conflicting knobs show a red Conflict action that queues a reset for that knob.
-- **Conflict coverage** - power profile vs governor/C-states, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches surface as warnings.
+- **Conflict coverage** - power profile vs governor/C-states, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and audio-isolation core mismatches (`isolcpus`/`nohz_full`/`rcu_nocbs`) surface as warnings.
 - **Simple conflict gate** - simple queue composition skips CPU governor when power-profile backend resolves to tuned
 - **Combo wheel safety** - combo-box settings ignore mouse-wheel input unless their dropdown menu is open, preventing accidental changes while scrolling.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
@@ -117,9 +121,11 @@ Notes:
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Cores & IRQ view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
+- In Cores & IRQ, linked core plan is enabled by default and keeps audio-role core selectors synchronized; housekeeping-role selectors track the inverse CPU set.
 - "Req." shows A/R/D markers for Advanced/Reboot/Depends-on (tooltip shows the key and any group/dependency details).
 - Dependent knobs are locked until dependencies are applied; tooltip shows required knob names.
-- PipeWire config knobs (clock constraints, memory lock, RT module, data loops) show a locked Apply action until configured; Configure stays available.
+- PipeWire config knobs (clock constraints, memory lock, RT module, pulse latency, pulse app rules, data loops) show a locked Apply action until configured; Configure stays available.
+- New Dev core/RT knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`, `systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`) show a locked Apply action until configured; Configure stays available.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Status keeps grouped headers by default; Req./Risk grouping is available when technical columns are shown.
@@ -433,11 +439,18 @@ preset extraction.
 | `pipewire_rt_module_tuning` | RT module fields dialog | Internal bundle member: one conservative RT-module preset |
 | `pipewire_mlock_policy` | memory lock policy dialog | Internal bundle member: fixed mlock policy preset |
 | `pipewire_clock_constraints` | min/max/rate constraints dialog | Deferred: full app only (no simple preset in v0.7) |
+| `pipewire_pulse_latency` | pulse.properties latency dialog | Deferred: full app only (client/workload specific) |
+| `pipewire_pulse_app_rules` | pulse.rules JSON dialog | Deferred: full app only (per-application matching) |
 | `pipewire_data_loop_affinity` | data-loop affinity dialog | Deferred: full app only (coupled to core/IRQ strategy) |
 | `kernel_isolcpus` | CPU core selector dialog | Deferred: full app only (core isolation family) |
 | `kernel_nohz_full` | CPU core selector dialog | Deferred: full app only (core isolation family) |
 | `kernel_rcu_nocbs` | CPU core selector dialog | Deferred: full app only (core isolation family) |
 | `kernel_irqaffinity` | CPU core selector dialog (+auto mode) | Deferred: full app only (core isolation family) |
+| `kernel_workqueue_cpumask` | CPU core selector dialog | Deferred: full app only (advanced core partitioning) |
+| `cgroup_user_slice_allowed_cpus` | CPU core selector dialog | Deferred: full app only (systemd cpuset partitioning) |
+| `irqbalance_banned_cpulist` | CPU core selector dialog | Deferred: full app only (irqbalance policy tuning) |
+| `systemd_pipewire_service_rt` | policy/priority/cores dialog | Deferred: full app only (service-level scheduling) |
+| `systemd_wireplumber_service_rt` | policy/priority/cores dialog | Deferred: full app only (service-level scheduling) |
 | `pipewire_quantum` | buffer-size combo / dialog value | Deferred: full app only for v0.7 (user-variable target) |
 | `pipewire_sample_rate` | sample-rate combo / dialog value | Deferred: full app only for v0.7 (user-variable target) |
 | `qjackctl_server_prefix_rt` | CPU core selector dialog | Deferred: full app only (workflow-specific and core-coupled) |

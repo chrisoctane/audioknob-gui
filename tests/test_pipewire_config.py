@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from audioknob_gui.worker.ops import build_pipewire_conf_content
+
 
 class TestPipeWireConfigGeneration:
     """Tests for PipeWire config file generation."""
@@ -117,3 +119,45 @@ class TestPipeWireUserOverrides:
             result = None
         
         assert result is None
+
+
+class TestPipeWireContentBuilder:
+    def test_build_content_supports_pulse_properties_section(self) -> None:
+        content = build_pipewire_conf_content(
+            {
+                "properties_section": "pulse.properties",
+                "properties": {
+                    "pulse.min.req": "64/48000",
+                    "pulse.default.req": "128/48000",
+                },
+            }
+        )
+
+        assert "pulse.properties = {" in content
+        assert "context.properties = {" not in content
+        assert 'pulse.min.req = "64/48000"' in content
+        assert 'pulse.default.req = "128/48000"' in content
+
+    def test_build_content_supports_context_modules_and_rules(self) -> None:
+        content = build_pipewire_conf_content(
+            {
+                "context_modules": [
+                    {"name": "libpipewire-module-profiler"},
+                ],
+                "rules_section": "pulse.rules",
+                "rules": [
+                    {
+                        "matches": [{"application.process.binary": "reaper"}],
+                        "actions": {"update-props": {"pulse.min.req": "64/48000"}},
+                    }
+                ],
+            }
+        )
+
+        assert "context.modules = [" in content
+        assert 'name = "libpipewire-module-profiler"' in content
+        assert "pulse.rules = [" in content
+        assert "matches = [" in content
+        assert "actions = {" in content
+        assert "update-props = {" in content
+        assert 'pulse.min.req = "64/48000"' in content

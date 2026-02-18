@@ -200,7 +200,9 @@ Settings (module.rt.args)
 - rt.prio
 - rt.time.soft / rt.time.hard
 - nice.level
+- uclamp.min / uclamp.max
 - rlimits.enabled / rtkit.enabled / rtportal.enabled
+- cpu.zero.denormals
 
 Apply/Reset
 - Drop-in file: ~/.config/pipewire/pipewire.conf.d/99-audioknob-rt-module.conf
@@ -362,6 +364,110 @@ Sources
 - PipeWire config reference: context.data-loops / loop.rt-prio / thread.affinity
   - https://docs.pipewire.org/page_man_pipewire_conf_5.html
 - PipeWire Performance Tuning (user-provided excerpt, 20 Apr 2023)
+
+-------------------------------------------------------------------------------
+## PipeWire Pulse Latency Defaults + Per-App Rules (Dev)
+
+Goal
+- Provide low-latency defaults for Pulse clients plus targeted per-application
+  overrides in `pipewire-pulse` drop-ins.
+
+Knobs
+- `pipewire_pulse_latency` (global defaults via `pulse.properties`)
+- `pipewire_pulse_app_rules` (per-app overrides via `pulse.rules`)
+
+Apply/Reset
+- Drop-ins in user config:
+  - `~/.config/pipewire/pipewire-pulse.conf.d/99-audioknob-pulse-latency.conf`
+  - `~/.config/pipewire/pipewire-pulse.conf.d/99-audioknob-pulse-rules.conf`
+- Reset removes only each knob’s own drop-in file.
+
+Status
+- `applied` only when file content matches generated expected content.
+- `partial` when file exists but differs from expected content.
+- `not_applied` when no configured values/rules are present or file is missing.
+
+Sources
+- PipeWire pulse config reference:
+  - https://docs.pipewire.org/page_man_pipewire-pulse_conf_5.html
+
+-------------------------------------------------------------------------------
+## PipeWire Profiler Module Enable (Dev)
+
+Goal
+- Ensure profiler metrics are available to diagnostics (`pw-top` / monitor
+  workflows) by explicitly loading `libpipewire-module-profiler`.
+
+Apply/Reset
+- User drop-in:
+  - `~/.config/pipewire/pipewire.conf.d/99-audioknob-profiler.conf`
+- Reset removes this file only.
+
+Status
+- Deterministic file-content comparison against generated module list.
+
+Sources
+- Profiler module reference:
+  - https://pipewire.pages.freedesktop.org/pipewire/page_module_profiler.html
+
+-------------------------------------------------------------------------------
+## systemd PipeWire/WirePlumber Service RT Drop-ins (Dev)
+
+Goal
+- Allow explicit per-service scheduling policy/priority and CPU affinity for
+  `pipewire.service` and `wireplumber.service`.
+
+Knobs
+- `systemd_pipewire_service_rt`
+- `systemd_wireplumber_service_rt`
+
+Apply/Reset
+- Root-managed drop-ins:
+  - `/etc/systemd/user/pipewire.service.d/99-audioknob-rt.conf`
+  - `/etc/systemd/user/wireplumber.service.d/99-audioknob-rt.conf`
+- Apply rewrites only knob-owned drop-in files.
+- Reset removes/restores only those knob-owned files.
+
+Status
+- Based on presence of expected drop-in lines; requires reload/restart/login to
+  become active in user managers.
+
+Sources
+- systemd exec scheduling controls:
+  - https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html
+
+-------------------------------------------------------------------------------
+## Core Partitioning Extras (Dev)
+
+Goal
+- Expose additional core partitioning controls that complement isolation and IRQ
+  tuning flows.
+
+Knobs
+- `kernel_workqueue_cpumask` (runtime workqueue CPU mask)
+- `cgroup_user_slice_allowed_cpus` (systemd `user.slice` AllowedCPUs drop-in)
+- `irqbalance_banned_cpulist` (irqbalance CPU ban policy)
+
+Apply/Reset
+- `kernel_workqueue_cpumask`: runtime sysfs write
+  - `/sys/devices/virtual/workqueue/cpumask`
+- `cgroup_user_slice_allowed_cpus`:
+  - `/etc/systemd/system/user.slice.d/99-audioknob-cpuset.conf`
+- `irqbalance_banned_cpulist`:
+  - distro-aware path (`/etc/sysconfig/irqbalance` or `/etc/default/irqbalance`)
+  - only `IRQBALANCE_BANNED_CPULIST=` is surgically replaced; other lines are retained
+
+Status
+- cpumask comparisons use CPU-set semantic parsing (`2-3` equals `2,3`) to avoid
+  false partial/not_applied states on format differences.
+
+Sources
+- Linux workqueue docs:
+  - https://docs.kernel.org/core-api/workqueue.html
+- systemd resource controls (`AllowedCPUs=`):
+  - https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html
+- irqbalance man page:
+  - https://manpages.ubuntu.com/manpages/noble/man1/irqbalance.1.html
 
 -------------------------------------------------------------------------------
 ## RTKit Daemon Tuning (On hold / De-scoped for apply)

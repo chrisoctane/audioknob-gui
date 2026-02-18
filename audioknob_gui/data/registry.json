@@ -151,6 +151,31 @@
         "read": true,
         "restore": true
       },
+      "category": "irq",
+      "description": "[i] sets irqbalance banned CPUs policy (IRQBALANCE_BANNED_CPULIST).\n[r] configure before apply.\n[+] keeps irqbalance from moving IRQs onto selected audio CPUs.\n[-] wrong bans can concentrate IRQ load.",
+      "id": "irqbalance_banned_cpulist",
+      "impl": {
+        "kind": "sysctl_conf",
+        "params": {
+          "lines": [
+            "IRQBALANCE_BANNED_CPULIST=0-1"
+          ],
+          "path": "/etc/sysconfig/irqbalance"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "medium",
+      "title": "IRQ Balance Policy"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
       "category": "cpu",
       "description": "[i] sets CPU governor to performance now and configures it to persist across reboots.\n[+] avoids frequency scaling latency spikes under realtime load.\n[-] higher power use and heat.",
       "id": "cpu_governor_performance_persistent",
@@ -551,6 +576,112 @@
         "restore": true
       },
       "category": "kernel",
+      "description": "[i] sets /sys/devices/virtual/workqueue/cpumask for global unbound workqueues.\n[r] configure before apply.\n[+] keeps kernel workqueue load off selected audio CPUs.\n[-] runtime only unless persisted by separate policy.",
+      "id": "kernel_workqueue_cpumask",
+      "impl": {
+        "kind": "sysfs_glob_kv",
+        "params": {
+          "glob": "/sys/devices/virtual/workqueue/cpumask",
+          "value": "0-1"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "Workqueue cpumask"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "cpu",
+      "description": "[i] writes a user.slice AllowedCPUs drop-in (cgroup v2 cpuset partitioning).\n[r] configure before apply.\n[+] constrains user-session workloads to selected CPUs.\n[-] requires service/session restart to fully take effect.",
+      "id": "cgroup_user_slice_allowed_cpus",
+      "impl": {
+        "kind": "sysctl_conf",
+        "params": {
+          "lines": [
+            "[Slice]",
+            "AllowedCPUs=0-3",
+            "CPUWeight=100"
+          ],
+          "path": "/etc/systemd/system/user.slice.d/99-audioknob-cpuset.conf"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "Cgroup CPU Partition"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] writes a systemd user drop-in for pipewire.service scheduling/affinity.\n[r] configure before apply.\n[+] allows explicit RT policy/priority and CPUAffinity for PipeWire.\n[-] incorrect values can starve desktop threads.",
+      "id": "systemd_pipewire_service_rt",
+      "impl": {
+        "kind": "sysctl_conf",
+        "params": {
+          "lines": [
+            "[Service]",
+            "CPUSchedulingPolicy=fifo",
+            "CPUSchedulingPriority=88",
+            "CPUAffinity=2 3"
+          ],
+          "path": "/etc/systemd/user/pipewire.service.d/99-audioknob-rt.conf"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "PipeWire systemd RT"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] writes a systemd user drop-in for wireplumber.service scheduling/affinity.\n[r] configure before apply.\n[+] allows explicit RT policy/priority and CPUAffinity for WirePlumber.\n[-] incorrect values can starve desktop threads.",
+      "id": "systemd_wireplumber_service_rt",
+      "impl": {
+        "kind": "sysctl_conf",
+        "params": {
+          "lines": [
+            "[Service]",
+            "CPUSchedulingPolicy=fifo",
+            "CPUSchedulingPriority=80",
+            "CPUAffinity=2 3"
+          ],
+          "path": "/etc/systemd/user/wireplumber.service.d/99-audioknob-rt.conf"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": true,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "WirePlumber systemd RT"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
       "description": "[i] adds preempt=full to kernel cmdline (PREEMPT_DYNAMIC).\n[+] increases kernel preemption for lower scheduling latency.\n[-] higher overhead; may affect stability on some systems; requires reboot.",
       "id": "kernel_preempt_full",
       "impl": {
@@ -803,6 +934,54 @@
         "restore": true
       },
       "category": "stack",
+      "description": "[i] sets pipewire-pulse global latency properties.\n[r] configure before apply.\n[+] aligns Pulse clients with lower-latency defaults.\n[-] aggressive values can increase xruns in older clients.",
+      "id": "pipewire_pulse_latency",
+      "impl": {
+        "kind": "pipewire_conf",
+        "params": {
+          "path": "~/.config/pipewire/pipewire-pulse.conf.d/99-audioknob-pulse-latency.conf",
+          "properties": {},
+          "properties_section": "pulse.properties"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "medium",
+      "title": "PipeWire Pulse Latency"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] writes pipewire-pulse per-app latency rules.\n[r] configure before apply.\n[+] allows per-application PIPEWIRE_LATENCY-style overrides.\n[-] malformed rules can be ignored by pipewire-pulse.",
+      "id": "pipewire_pulse_app_rules",
+      "impl": {
+        "kind": "pipewire_conf",
+        "params": {
+          "path": "~/.config/pipewire/pipewire-pulse.conf.d/99-audioknob-pulse-rules.conf",
+          "rules": [],
+          "rules_section": "pulse.rules"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "medium",
+      "title": "PipeWire Pulse App Rules"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
       "description": "[i] constrains PipeWire clock/quantum ranges (advanced).\n[r] configure before apply; empty fields are ignored.\n[+] can stabilize buffer ranges and allowed rates.\n[-] misconfiguration can cause xruns or refused rates.",
       "id": "pipewire_clock_constraints",
       "impl": {
@@ -1012,6 +1191,33 @@
       "requires_root": false,
       "risk_level": "low",
       "title": "PipeWire Pro Audio"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "stack",
+      "description": "[i] enables PipeWire profiler module in a user drop-in.\n[+] ensures pw-top profiler counters are available.\n[-] minor runtime overhead while enabled.",
+      "id": "pipewire_profiler_enable",
+      "impl": {
+        "kind": "pipewire_conf",
+        "params": {
+          "context_modules": [
+            {
+              "name": "libpipewire-module-profiler"
+            }
+          ],
+          "path": "~/.config/pipewire/pipewire.conf.d/99-audioknob-profiler.conf"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": false,
+      "risk_level": "low",
+      "title": "PipeWire Profiler"
     },
     {
       "capabilities": {

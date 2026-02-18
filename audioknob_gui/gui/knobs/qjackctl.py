@@ -35,8 +35,20 @@ def configure_dialog(ui) -> None:
     chosen = dialog.selected_cores()
     # Empty selection means "no pinning" (remove taskset prefix).
     # None (unset) means "don't override existing pinning".
-    ui.state["qjackctl_cpu_cores"] = chosen
+    role = None
+    role_fn = getattr(ui, "_core_plan_role_for_knob", None)
+    if callable(role_fn):
+        role = role_fn("qjackctl_server_prefix_rt")
+    linked_apply = getattr(ui, "_apply_linked_core_plan", None)
+    linked = bool(ui.state.get("core_plan_linked", True))
+    linked_used = False
+    if linked and role in ("audio", "housekeeping") and callable(linked_apply):
+        linked_apply(source=role, cores=chosen)
+        linked_used = True
+    else:
+        ui.state["qjackctl_cpu_cores"] = chosen
     save_state(ui.state)
+    ui._sync_core_plan_controls()
     status = ui._knob_statuses.get("qjackctl_server_prefix_rt")
     if status in ("applied", "pending_reboot"):
         _get_gui_logger().info("qjackctl cores updated; reapplying")
@@ -45,7 +57,7 @@ def configure_dialog(ui) -> None:
     QMessageBox.information(
         ui,
         "Saved",
-        "Saved CPU core selection for QjackCtl."
+        ("Saved linked core plan from QjackCtl." if linked_used else "Saved CPU core selection for QjackCtl.")
         + (f" Cores: {','.join(map(str, chosen))}" if chosen else " (no pinning)"),
     )
 

@@ -502,6 +502,53 @@ def test_cmd_status_uses_kernel_status_param_fallback(monkeypatch):
     assert captured_param.get("value") == "isolcpus"
 
 
+def test_apply_root_state_overrides_irqbalance_uses_prefix_replace(monkeypatch):
+    from audioknob_gui.worker.cli import _apply_root_state_overrides
+
+    monkeypatch.setattr(
+        "audioknob_gui.worker.cli.worker_ops.read_os_release",
+        lambda: {"ID": "ubuntu"},
+    )
+    monkeypatch.setattr(
+        "audioknob_gui.worker.cli.worker_ops.resolve_irqbalance_config_path",
+        lambda _distro_id: "/etc/default/irqbalance",
+    )
+
+    params = {
+        "path": "/etc/sysconfig/irqbalance",
+        "lines": ["IRQBALANCE_BANNED_CPULIST=0-1"],
+    }
+    state = {"irqbalance_banned_cpulist_cores": [2, 3]}
+
+    out = _apply_root_state_overrides("irqbalance_banned_cpulist", params, state)
+
+    assert out["path"] == "/etc/default/irqbalance"
+    assert out["lines"] == ["IRQBALANCE_BANNED_CPULIST=2,3"]
+    assert out["replace_prefixes"] == ["IRQBALANCE_BANNED_CPULIST="]
+    assert out.get("replace_file") is not True
+
+
+def test_force_reset_remove_lines_supports_prefixes(tmp_path):
+    from audioknob_gui.worker.cli import _force_reset_remove_lines
+
+    target = tmp_path / "irqbalance"
+    target.write_text(
+        "IRQBALANCE_BANNED_CPULIST=0-1\n"
+        "IRQBALANCE_ONESHOT=0\n",
+        encoding="utf-8",
+    )
+
+    success, message = _force_reset_remove_lines(
+        str(target),
+        [],
+        remove_prefixes=["IRQBALANCE_BANNED_CPULIST="],
+    )
+
+    assert success is True
+    assert "Removed" in message
+    assert target.read_text(encoding="utf-8") == "IRQBALANCE_ONESHOT=0\n"
+
+
 @pytest.mark.parametrize(
     "knob_id,kind,helper_name",
     [
@@ -575,3 +622,370 @@ device.profile.pro = "true"
     success, message = _force_reset_wpctl_profile({"device_id": "42"})
     assert success is False
     assert "Cannot safely force-reset Pro Audio profile" in message
+
+
+def test_kernel_cmdline_clear_param_detects_explicit_empty() -> None:
+    from audioknob_gui.worker.cli import _kernel_cmdline_clear_param
+
+    assert _kernel_cmdline_clear_param({"kernel_isolcpus_cores": []}, "kernel_isolcpus") == "isolcpus"
+    assert _kernel_cmdline_clear_param({"kernel_nohz_full_cores": []}, "kernel_nohz_full") == "nohz_full"
+    assert _kernel_cmdline_clear_param({"kernel_rcu_nocbs_cores": []}, "kernel_rcu_nocbs") == "rcu_nocbs"
+    assert _kernel_cmdline_clear_param(
+        {"irq_housekeeping_auto": False, "kernel_irqaffinity_cores": []},
+        "kernel_irqaffinity",
+    ) == "irqaffinity"
+    assert _kernel_cmdline_clear_param(
+        {"irq_housekeeping_auto": True, "irq_pinning_cpu_cores": []},
+        "kernel_irqaffinity",
+    ) == "irqaffinity"
+
+
+def test_cmd_apply_kernel_core_clear_removes_cmdline_param(monkeypatch, tmp_path):
+    import argparse
+    import io
+    import sys
+    from types import SimpleNamespace
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+    from audioknob_gui.worker.ops import DistroInfo
+
+    cmdline = tmp_path / "cmdline"
+    cmdline.write_text("quiet splash isolcpus=2,3 threadirqs\n", encoding="utf-8")
+
+    knob = Knob(
+        id="kernel_isolcpus",
+        title="CPU Isolation",
+        description="",
+        category="kernel",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=True,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind="kernel_cmdline", params={"param": ""}),
+    )
+
+    monkeypatch.setattr(cli, "_require_root", lambda: None)
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(
+        cli,
+        "default_paths",
+        lambda: SimpleNamespace(var_lib_dir=str(tmp_path / "var"), user_state_dir=str(tmp_path / "user")),
+    )
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {"kernel_isolcpus_cores": []})
+    monkeypatch.setattr(cli, "_log_audit_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr(
+        "audioknob_gui.worker.ops.detect_distro",
+        lambda: DistroInfo(
+            distro_id="test",
+            boot_system="bls",
+            kernel_cmdline_file=str(cmdline),
+            kernel_cmdline_update_cmd=[],
+        ),
+    )
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_apply(argparse.Namespace(registry="unused", knob=["kernel_isolcpus"]))
+
+    assert rc == 0
+    assert "isolcpus=" not in cmdline.read_text(encoding="utf-8")
+    payload = json.loads(captured.getvalue())
+    assert payload["applied"] == ["kernel_isolcpus"]
+
+
+def test_cmd_apply_irqbalance_clear_removes_banned_line(monkeypatch, tmp_path):
+    import argparse
+    import io
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    irqbalance_cfg = tmp_path / "irqbalance"
+    irqbalance_cfg.write_text(
+        "IRQBALANCE_BANNED_CPULIST=2,3\nIRQBALANCE_ONESHOT=0\n",
+        encoding="utf-8",
+    )
+
+    knob = Knob(
+        id="irqbalance_banned_cpulist",
+        title="IRQ Balance Policy",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysctl_conf",
+            params={
+                "path": "/etc/sysconfig/irqbalance",
+                "lines": ["IRQBALANCE_BANNED_CPULIST=0-1"],
+            },
+        ),
+    )
+
+    monkeypatch.setattr(cli, "_require_root", lambda: None)
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(
+        cli,
+        "default_paths",
+        lambda: SimpleNamespace(var_lib_dir=str(tmp_path / "var"), user_state_dir=str(tmp_path / "user")),
+    )
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {"irqbalance_banned_cpulist_cores": []})
+    monkeypatch.setattr(cli, "_log_audit_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr(
+        "audioknob_gui.worker.cli.worker_ops.read_os_release",
+        lambda: {"ID": "ubuntu"},
+    )
+    monkeypatch.setattr(
+        "audioknob_gui.worker.cli.worker_ops.resolve_irqbalance_config_path",
+        lambda _distro_id: str(irqbalance_cfg),
+    )
+    monkeypatch.setattr(
+        cli.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0] if args else [], returncode=0, stdout="", stderr=""),
+    )
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_apply(argparse.Namespace(registry="unused", knob=["irqbalance_banned_cpulist"]))
+
+    assert rc == 0
+    text = irqbalance_cfg.read_text(encoding="utf-8")
+    assert "IRQBALANCE_BANNED_CPULIST=" not in text
+    assert "IRQBALANCE_ONESHOT=0" in text
+
+
+def test_cmd_apply_cgroup_clear_deletes_dropin(monkeypatch, tmp_path):
+    import argparse
+    import io
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    dropin = tmp_path / "99-audioknob-cpuset.conf"
+    dropin.write_text("[Slice]\nAllowedCPUs=2 3\nCPUWeight=100\n", encoding="utf-8")
+
+    knob = Knob(
+        id="cgroup_user_slice_allowed_cpus",
+        title="Cgroup CPU Partition",
+        description="",
+        category="cpu",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=True,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysctl_conf",
+            params={
+                "path": str(dropin),
+                "lines": ["[Slice]", "AllowedCPUs=0-3", "CPUWeight=100"],
+            },
+        ),
+    )
+
+    monkeypatch.setattr(cli, "_require_root", lambda: None)
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(
+        cli,
+        "default_paths",
+        lambda: SimpleNamespace(var_lib_dir=str(tmp_path / "var"), user_state_dir=str(tmp_path / "user")),
+    )
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {"cgroup_user_slice_allowed_cores": []})
+    monkeypatch.setattr(cli, "_log_audit_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr(
+        cli.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0] if args else [], returncode=0, stdout="", stderr=""),
+    )
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_apply(argparse.Namespace(registry="unused", knob=["cgroup_user_slice_allowed_cpus"]))
+
+    assert rc == 0
+    assert not dropin.exists()
+
+
+def test_cmd_apply_irq_pinning_clear_uses_reset_path(monkeypatch, tmp_path):
+    import argparse
+    import io
+    import sys
+    from types import SimpleNamespace
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="irq_pinning",
+        title="IRQ Pinning",
+        description="",
+        category="irq",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="irq_affinity",
+            params={
+                "cpu_cores": "0,1",
+                "device_keys": [],
+                "persist_state_path": "/var/lib/audioknob-gui/state.json",
+                "persist_unit": "audioknob-irq-pinning.service",
+                "persist_unit_path": "/etc/systemd/system/audioknob-irq-pinning.service",
+            },
+        ),
+    )
+    called: dict[str, dict] = {}
+
+    def _fake_force_reset(params):
+        called["params"] = dict(params)
+        return True, "reset ok"
+
+    monkeypatch.setattr(cli, "_require_root", lambda: None)
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(
+        cli,
+        "default_paths",
+        lambda: SimpleNamespace(var_lib_dir=str(tmp_path / "var"), user_state_dir=str(tmp_path / "user")),
+    )
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {"irq_pinning_cpu_cores": []})
+    monkeypatch.setattr(cli, "_log_audit_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr(cli, "_force_reset_irq_affinity", _fake_force_reset)
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_apply(argparse.Namespace(registry="unused", knob=["irq_pinning"]))
+
+    assert rc == 0
+    assert "params" in called
+    payload = json.loads(captured.getvalue())
+    assert payload["applied"] == ["irq_pinning"]
+
+
+def test_check_knob_status_sysctl_clear_prefixes_uses_absence_semantics(tmp_path):
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker.ops import check_knob_status
+
+    path = tmp_path / "irqbalance"
+    path.write_text(
+        "IRQBALANCE_BANNED_CPULIST=2,3\nIRQBALANCE_ONESHOT=0\n",
+        encoding="utf-8",
+    )
+
+    knob = Knob(
+        id="irqbalance_banned_cpulist",
+        title="IRQ Balance Policy",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysctl_conf",
+            params={
+                "path": str(path),
+                "lines": [],
+                "clear_prefixes": ["IRQBALANCE_BANNED_CPULIST="],
+            },
+        ),
+    )
+
+    assert check_knob_status(knob) == "not_applied"
+    path.write_text("IRQBALANCE_ONESHOT=0\n", encoding="utf-8")
+    assert check_knob_status(knob) == "applied"
+    path.unlink()
+    assert check_knob_status(knob) == "applied"
+
+
+def test_check_knob_status_sysctl_clear_file_uses_absence_semantics(tmp_path):
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker.ops import check_knob_status
+
+    path = tmp_path / "99-audioknob-cpuset.conf"
+    path.write_text("[Slice]\nAllowedCPUs=2 3\n", encoding="utf-8")
+
+    knob = Knob(
+        id="cgroup_user_slice_allowed_cpus",
+        title="Cgroup CPU Partition",
+        description="",
+        category="cpu",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysctl_conf",
+            params={
+                "path": str(path),
+                "lines": [],
+                "clear_file": True,
+            },
+        ),
+    )
+
+    assert check_knob_status(knob) == "not_applied"
+    path.unlink()
+    assert check_knob_status(knob) == "applied"
+
+
+def test_preview_sysctl_clear_file_reports_delete(tmp_path):
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker.ops import preview
+
+    path = tmp_path / "99-audioknob-cpuset.conf"
+    path.write_text("[Slice]\nAllowedCPUs=2 3\n", encoding="utf-8")
+
+    knob = Knob(
+        id="cgroup_user_slice_allowed_cpus",
+        title="Cgroup CPU Partition",
+        description="",
+        category="cpu",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysctl_conf",
+            params={
+                "path": str(path),
+                "lines": [],
+                "clear_file": True,
+            },
+        ),
+    )
+
+    item = preview(knob, action="apply")
+    assert len(item.file_changes) == 1
+    assert item.file_changes[0].path == str(path)
+    assert item.file_changes[0].action == "delete"
