@@ -20,6 +20,12 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install system libraries (Qt runtime)
+        run: |
+          sudo apt-get update
+          # PySide6 wheels need system EGL/OpenGL libs available at import-time.
+          sudo apt-get install -y libegl1 libgl1
+
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip

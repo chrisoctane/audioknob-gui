@@ -18,6 +18,8 @@ Allowed paths:
 - `docs/internal/audit/STABILIZATION_STATE.md`
 - `docs/internal/audit/MULTI_AGENT_CONTROL_SYSTEM.md`
 - `docs/internal/audit/releases/`
+- `.github/workflows/consistency-check.yml`
+- `.github/workflows/release-quality-gate.yml`
 - `CHANGELOG.md`
 - `pyproject.toml`
 - `audioknob_gui/gui/main_window.py`
