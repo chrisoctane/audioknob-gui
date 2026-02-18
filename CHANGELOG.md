@@ -4,6 +4,12 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.8] - 2026-02-18
+
+### Fixed
+- CI quality-gate workflows now install required Qt runtime libraries (`libegl1`, `libgl1`) before pytest so PySide6 imports succeed on GitHub-hosted Ubuntu runners.
+- Release-tag and master-branch gate runs now use the same Qt runtime preinstall step, preventing `ImportError: libEGL.so.1` during test collection.
+
 ## [0.7.7] - 2026-02-18
 
 ### Added
