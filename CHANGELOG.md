@@ -4,6 +4,16 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.9] - 2026-02-19
+
+### Changed
+- RTIRQ restore now auto-disables `rtirq.service` when older transactions were recorded before the service existed, reducing force-reset handoffs during normal reset flows.
+- Workqueue cpumask handling now normalizes CPU-list selections to kernel mask syntax on apply and accepts both list/mask representations during status checks.
+
+### Fixed
+- Sysfs write failures in apply now surface a clear knob-scoped error message instead of bubbling an unhandled traceback.
+- Modeless XRUN/Jitter monitor dialogs now stop polling cleanly on close to prevent hidden background refresh loops.
+
 ## [0.7.8] - 2026-02-18
 
 ### Fixed
