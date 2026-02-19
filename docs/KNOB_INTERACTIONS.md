@@ -67,6 +67,9 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
   with the same housekeeping/audio-core strategy used by IRQ pinning/isolation.
 - `kernel_workqueue_cpumask` is runtime sysfs state and may be reset by reboot
   or distro policies.
+- Some kernels expose `/sys/devices/virtual/workqueue/cpumask` in hex mask
+  syntax; the app normalizes configured CPU-list selections to that mask format
+  during apply and accepts either list or mask representation during status.
 - `cgroup_user_slice_allowed_cpus` constrains user-session workloads via
   systemd/cgroup v2 and can reduce desktop contention on selected audio cores.
 - Clearing core selections and applying is treated as an explicit reset path for

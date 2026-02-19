@@ -18,6 +18,36 @@ class _DummyCorePlan:
         return [0, 1, 2, 3]
 
 
+class _DummyTimer:
+    def __init__(self) -> None:
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+class _DummyMonitorDialog:
+    def __init__(self) -> None:
+        self._timer = _DummyTimer()
+        self._running = True
+        self._closing = False
+        self.stop_called = False
+        self.delete_later_called = False
+
+    def _stop(self) -> None:
+        self.stop_called = True
+
+    def deleteLater(self) -> None:
+        self.delete_later_called = True
+
+
+class _DummyMonitorUi:
+    _stop_monitor_dialog = MainWindow._stop_monitor_dialog
+
+    def __init__(self) -> None:
+        self._xrun_dialog: object | None = "sentinel"
+
+
 def test_apply_linked_core_plan_from_audio() -> None:
     ui = _DummyCorePlan(linked=True)
 
@@ -50,3 +80,26 @@ def test_apply_linked_core_plan_noop_when_disabled() -> None:
 
     assert changed is False
     assert ui.state["irq_pinning_cpu_cores"] == [2, 3]
+
+
+def test_stop_monitor_dialog_stops_background_polling() -> None:
+    ui = _DummyMonitorUi()
+    dialog = _DummyMonitorDialog()
+
+    ui._stop_monitor_dialog(dialog)
+
+    assert dialog.stop_called is True
+    assert dialog._timer.stopped is True
+    assert dialog._running is False
+    assert dialog._closing is False
+
+
+def test_stop_monitor_dialog_preserves_restart_state() -> None:
+    ui = _DummyMonitorUi()
+    dialog = _DummyMonitorDialog()
+
+    ui._stop_monitor_dialog(dialog)
+
+    assert dialog._closing is False
+    assert dialog.stop_called is True
+    assert dialog._timer.stopped is True

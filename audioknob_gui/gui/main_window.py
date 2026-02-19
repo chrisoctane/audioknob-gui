@@ -3364,6 +3364,7 @@ class MainWindow(TableMixin, QMainWindow):
             return
         dialog = XrunMonitorDialog(parent=self)
         dialog.setModal(False)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
         dialog.finished.connect(lambda _=None: setattr(self, "_xrun_dialog", None))
         dialog.show()
         dialog.raise_()
@@ -3379,11 +3380,52 @@ class MainWindow(TableMixin, QMainWindow):
             return
         dialog = JitterMonitorDialog(parent=self)
         dialog.setModal(False)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
         dialog.finished.connect(lambda _=None: setattr(self, "_jitter_dialog", None))
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
         self._jitter_dialog = dialog
+
+    def _stop_monitor_dialog(self, dialog: object | None) -> None:
+        if dialog is None:
+            return
+
+        # Ensure modeless monitor dialogs stop polling when closed/hidden.
+        stop = getattr(dialog, "_stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                pass
+
+        timer = getattr(dialog, "_timer", None)
+        stop_timer = getattr(timer, "stop", None)
+        if callable(stop_timer):
+            try:
+                stop_timer()
+            except Exception:
+                pass
+
+        if hasattr(dialog, "_running"):
+            try:
+                setattr(dialog, "_running", False)
+            except Exception:
+                pass
+
+    def closeEvent(self, event) -> None:
+        for attr_name in ("_xrun_dialog", "_jitter_dialog"):
+            dialog = getattr(self, attr_name, None)
+            if dialog is None:
+                continue
+            try:
+                if isValid(dialog):
+                    self._stop_monitor_dialog(dialog)
+                    dialog.close()
+            except Exception:
+                pass
+            setattr(self, attr_name, None)
+        super().closeEvent(event)
 
     def _launch_in_terminal(self, command: list[str]) -> bool:
         candidates: list[tuple[str, list[str]]] = [

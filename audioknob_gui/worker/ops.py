@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import glob
 import os
 import subprocess
@@ -637,6 +638,77 @@ def _parse_cpu_list(spec: str) -> set[int]:
             except ValueError:
                 continue
     return out
+
+
+def _cpu_mask_from_set(cpus: set[int]) -> str:
+    valid = sorted({int(cpu) for cpu in cpus if int(cpu) >= 0})
+    if not valid:
+        return "0"
+    word_count = (max(valid) // 32) + 1
+    words = [0] * word_count
+    for cpu in valid:
+        words[cpu // 32] |= 1 << (cpu % 32)
+    head = f"{words[-1]:x}"
+    if word_count == 1:
+        return head
+    tail = [f"{word:08x}" for word in reversed(words[:-1])]
+    return ",".join([head, *tail])
+
+
+def _cpu_mask_from_cpu_list(spec: str) -> str | None:
+    cpus = _parse_cpu_list(spec)
+    if not cpus:
+        return None
+    return _cpu_mask_from_set(cpus)
+
+
+def _is_hex_mask_like(spec: str) -> bool:
+    text = str(spec).strip()
+    if not text:
+        return False
+    for part in text.split(","):
+        token = part.strip().lower()
+        if token.startswith("0x"):
+            token = token[2:]
+        if not token:
+            return False
+        try:
+            int(token, 16)
+        except ValueError:
+            return False
+    return True
+
+
+def _parse_cpu_mask(spec: str) -> set[int]:
+    if not _is_hex_mask_like(spec):
+        return set()
+    out: set[int] = set()
+    words: list[int] = []
+    for part in str(spec).strip().split(","):
+        token = part.strip().lower()
+        if token.startswith("0x"):
+            token = token[2:]
+        try:
+            words.append(int(token, 16))
+        except ValueError:
+            return set()
+    for word_index, word in enumerate(reversed(words)):
+        bit = 0
+        while word:
+            if word & 1:
+                out.add(word_index * 32 + bit)
+            word >>= 1
+            bit += 1
+    return out
+
+
+def _normalize_cpu_mask(spec: str) -> str | None:
+    if not _is_hex_mask_like(spec):
+        return None
+    cpus = _parse_cpu_mask(spec)
+    if not cpus:
+        return "0"
+    return _cpu_mask_from_set(cpus)
 
 
 def _find_pids_by_comm(name: str) -> list[int]:
@@ -1858,8 +1930,29 @@ def write_sysfs_values(glob_pat: str | list[str], value: str) -> list[dict[str, 
                     before = raw
         except Exception:
             before = None
-        path.write_text(value + "\n", encoding="utf-8")
-        effects.append({"kind": "sysfs_write", "path": p, "before": before, "after": value})
+        write_value = str(value)
+        # Some cpumask sysfs files expect hex mask syntax (e.g., "ffffffff")
+        # while GUI state stores core selections as CPU list syntax.
+        if path.name == "cpumask":
+            write_value = _cpu_mask_from_cpu_list(str(value)) or str(value)
+        try:
+            path.write_text(write_value + "\n", encoding="utf-8")
+        except OSError as exc:
+            # Keep a compatibility fallback for kernels that reject the initial
+            # representation with EINVAL/EOVERFLOW.
+            if (
+                path.name == "cpumask"
+                and exc.errno in (errno.EINVAL, errno.EOVERFLOW)
+            ):
+                fallback_value = _cpu_mask_from_cpu_list(str(value))
+                if fallback_value and fallback_value != write_value:
+                    path.write_text(fallback_value + "\n", encoding="utf-8")
+                    write_value = fallback_value
+                else:
+                    raise
+            else:
+                raise
+        effects.append({"kind": "sysfs_write", "path": p, "before": before, "after": write_value})
     return effects
 
 
@@ -2244,14 +2337,10 @@ def check_knob_status(knob: Any) -> str:
         cpuset_compare = knob.id == "kernel_workqueue_cpumask"
         if not cpuset_compare:
             cpuset_compare = "cpumask" in glob_pat
-        parse_cpu_list = None
+        wanted_set = _parse_cpu_list(wanted) if cpuset_compare else set()
+        wanted_mask = None
         if cpuset_compare:
-            try:
-                from audioknob_gui.core.irq import parse_cpu_list as _parse_cpu_list
-
-                parse_cpu_list = _parse_cpu_list
-            except Exception:
-                parse_cpu_list = None
+            wanted_mask = _cpu_mask_from_set(wanted_set) if wanted_set else _normalize_cpu_mask(wanted)
         applied_count = 0
         saw_selector = False
         for p in matches:
@@ -2271,11 +2360,19 @@ def check_knob_status(knob: Any) -> str:
                     # Plain value (no selector format)
                     current = content
 
-                if parse_cpu_list is not None:
-                    if parse_cpu_list(str(current)) == parse_cpu_list(wanted):
+                if cpuset_compare:
+                    current_text = str(current)
+                    current_set = _parse_cpu_list(current_text)
+                    if wanted_set and current_set == wanted_set:
                         applied_count += 1
-                elif current == wanted:
-                    applied_count += 1
+                        continue
+                    current_mask = _normalize_cpu_mask(current_text)
+                    if wanted_mask is not None and current_mask == wanted_mask:
+                        applied_count += 1
+                        continue
+                else:
+                    if current == wanted:
+                        applied_count += 1
             except Exception:
                 pass
         if applied_count == len(matches):

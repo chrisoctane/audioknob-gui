@@ -962,6 +962,52 @@ def test_cmd_apply_irq_pinning_clear_uses_reset_path(monkeypatch, tmp_path):
     assert payload["applied"] == ["irq_pinning"]
 
 
+def test_cmd_apply_sysfs_write_error_raises_clear_message(monkeypatch, tmp_path):
+    import argparse
+    from types import SimpleNamespace
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="kernel_workqueue_cpumask",
+        title="Workqueue cpumask",
+        description="",
+        category="kernel",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysfs_glob_kv",
+            params={
+                "glob": "/sys/devices/virtual/workqueue/cpumask",
+                "value": "0-1",
+            },
+        ),
+    )
+
+    def _raise_sysfs(*_args, **_kwargs):
+        raise OSError(75, "Value too large for defined data type")
+
+    monkeypatch.setattr(cli, "_require_root", lambda: None)
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(
+        cli,
+        "default_paths",
+        lambda: SimpleNamespace(var_lib_dir=str(tmp_path / "var"), user_state_dir=str(tmp_path / "user")),
+    )
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {"kernel_workqueue_cpumask_cores": [2, 3]})
+    monkeypatch.setattr(cli, "_log_audit_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr("audioknob_gui.worker.ops.write_sysfs_values", _raise_sysfs)
+
+    with pytest.raises(SystemExit, match="failed to write sysfs value"):
+        cli.cmd_apply(argparse.Namespace(registry="unused", knob=["kernel_workqueue_cpumask"]))
+
+
 def test_check_knob_status_sysctl_clear_prefixes_uses_absence_semantics(tmp_path):
     from audioknob_gui.registry import Capabilities, Impl, Knob
     from audioknob_gui.worker.ops import check_knob_status

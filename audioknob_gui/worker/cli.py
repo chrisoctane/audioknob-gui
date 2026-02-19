@@ -1911,7 +1911,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     if not all_cores:
                         raise SystemExit("Failed to read CPU topology for workqueue cpumask reset.")
                     value = cpu_list_from_cores(all_cores)
-            sysfs_effects = write_sysfs_values(glob_pat, value)
+            try:
+                sysfs_effects = write_sysfs_values(glob_pat, value)
+            except OSError as exc:
+                raise SystemExit(
+                    f"{k.title}: failed to write sysfs value '{value}' to {glob_pat}: {exc}"
+                ) from exc
             if not sysfs_effects:
                 raise SystemExit(f"No sysfs entries found for: {glob_pat}")
             for e in sysfs_effects:

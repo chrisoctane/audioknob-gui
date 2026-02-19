@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 
 from audioknob_gui.registry import Capabilities, Impl, Knob
-from audioknob_gui.worker.ops import check_knob_status
+from audioknob_gui.worker.ops import check_knob_status, write_sysfs_values
 
 
 def _extract_sysfs_selector(content: str) -> str | None:
@@ -131,3 +131,35 @@ def test_check_knob_status_cpumask_detects_mismatch(monkeypatch) -> None:
     )
 
     assert check_knob_status(knob) == "not_applied"
+
+
+def test_check_knob_status_cpumask_accepts_hex_mask(monkeypatch) -> None:
+    knob = _cpumask_knob("2-3")
+
+    monkeypatch.setattr(
+        "audioknob_gui.worker.ops._expand_sysfs_globs",
+        lambda _glob: ["/sys/devices/virtual/workqueue/cpumask"],
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda _self, encoding="utf-8": "c\n",
+    )
+
+    assert check_knob_status(knob) == "applied"
+
+
+def test_write_sysfs_values_cpumask_converts_cpu_list_to_mask(monkeypatch, tmp_path) -> None:
+    cpumask_path = tmp_path / "cpumask"
+    cpumask_path.write_text("ffffffff\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "audioknob_gui.worker.ops._expand_sysfs_globs",
+        lambda _glob: [str(cpumask_path)],
+    )
+
+    effects = write_sysfs_values("/ignored", "2-3")
+
+    assert cpumask_path.read_text(encoding="utf-8") == "c\n"
+    assert effects[0]["path"] == str(cpumask_path)
+    assert effects[0]["after"] == "c"

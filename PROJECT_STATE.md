@@ -244,6 +244,7 @@ Next phases (planned, incremental):
 - IRQ Overview and IRQ Pinning dialogs now use the dark theme throughout (including group boxes and scroll viewports).
 - IRQ pinning device list now forces a dark scroll-content background to avoid white panels on some distros.
 - Status/scan dialogs no longer crash when closed mid-refresh; background workers persist and skip UI updates if the dialog is gone.
+- Modeless XRUN/Jitter monitor dialogs now explicitly stop their polling loops and are deleted when closed, preventing hidden-dialog background polling (for example orphan `pw-top` refresh loops).
 - IRQ pinning housekeeping sweep now skips read-only kernel-managed IRQs and reports a concise warning instead of flooding errors.
 - Jitter Test info now summarizes per-thread stats and offers a Show Sample List view for raw values.
 - Sorting/grouping now uses the correct column indices after adding the CLI column (category/risk grouping restored).
@@ -255,6 +256,7 @@ Next phases (planned, incremental):
 - Restoring CPU governor effects now resolves systemd restores via the worker ops module to avoid UnboundLocalError.
 - Reset defaults now parses JSON output even on non-zero exit codes to avoid false “Root reset failed” errors.
 - Sysfs restore errors are now reported per-path instead of aborting the entire reset with a generic root effects failure.
+- Workqueue cpumask apply now converts CPU-list selections to kernel cpumask mask syntax, status compares both list/mask formats, and sysfs write failures return a clear knob-scoped error instead of an unhandled traceback.
 - IRQ affinity restore errors are now reported per-path instead of aborting the entire reset with a generic root effects failure.
 - Packaged installs now include GUI/worker subpackages so installed entrypoints do not crash with ModuleNotFoundError.
 - Debian packages now relocate Python modules into dist-packages so system Python can import them.
