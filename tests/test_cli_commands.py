@@ -142,8 +142,8 @@ def test_rtirq_status_partial_when_service_enabled_without_config(monkeypatch, t
     assert check_knob_status(knob) == "partial"
 
 
-def test_restore_rtirq_suggests_force_reset_when_unit_was_missing(monkeypatch, tmp_path):
-    """restore-knob should offer force reset when the rtirq unit was not present in the original state."""
+def test_restore_rtirq_auto_disables_when_unit_was_missing(monkeypatch, tmp_path):
+    """restore-knob should auto-disable rtirq when the unit was not present in the original state."""
     import subprocess
 
     from audioknob_gui.registry import Capabilities, Impl, Knob
@@ -195,9 +195,88 @@ def test_restore_rtirq_suggests_force_reset_when_unit_was_missing(monkeypatch, t
         lambda _distro_id: str(tmp_path / "rtirq.conf"),
     )
 
+    state = {"enabled": "enabled"}
+
+    def _fake_run(argv, *args, **kwargs):
+        if argv[:2] == ["systemctl", "is-enabled"] and argv[-1] == "rtirq.service":
+            return subprocess.CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=f"{state['enabled']}\n",
+                stderr="",
+            )
+        if argv[:3] == ["systemctl", "disable", "--now"] and argv[-1] == "rtirq.service":
+            state["enabled"] = "disabled"
+            return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout="", stderr="")
+        return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli.subprocess, "run", _fake_run)
+
+    result = cli._restore_knob_once("rtirq_enable")
+    assert result.get("success") is True
+    restored = [str(x) for x in result.get("restored", [])]
+    assert any("auto-disabled rtirq.service" in line for line in restored)
+
+
+def test_restore_rtirq_suggests_force_reset_when_auto_disable_fails(monkeypatch, tmp_path):
+    """restore-knob should offer force reset if rtirq remains enabled after auto-disable."""
+    import subprocess
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="rtirq_enable",
+        title="RT IRQ",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind="rtirq_config", params={"unit": "rtirq.service"}),
+    )
+
+    manifest = {
+        "schema": 1,
+        "txid": "tx1",
+        "applied": ["rtirq_enable"],
+        "backups": [],
+        "effects": [
+            {
+                "kind": "systemd_unit_toggle",
+                "unit": "rtirq.service",
+                "pre": {"enabled": "not-found", "active": "inactive"},
+                "result": {"returncode": 1, "stdout": "", "stderr": "Unit rtirq.service does not exist"},
+            },
+        ],
+    }
+
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(cli, "_find_transaction_for_knob", lambda _kid: ("tx1", manifest, "user"))
+    monkeypatch.setattr(cli, "_knob_restore_targets", lambda _k: ([], ["rtirq.service"], []))
+    monkeypatch.setattr(cli, "_filter_manifest_backups_for_knob", lambda *_a, **_kw: [])
+    monkeypatch.setattr(cli, "_filter_manifest_effects_for_knob", lambda effects, **_kw: list(effects))
+    monkeypatch.setattr(cli.worker_ops, "systemd_restore", lambda _e: None)
+    monkeypatch.setattr("audioknob_gui.worker.ops.read_os_release", lambda: {"ID": "test"})
+    monkeypatch.setattr(
+        "audioknob_gui.worker.ops.resolve_rtirq_config_path",
+        lambda _distro_id: str(tmp_path / "rtirq.conf"),
+    )
+
     def _fake_run(argv, *args, **kwargs):
         if argv[:2] == ["systemctl", "is-enabled"] and argv[-1] == "rtirq.service":
             return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout="enabled\n", stderr="")
+        if argv[:3] == ["systemctl", "disable", "--now"] and argv[-1] == "rtirq.service":
+            return subprocess.CompletedProcess(
+                args=list(argv),
+                returncode=1,
+                stdout="",
+                stderr="mock disable failure",
+            )
         return subprocess.CompletedProcess(args=list(argv), returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(cli.subprocess, "run", _fake_run)

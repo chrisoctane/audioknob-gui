@@ -202,6 +202,7 @@ Next phases (planned, incremental):
 - PipeWire RT Setup Safe RT preset now resets all fields in the setup dialog back to the preset/default values.
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - RTIRQ knob now writes an audioknob config block (name/high lists + priorities) and enables the rtirq service.
+- RTIRQ restore now auto-disables `rtirq.service` when older transactions were recorded before the unit existed; it only falls back to a force-reset prompt if disable verification still fails.
 - KDE Indexer status now handles balooctl output from stderr (balooctl6 on Tumbleweed).
 - Preset comparisons ignore unknown/not-applicable snapshot states; Huge Pages no longer forces synthetic status labels.
 - KDE Indexer apply now times out and errors if balooctl hangs or still reports running.

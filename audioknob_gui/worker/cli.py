@@ -3509,21 +3509,35 @@ def _restore_knob_once(knob_id: str) -> dict:
             errors.append(f"Failed to restore systemd effects: {exc}")
 
         # If the service didn't exist when this knob was applied (unit not found),
-        # a later package install can leave the unit enabled. Offer a force reset
-        # path so the GUI can disable it on request.
+        # a later package install can leave the unit enabled. Try to disable it
+        # automatically so normal reset remains seamless.
         if not errors and pre_not_found and unit:
             try:
                 r = subprocess.run(["systemctl", "is-enabled", unit], capture_output=True, text=True)
                 enabled = (r.stdout or r.stderr or "").strip()
                 if enabled in ("enabled", "static", "indirect"):
-                    return {
-                        "schema": 1,
-                        "success": False,
-                        "knob_id": knob_id,
-                        "txid": txid,
-                        "scope": scope,
-                        "error": f"Force reset available: reset did not disable {unit}",
-                    }
+                    disable_result = subprocess.run(
+                        ["systemctl", "disable", "--now", unit],
+                        capture_output=True,
+                        text=True,
+                    )
+                    verify = subprocess.run(["systemctl", "is-enabled", unit], capture_output=True, text=True)
+                    enabled_after = (verify.stdout or verify.stderr or "").strip()
+                    if enabled_after in ("enabled", "static", "indirect"):
+                        detail = (
+                            disable_result.stderr.strip()
+                            or disable_result.stdout.strip()
+                            or "unknown error"
+                        )
+                        return {
+                            "schema": 1,
+                            "success": False,
+                            "knob_id": knob_id,
+                            "txid": txid,
+                            "scope": scope,
+                            "error": f"Force reset available: reset did not disable {unit} ({detail})",
+                        }
+                    restored.append(f"(auto-disabled {unit} added after initial apply)")
             except Exception:
                 pass
 
