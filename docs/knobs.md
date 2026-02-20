@@ -25,11 +25,11 @@ Common sources
 - PipeWire Performance Tuning (user-provided excerpt, Wim Taymans, 20 Apr 2023)
 
 -------------------------------------------------------------------------------
-## Kernel RT Extras (Dev)
+## Kernel RT Extras (Main + Dev)
 
 Goal
 - Provide optional kernel boot parameters that can improve RT latency on some
-  systems, while keeping them gated as dev-only until validated on user rigs.
+  systems, while keeping them gated behind the Advanced lock until validated on user rigs.
 
 Knobs (kernel cmdline)
 - clocksource=tsc
@@ -40,7 +40,9 @@ Knobs (kernel cmdline)
 - nosmt
 
 UI
-- Dev tab only. High-risk warnings in Info.
+- `kernel_clocksource_tsc` and `kernel_tsc_reliable`: Main tab (Advanced lock required).
+- `kernel_preempt_full`, `kernel_nmi_watchdog_off`, `kernel_nosoftlockup`, `kernel_nosmt`: Dev tab.
+- High-risk warnings in Info.
 - Requires reboot toggle and Advanced knobs toggle (consistent with other kernel
   cmdline knobs).
 
@@ -437,11 +439,12 @@ Sources
   - https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html
 
 -------------------------------------------------------------------------------
-## Core Partitioning Extras (Dev)
+## Core Partitioning Extras (Cores & IRQ)
 
 Goal
 - Expose additional core partitioning controls that complement isolation and IRQ
   tuning flows.
+- UI location: Full mode -> `Cores & IRQ` tab.
 
 Knobs
 - `kernel_workqueue_cpumask` (runtime workqueue CPU mask)

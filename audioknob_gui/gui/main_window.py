@@ -423,16 +423,11 @@ class MainWindow(TableMixin, QMainWindow):
     def _dev_knob_ids(self) -> set[str]:
         return {
             "kernel_preempt_full",
-            "kernel_clocksource_tsc",
-            "kernel_tsc_reliable",
             "kernel_nmi_watchdog_off",
             "kernel_nosoftlockup",
             "kernel_nosmt",
-            "kernel_workqueue_cpumask",
-            "cgroup_user_slice_allowed_cpus",
             "systemd_pipewire_service_rt",
             "systemd_wireplumber_service_rt",
-            "irqbalance_banned_cpulist",
             "pipewire_clock_constraints",
             "pipewire_mlock_policy",
             "pipewire_data_loop_affinity",
@@ -461,6 +456,9 @@ class MainWindow(TableMixin, QMainWindow):
             "kernel_nohz_full",
             "kernel_rcu_nocbs",
             "kernel_irqaffinity",
+            "kernel_workqueue_cpumask",
+            "cgroup_user_slice_allowed_cpus",
+            "irqbalance_banned_cpulist",
         }
 
     def _on_view_tab_changed(self, index: int) -> None:

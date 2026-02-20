@@ -65,6 +65,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ### Workqueue cpumask + user.slice AllowedCPUs
 - `kernel_workqueue_cpumask` and `cgroup_user_slice_allowed_cpus` should align
   with the same housekeeping/audio-core strategy used by IRQ pinning/isolation.
+- In Full mode, these partition-policy knobs and `irqbalance_banned_cpulist`
+  are surfaced in the **Cores & IRQ** tab for shared core-plan workflow.
 - `kernel_workqueue_cpumask` is runtime sysfs state and may be reset by reboot
   or distro policies.
 - Some kernels expose `/sys/devices/virtual/workqueue/cpumask` in hex mask
@@ -89,6 +91,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
   IRQ Housekeeping section above).
 
 ### Kernel RT extras (clocksource=tsc / tsc=reliable / nmi_watchdog=0 / nosoftlockup / preempt=full)
+- In Full mode, TSC timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`)
+  are surfaced in the **Main** tab (advanced-gated); other RT extras remain in **Dev**.
 - Disables watchdog diagnostics (NMI/soft lockup); reduces visibility into hangs.
 - clocksource/tsc options are hardware-specific and can be unstable on some systems.
 - The app warns before applying TSC-related knobs if pre-flight checks look unsafe.
