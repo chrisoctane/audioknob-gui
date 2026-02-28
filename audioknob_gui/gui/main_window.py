@@ -63,6 +63,23 @@ from audioknob_gui.gui.widgets.numbered_dial import NumberedDial
 from audioknob_gui.gui.widgets.no_wheel_combo import ComboWheelGuard
 from audioknob_gui.platform.packages import which_command
 from audioknob_gui.registry import load_registry
+from audioknob_gui.knob_ids import (
+    AUDIO_GROUP_MEMBERSHIP,
+    RT_LIMITS_AUDIO_GROUP,
+    IRQBALANCE_DISABLE,
+    IRQ_PINNING,
+    POWER_PROFILE_PERFORMANCE,
+    KERNEL_ISOLCPUS,
+    KERNEL_NOHZ_FULL,
+    KERNEL_RCU_NOCBS,
+    KERNEL_IRQAFFINITY,
+    PIPEWIRE_QUANTUM,
+    PIPEWIRE_RT_SETUP,
+    PIPEWIRE_RT_LIMITS_GROUP,
+    PIPEWIRE_RT_MODULE_TUNING,
+    PIPEWIRE_MLOCK_POLICY,
+    PIPEWIRE_PULSE_APP_RULES,
+)
 
 from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPainter, QPixmap
@@ -381,21 +398,21 @@ class MainWindow(TableMixin, QMainWindow):
     def _advanced_knob_ids(self) -> set[str]:
         return set(
             [
-                "irqbalance_disable",
+                IRQBALANCE_DISABLE,
                 "rtirq_enable",
-                "irq_pinning",
+                IRQ_PINNING,
                 "cpu_governor_performance_persistent",
-                "power_profile_performance",
+                POWER_PROFILE_PERFORMANCE,
                 "kernel_threadirqs",
                 "kernel_rt_throttling_off",
                 "kernel_cstate_limit",
                 "kernel_intel_idle_cstate_limit",
                 "kernel_audit_off",
                 "kernel_mitigations_off",
-                "kernel_isolcpus",
-                "kernel_nohz_full",
-                "kernel_rcu_nocbs",
-                "kernel_irqaffinity",
+                KERNEL_ISOLCPUS,
+                KERNEL_NOHZ_FULL,
+                KERNEL_RCU_NOCBS,
+                KERNEL_IRQAFFINITY,
                 "kernel_workqueue_cpumask",
                 "cgroup_user_slice_allowed_cpus",
                 "kernel_preempt_full",
@@ -408,13 +425,13 @@ class MainWindow(TableMixin, QMainWindow):
                 "systemd_wireplumber_service_rt",
                 "irqbalance_banned_cpulist",
                 "pipewire_clock_constraints",
-                "pipewire_mlock_policy",
-                "pipewire_rt_setup",
+                PIPEWIRE_MLOCK_POLICY,
+                PIPEWIRE_RT_SETUP,
                 "pipewire_data_loop_affinity",
                 "wireplumber_alsa_usb_tuning",
                 "pipewire_pro_audio_profile",
                 "pipewire_pulse_latency",
-                "pipewire_pulse_app_rules",
+                PIPEWIRE_PULSE_APP_RULES,
                 "pipewire_profiler_enable",
                 "rtkit_daemon_tuning",
             ]
@@ -429,33 +446,33 @@ class MainWindow(TableMixin, QMainWindow):
             "systemd_pipewire_service_rt",
             "systemd_wireplumber_service_rt",
             "pipewire_clock_constraints",
-            "pipewire_mlock_policy",
+            PIPEWIRE_MLOCK_POLICY,
             "pipewire_data_loop_affinity",
             "wireplumber_alsa_usb_tuning",
             "pipewire_pro_audio_profile",
             "pipewire_pulse_latency",
-            "pipewire_pulse_app_rules",
+            PIPEWIRE_PULSE_APP_RULES,
             "pipewire_profiler_enable",
             "rtkit_daemon_tuning",
         }
 
     def _hidden_knob_ids(self) -> set[str]:
         return {
-            "pipewire_rt_limits_group",
-            "pipewire_rt_module_tuning",
+            PIPEWIRE_RT_LIMITS_GROUP,
+            PIPEWIRE_RT_MODULE_TUNING,
         }
 
     def _core_knob_ids(self) -> set[str]:
         return {
             "qjackctl_server_prefix_rt",
-            "irq_pinning",
+            IRQ_PINNING,
             "kernel_rt_throttling_off",
             "kernel_cstate_limit",
             "kernel_intel_idle_cstate_limit",
-            "kernel_isolcpus",
-            "kernel_nohz_full",
-            "kernel_rcu_nocbs",
-            "kernel_irqaffinity",
+            KERNEL_ISOLCPUS,
+            KERNEL_NOHZ_FULL,
+            KERNEL_RCU_NOCBS,
+            KERNEL_IRQAFFINITY,
             "kernel_workqueue_cpumask",
             "cgroup_user_slice_allowed_cpus",
             "irqbalance_banned_cpulist",
@@ -572,10 +589,10 @@ class MainWindow(TableMixin, QMainWindow):
         self.state["irq_housekeeping_auto"] = bool(enabled)
         save_state(self.state)
         self._sync_core_plan_controls()
-        status = self._knob_statuses.get("kernel_irqaffinity")
+        status = self._knob_statuses.get(KERNEL_IRQAFFINITY)
         if status in ("applied", "pending_reboot"):
             _get_gui_logger().info("irq housekeeping mode updated; reapplying")
-            self._on_apply_knob("kernel_irqaffinity")
+            self._on_apply_knob(KERNEL_IRQAFFINITY)
             return
         QMessageBox.information(
             self,
@@ -613,16 +630,16 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _core_plan_role_for_knob(self, knob_id: str) -> str | None:
         if knob_id in (
-            "irq_pinning",
+            IRQ_PINNING,
             "qjackctl_server_prefix_rt",
-            "kernel_isolcpus",
-            "kernel_nohz_full",
-            "kernel_rcu_nocbs",
+            KERNEL_ISOLCPUS,
+            KERNEL_NOHZ_FULL,
+            KERNEL_RCU_NOCBS,
             "irqbalance_banned_cpulist",
         ):
             return "audio"
         if knob_id in (
-            "kernel_irqaffinity",
+            KERNEL_IRQAFFINITY,
             "kernel_workqueue_cpumask",
             "cgroup_user_slice_allowed_cpus",
         ):
@@ -781,24 +798,24 @@ class MainWindow(TableMixin, QMainWindow):
 
         if self._linked_core_plan_enabled():
             affected = [
-                "irq_pinning",
+                IRQ_PINNING,
                 "qjackctl_server_prefix_rt",
-                "kernel_isolcpus",
-                "kernel_nohz_full",
-                "kernel_rcu_nocbs",
-                "kernel_irqaffinity",
+                KERNEL_ISOLCPUS,
+                KERNEL_NOHZ_FULL,
+                KERNEL_RCU_NOCBS,
+                KERNEL_IRQAFFINITY,
                 "kernel_workqueue_cpumask",
                 "cgroup_user_slice_allowed_cpus",
                 "irqbalance_banned_cpulist",
             ]
         else:
             affected = [
-                "irq_pinning",
+                IRQ_PINNING,
                 "qjackctl_server_prefix_rt",
-                "kernel_isolcpus",
-                "kernel_nohz_full",
-                "kernel_rcu_nocbs",
-                "kernel_irqaffinity",
+                KERNEL_ISOLCPUS,
+                KERNEL_NOHZ_FULL,
+                KERNEL_RCU_NOCBS,
+                KERNEL_IRQAFFINITY,
             ]
         by_id = {k.id: k for k in self.registry}
         queued: list[str] = []
@@ -865,7 +882,7 @@ class MainWindow(TableMixin, QMainWindow):
         if auto:
             housekeeping = sorted(set(self._cpu_core_universe()) - set(audio))
         else:
-            housekeeping = sorted(set(self._kernel_cores_from_state("kernel_irqaffinity") or []))
+            housekeeping = sorted(set(self._kernel_cores_from_state(KERNEL_IRQAFFINITY) or []))
         hk_text = ",".join(str(c) for c in housekeeping) if housekeeping else "unset"
         linked_mode = "on" if self._linked_core_plan_enabled() else "off"
         mode = "auto" if auto else "manual"
@@ -902,7 +919,7 @@ class MainWindow(TableMixin, QMainWindow):
         if auto:
             housekeeping = sorted(set(cores) - set(audio))
         else:
-            housekeeping = sorted(set(self._kernel_cores_from_state("kernel_irqaffinity") or []))
+            housekeeping = sorted(set(self._kernel_cores_from_state(KERNEL_IRQAFFINITY) or []))
 
         dialog = QDialog(self)
         dialog.setStyleSheet(self.styleSheet())
@@ -1461,7 +1478,7 @@ class MainWindow(TableMixin, QMainWindow):
             if kid in non_queue_knob_ids:
                 if status in ("applied", "pending_reboot"):
                     reasons[kid] = "already active"
-                elif kid == "audio_group_membership":
+                elif kid == AUDIO_GROUP_MEMBERSHIP:
                     reasons[kid] = "manual action"
                 else:
                     reasons[kid] = "not queued"
@@ -1556,7 +1573,7 @@ class MainWindow(TableMixin, QMainWindow):
         if not apply_knobs:
             return True
 
-        group_status = self._knob_statuses.get("audio_group_membership", "unknown")
+        group_status = self._knob_statuses.get(AUDIO_GROUP_MEMBERSHIP, "unknown")
         if group_status == "pending_reboot":
             QMessageBox.information(
                 self,
@@ -1842,7 +1859,7 @@ class MainWindow(TableMixin, QMainWindow):
             return False, "Not available on this system"
         reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
         advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
-        group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
+        group_pending = self._knob_statuses.get(AUDIO_GROUP_MEMBERSHIP) == "pending_reboot"
         group_ok = self._knob_group_ok(k)
         if group_pending and k.requires_groups:
             group_ok = False
@@ -3181,7 +3198,7 @@ class MainWindow(TableMixin, QMainWindow):
         return None
 
     def _pipewire_quantum_from_state(self) -> int | None:
-        raw = self.state.get("pipewire_quantum")
+        raw = self.state.get(PIPEWIRE_QUANTUM)
         if raw is None:
             return None
         try:
@@ -3233,10 +3250,10 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _kernel_core_key(self, knob_id: str) -> str | None:
         mapping = {
-            "kernel_isolcpus": "kernel_isolcpus_cores",
-            "kernel_nohz_full": "kernel_nohz_full_cores",
-            "kernel_rcu_nocbs": "kernel_rcu_nocbs_cores",
-            "kernel_irqaffinity": "kernel_irqaffinity_cores",
+            KERNEL_ISOLCPUS: "kernel_isolcpus_cores",
+            KERNEL_NOHZ_FULL: "kernel_nohz_full_cores",
+            KERNEL_RCU_NOCBS: "kernel_rcu_nocbs_cores",
+            KERNEL_IRQAFFINITY: "kernel_irqaffinity_cores",
             "kernel_workqueue_cpumask": "kernel_workqueue_cpumask_cores",
             "cgroup_user_slice_allowed_cpus": "cgroup_user_slice_allowed_cores",
             "irqbalance_banned_cpulist": "irqbalance_banned_cpulist_cores",
@@ -3259,7 +3276,7 @@ class MainWindow(TableMixin, QMainWindow):
         if not key:
             return None
         cores = None
-        if knob_id == "kernel_irqaffinity" and self.state.get("irq_housekeeping_auto", True):
+        if knob_id == KERNEL_IRQAFFINITY and self.state.get("irq_housekeeping_auto", True):
             try:
                 from audioknob_gui.core.irq import cpu_list_from_cores, read_cpu_present
             except Exception:
@@ -3281,10 +3298,10 @@ class MainWindow(TableMixin, QMainWindow):
         if not cpu_list:
             return None
         prefixes = {
-            "kernel_isolcpus": "isolcpus",
-            "kernel_nohz_full": "nohz_full",
-            "kernel_rcu_nocbs": "rcu_nocbs",
-            "kernel_irqaffinity": "irqaffinity",
+            KERNEL_ISOLCPUS: "isolcpus",
+            KERNEL_NOHZ_FULL: "nohz_full",
+            KERNEL_RCU_NOCBS: "rcu_nocbs",
+            KERNEL_IRQAFFINITY: "irqaffinity",
         }
         prefix = prefixes.get(knob_id)
         if not prefix:
@@ -3718,7 +3735,7 @@ class MainWindow(TableMixin, QMainWindow):
         impl_info = "Not implemented yet"
         if k.impl:
             kind_label = k.impl.kind
-            if k.id == "pipewire_rt_setup":
+            if k.id == PIPEWIRE_RT_SETUP:
                 kind_label = "composite (queues PipeWire RT Limits + PipeWire RT Module)"
             impl_info = f"<b>Kind:</b> {kind_label}<br/>"
             # For configurable knobs, show current configured values rather than registry defaults.
@@ -4211,9 +4228,9 @@ class MainWindow(TableMixin, QMainWindow):
         if conflicts and not self._power_profile_backend_is_tuned():
             filtered: dict[str, set[str]] = {}
             for src_id, targets in conflicts.items():
-                if src_id == "power_profile_performance":
+                if src_id == POWER_PROFILE_PERFORMANCE:
                     continue
-                new_targets = {t for t in targets if t != "power_profile_performance"}
+                new_targets = {t for t in targets if t != POWER_PROFILE_PERFORMANCE}
                 if new_targets:
                     filtered[src_id] = new_targets
             conflicts = filtered
@@ -4528,17 +4545,17 @@ class MainWindow(TableMixin, QMainWindow):
                 if kid in simple_mode.SIMPLE_MANAGED_KNOB_IDS and kid not in owned:
                     owned.add(kid)
                     changed = True
-            if {"pipewire_rt_limits_group", "pipewire_rt_module_tuning", "pipewire_mlock_policy"} & applied_ids:
-                if "pipewire_rt_setup" not in owned:
-                    owned.add("pipewire_rt_setup")
+            if {PIPEWIRE_RT_LIMITS_GROUP, PIPEWIRE_RT_MODULE_TUNING, PIPEWIRE_MLOCK_POLICY} & applied_ids:
+                if PIPEWIRE_RT_SETUP not in owned:
+                    owned.add(PIPEWIRE_RT_SETUP)
                     changed = True
             for kid in restored_ids:
                 if kid in owned:
                     owned.discard(kid)
                     changed = True
-            if {"pipewire_rt_limits_group", "pipewire_rt_module_tuning", "pipewire_mlock_policy"} & restored_ids:
-                if "pipewire_rt_setup" in owned:
-                    owned.discard("pipewire_rt_setup")
+            if {PIPEWIRE_RT_LIMITS_GROUP, PIPEWIRE_RT_MODULE_TUNING, PIPEWIRE_MLOCK_POLICY} & restored_ids:
+                if PIPEWIRE_RT_SETUP in owned:
+                    owned.discard(PIPEWIRE_RT_SETUP)
                     changed = True
             if changed:
                 self._set_simple_owned_knob_ids(owned)
@@ -4559,8 +4576,8 @@ class MainWindow(TableMixin, QMainWindow):
             if updated:
                 self._save_queue()
         self._refresh_statuses()
-        if "rt_limits_audio_group" in applied_ids and not self._rt_limits_active():
-            self._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
+        if RT_LIMITS_AUDIO_GROUP in applied_ids and not self._rt_limits_active():
+            self._knob_statuses[RT_LIMITS_AUDIO_GROUP] = "pending_reboot"
             self._update_reboot_banner()
             QMessageBox.information(
                 self,

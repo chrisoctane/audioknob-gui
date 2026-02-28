@@ -3,26 +3,36 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
+from audioknob_gui.knob_ids import (
+    IRQBALANCE_DISABLE,
+    IRQ_PINNING,
+    KERNEL_IRQAFFINITY,
+    KERNEL_ISOLCPUS,
+    KERNEL_NOHZ_FULL,
+    KERNEL_RCU_NOCBS,
+    PIPEWIRE_QUANTUM,
+    POWER_PROFILE_PERFORMANCE,
+)
 
 _RAW_CONFLICTS: dict[str, list[str]] = {
-    "power_profile_performance": [
+    POWER_PROFILE_PERFORMANCE: [
         "cpu_governor_performance_persistent",
         "kernel_cstate_limit",
         "kernel_intel_idle_cstate_limit",
     ],
-    "irq_pinning": [
-        "irqbalance_disable",
+    IRQ_PINNING: [
+        IRQBALANCE_DISABLE,
     ],
     "pipewire_clock_constraints": [
-        "pipewire_quantum",
+        PIPEWIRE_QUANTUM,
         "pipewire_sample_rate",
     ],
     "pipewire_data_loop_affinity": [
-        "kernel_isolcpus",
-        "kernel_nohz_full",
-        "kernel_rcu_nocbs",
-        "kernel_irqaffinity",
-        "irq_pinning",
+        KERNEL_ISOLCPUS,
+        KERNEL_NOHZ_FULL,
+        KERNEL_RCU_NOCBS,
+        KERNEL_IRQAFFINITY,
+        IRQ_PINNING,
     ],
 }
 
@@ -39,7 +49,7 @@ def _build_conflict_map() -> dict[str, set[str]]:
 CONFLICT_MAP = _build_conflict_map()
 
 SECTION_MAP: dict[str, list[str]] = {
-    "power_profile_performance": ["Power Profile (powerprofilesctl / tuned)"],
+    POWER_PROFILE_PERFORMANCE: ["Power Profile (powerprofilesctl / tuned)"],
     "cpu_governor_performance_persistent": ["CPU Performance (persistent governor)"],
     "kernel_cstate_limit": ["CPU C-States / Intel C-States limiters"],
     "kernel_intel_idle_cstate_limit": ["CPU C-States / Intel C-States limiters"],
@@ -47,29 +57,29 @@ SECTION_MAP: dict[str, list[str]] = {
         "PipeWire Clock Constraints / Mlock / RT Module / Data Loops",
         "PipeWire Quantum / Sample Rate",
     ],
-    "pipewire_quantum": ["PipeWire Quantum / Sample Rate"],
+    PIPEWIRE_QUANTUM: ["PipeWire Quantum / Sample Rate"],
     "pipewire_sample_rate": ["PipeWire Quantum / Sample Rate"],
     "pipewire_data_loop_affinity": [
         "PipeWire Clock Constraints / Mlock / RT Module / Data Loops",
         "CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)",
         "IRQ Pinning + IRQ Balance",
     ],
-    "kernel_isolcpus": ["CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)"],
-    "kernel_nohz_full": ["CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)"],
-    "kernel_rcu_nocbs": ["CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)"],
-    "kernel_irqaffinity": [
+    KERNEL_ISOLCPUS: ["CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)"],
+    KERNEL_NOHZ_FULL: ["CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)"],
+    KERNEL_RCU_NOCBS: ["CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)"],
+    KERNEL_IRQAFFINITY: [
         "CPU isolation set (isolcpus / nohz_full / rcu_nocbs / irqaffinity)",
         "IRQ Housekeeping + kernel irqaffinity",
     ],
-    "irq_pinning": ["IRQ Pinning + IRQ Balance"],
-    "irqbalance_disable": ["IRQ Pinning + IRQ Balance"],
+    IRQ_PINNING: ["IRQ Pinning + IRQ Balance"],
+    IRQBALANCE_DISABLE: ["IRQ Pinning + IRQ Balance"],
 }
 
-_AUDIO_ISOLATION_IDS = ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs")
+_AUDIO_ISOLATION_IDS = (KERNEL_ISOLCPUS, KERNEL_NOHZ_FULL, KERNEL_RCU_NOCBS)
 _AUDIO_ISOLATION_STATE_KEYS = {
-    "kernel_isolcpus": "kernel_isolcpus_cores",
-    "kernel_nohz_full": "kernel_nohz_full_cores",
-    "kernel_rcu_nocbs": "kernel_rcu_nocbs_cores",
+    KERNEL_ISOLCPUS: "kernel_isolcpus_cores",
+    KERNEL_NOHZ_FULL: "kernel_nohz_full_cores",
+    KERNEL_RCU_NOCBS: "kernel_rcu_nocbs_cores",
 }
 ACTIVE_CONFLICT_STATES = frozenset({"applied", "pending_reboot", "running", "partial"})
 
@@ -110,9 +120,9 @@ def prune_power_profile_conflicts(
 ) -> set[str]:
     if backend_is_tuned:
         return set(conflict_ids)
-    if knob_id == "power_profile_performance":
+    if knob_id == POWER_PROFILE_PERFORMANCE:
         return set()
-    return {cid for cid in conflict_ids if cid != "power_profile_performance"}
+    return {cid for cid in conflict_ids if cid != POWER_PROFILE_PERFORMANCE}
 
 
 def _normalized_core_list(state: dict, knob_id: str) -> tuple[int, ...] | None:

@@ -26,6 +26,15 @@ from audioknob_gui.core.transaction import (
     restore_file,
     write_manifest,
 )
+from audioknob_gui.knob_ids import (
+    KERNEL_IRQAFFINITY,
+    PIPEWIRE_MLOCK_POLICY,
+    PIPEWIRE_PULSE_APP_RULES,
+    PIPEWIRE_RT_LIMITS_GROUP,
+    PIPEWIRE_RT_MODULE_TUNING,
+    PIPEWIRE_RT_SETUP,
+    POWER_PROFILE_PERFORMANCE,
+)
 from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
 from audioknob_gui.worker.ops import (
@@ -308,7 +317,7 @@ def _pipewire_pulse_latency_override(state: dict) -> dict[str, Any]:
 
 
 def _pipewire_pulse_rules_override(state: dict) -> list[dict[str, Any]]:
-    profiles = state.get("pipewire_pulse_app_rules")
+    profiles = state.get(PIPEWIRE_PULSE_APP_RULES)
     if not isinstance(profiles, list):
         return []
     rules: list[dict[str, Any]] = []
@@ -476,7 +485,7 @@ def _apply_pipewire_state_overrides(kid: str, params: dict[str, Any], state: dic
         props = dict(new_params.get("properties") or {})
         props.update(_pipewire_clock_constraints_override(state))
         new_params["properties"] = props
-    elif kid == "pipewire_mlock_policy":
+    elif kid == PIPEWIRE_MLOCK_POLICY:
         props = dict(new_params.get("properties") or {})
         props.update(_pipewire_mlock_override(state))
         new_params["properties"] = props
@@ -485,12 +494,12 @@ def _apply_pipewire_state_overrides(kid: str, params: dict[str, Any], state: dic
         props.update(_pipewire_pulse_latency_override(state))
         new_params["properties"] = props
         new_params["properties_section"] = "pulse.properties"
-    elif kid == "pipewire_pulse_app_rules":
+    elif kid == PIPEWIRE_PULSE_APP_RULES:
         rules = _pipewire_pulse_rules_override(state)
         if rules:
             new_params["rules"] = rules
         new_params["rules_section"] = "pulse.rules"
-    elif kid == "pipewire_rt_module_tuning":
+    elif kid == PIPEWIRE_RT_MODULE_TUNING:
         args = dict(new_params.get("module_rt_args") or {})
         args.update(_pipewire_rt_module_override(state))
         new_params["module_rt_args"] = args
@@ -502,7 +511,7 @@ def _apply_pipewire_state_overrides(kid: str, params: dict[str, Any], state: dic
         props = dict(new_params.get("props") or {})
         props.update(_wireplumber_alsa_override(state))
         new_params["props"] = props
-    elif kid == "pipewire_rt_limits_group":
+    elif kid == PIPEWIRE_RT_LIMITS_GROUP:
         group = _pipewire_limits_group_override(state) or str(new_params.get("group") or "").strip() or None
         group = _resolve_existing_group(group, ["pipewire", "audio", "realtime"])
         if group:
@@ -568,7 +577,7 @@ def _kernel_cmdline_clear_param(state: dict, knob_id: str) -> str | None:
         return None
     key, prefix = meta
 
-    if knob_id == "kernel_irqaffinity" and state.get("irq_housekeeping_auto", True):
+    if knob_id == KERNEL_IRQAFFINITY and state.get("irq_housekeeping_auto", True):
         audio_raw, audio_configured = _state_int_list_with_presence(state, "irq_pinning_cpu_cores")
         if audio_configured and _kernel_cmdline_override(state, knob_id) is None:
             return prefix
@@ -629,7 +638,7 @@ def _irq_housekeeping_override(state: dict, audio_cpu_list: str | None) -> str |
 
 
 def _kernel_cmdline_override(state: dict, knob_id: str) -> str | None:
-    if knob_id == "kernel_irqaffinity" and state.get("irq_housekeeping_auto", True):
+    if knob_id == KERNEL_IRQAFFINITY and state.get("irq_housekeeping_auto", True):
         audio_raw = state.get("irq_pinning_cpu_cores")
         audio_set: set[int] = set()
         if isinstance(audio_raw, list) and all(isinstance(x, int) for x in audio_raw):
@@ -891,12 +900,12 @@ def cmd_preview(args: argparse.Namespace) -> int:
         if k.impl is not None and k.impl.kind == "wireplumber_conf":
             new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
-        if k.impl is not None and k.id == "pipewire_rt_limits_group" and k.impl.kind == "pam_limits_audio_group":
+        if k.impl is not None and k.id == PIPEWIRE_RT_LIMITS_GROUP and k.impl.kind == "pam_limits_audio_group":
             new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
         if (
             power_profile_backend is not None
-            and k.id == "power_profile_performance"
+            and k.id == POWER_PROFILE_PERFORMANCE
             and k.impl is not None
             and k.impl.kind == "power_profile"
         ):
@@ -1459,14 +1468,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
             params = new_params
         if (
             power_profile_backend is not None
-            and k.id == "power_profile_performance"
+            and k.id == POWER_PROFILE_PERFORMANCE
             and k.impl is not None
             and k.impl.kind == "power_profile"
         ):
             new_params = dict(k.impl.params)
             new_params["backend"] = power_profile_backend
             params = new_params
-        if k.impl is not None and k.id == "pipewire_rt_limits_group" and k.impl.kind == "pam_limits_audio_group":
+        if k.impl is not None and k.id == PIPEWIRE_RT_LIMITS_GROUP and k.impl.kind == "pam_limits_audio_group":
             params = _apply_pipewire_state_overrides(k.id, params, state)
         params = _apply_root_state_overrides(k.id, params, state)
 
@@ -2960,12 +2969,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         if k.impl is not None and k.impl.kind == "wireplumber_conf":
             new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
-        if k.impl is not None and k.id == "pipewire_rt_limits_group" and k.impl.kind == "pam_limits_audio_group":
+        if k.impl is not None and k.id == PIPEWIRE_RT_LIMITS_GROUP and k.impl.kind == "pam_limits_audio_group":
             new_params = _apply_pipewire_state_overrides(k.id, k.impl.params, state)
             k = replace(k, impl=replace(k.impl, params=new_params))
         if (
             power_profile_backend is not None
-            and k.id == "power_profile_performance"
+            and k.id == POWER_PROFILE_PERFORMANCE
             and k.impl is not None
             and k.impl.kind == "power_profile"
         ):
@@ -3001,9 +3010,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     # Derive combined status for PW RT setup (limits + module).
     by_id = {s["knob_id"]: s for s in statuses}
-    if "pipewire_rt_setup" in by_id:
-        limits = by_id.get("pipewire_rt_limits_group", {}).get("status", "unknown")
-        module = by_id.get("pipewire_rt_module_tuning", {}).get("status", "unknown")
+    if PIPEWIRE_RT_SETUP in by_id:
+        limits = by_id.get(PIPEWIRE_RT_LIMITS_GROUP, {}).get("status", "unknown")
+        module = by_id.get(PIPEWIRE_RT_MODULE_TUNING, {}).get("status", "unknown")
         module_keys = (
             "pipewire_rt_prio",
             "pipewire_rt_time_soft",
@@ -3030,7 +3039,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                     combined = "partial"
             else:
                 combined = "not_applied"
-            by_id["pipewire_rt_setup"]["status"] = combined
+            by_id[PIPEWIRE_RT_SETUP]["status"] = combined
             statuses = list(by_id.values())
             print(json.dumps({
                 "schema": 1,
@@ -3056,7 +3065,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             combined = "not_applied"
         else:
             combined = limits
-        by_id["pipewire_rt_setup"]["status"] = combined
+        by_id[PIPEWIRE_RT_SETUP]["status"] = combined
         statuses = list(by_id.values())
     
     print(json.dumps({
@@ -4533,13 +4542,13 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
     params = k.impl.params
     state = _load_gui_state()
     power_profile_backend = _power_profile_backend_override(state)
-    if knob_id == "pipewire_rt_limits_group" and kind == "pam_limits_audio_group":
+    if knob_id == PIPEWIRE_RT_LIMITS_GROUP and kind == "pam_limits_audio_group":
         params = _apply_pipewire_state_overrides(knob_id, params, state)
     if kind == "wpctl_profile" and knob_id.startswith("pipewire_"):
         params = _apply_pipewire_state_overrides(knob_id, params, state)
     if (
         power_profile_backend is not None
-        and knob_id == "power_profile_performance"
+        and knob_id == POWER_PROFILE_PERFORMANCE
         and kind == "power_profile"
     ):
         new_params = dict(params)

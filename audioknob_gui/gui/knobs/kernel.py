@@ -5,6 +5,12 @@ from PySide6.QtWidgets import QDialog, QMessageBox, QPushButton
 
 from audioknob_gui.gui.dialogs.cpu_cores import CpuCoreDialog
 from audioknob_gui.gui.state import save_state
+from audioknob_gui.knob_ids import (
+    KERNEL_IRQAFFINITY,
+    KERNEL_ISOLCPUS,
+    KERNEL_NOHZ_FULL,
+    KERNEL_RCU_NOCBS,
+)
 
 
 def build_config_button(ui, knob_id: str) -> QPushButton:
@@ -20,32 +26,32 @@ def configure_core_dialog(ui, knob_id: str) -> None:
     from audioknob_gui.gui.logging_utils import _get_gui_logger
 
     cpu_count = get_cpu_count()
-    allow_auto = knob_id == "kernel_irqaffinity"
+    allow_auto = knob_id == KERNEL_IRQAFFINITY
     auto_enabled = bool(ui.state.get("irq_housekeeping_auto", True))
     selected = set(ui._kernel_cores_from_state(knob_id) or [])
     titles = {
-        "kernel_isolcpus": "Configure isolcpus cores",
-        "kernel_nohz_full": "Configure nohz_full cores",
-        "kernel_rcu_nocbs": "Configure rcu_nocbs cores",
-        "kernel_irqaffinity": "Configure irqaffinity cores",
+        KERNEL_ISOLCPUS: "Configure isolcpus cores",
+        KERNEL_NOHZ_FULL: "Configure nohz_full cores",
+        KERNEL_RCU_NOCBS: "Configure rcu_nocbs cores",
+        KERNEL_IRQAFFINITY: "Configure irqaffinity cores",
         "kernel_workqueue_cpumask": "Configure workqueue cpumask cores",
         "cgroup_user_slice_allowed_cpus": "Configure cgroup user.slice CPUs",
         "irqbalance_banned_cpulist": "Configure irqbalance banned CPUs",
     }
     lines = {
-        "kernel_isolcpus": [
+        KERNEL_ISOLCPUS: [
             "Select CPU cores to isolate from the scheduler.",
             "These cores should be reserved for audio workloads.",
         ],
-        "kernel_nohz_full": [
+        KERNEL_NOHZ_FULL: [
             "Select CPU cores for full tickless mode.",
             "Use the same isolated cores for best results.",
         ],
-        "kernel_rcu_nocbs": [
+        KERNEL_RCU_NOCBS: [
             "Select CPU cores to offload RCU callbacks.",
             "Use the same isolated cores for best results.",
         ],
-        "kernel_irqaffinity": [
+        KERNEL_IRQAFFINITY: [
             "Select housekeeping cores for default IRQ handling.",
             "Use non-isolated cores to keep IRQs off audio cores.",
         ],
@@ -145,7 +151,7 @@ def configure_core_dialog(ui, knob_id: str) -> None:
 
 
 def apply_param_overrides(ui, knob, params: dict) -> None:
-    if knob.id in ("kernel_isolcpus", "kernel_nohz_full", "kernel_rcu_nocbs", "kernel_irqaffinity"):
+    if knob.id in (KERNEL_ISOLCPUS, KERNEL_NOHZ_FULL, KERNEL_RCU_NOCBS, KERNEL_IRQAFFINITY):
         override = ui._kernel_cmdline_param_for_state(knob.id)
         if override:
             params["param"] = override

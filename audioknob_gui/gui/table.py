@@ -26,6 +26,14 @@ from audioknob_gui.gui.conflicts import (
     prune_power_profile_conflicts,
 )
 from audioknob_gui.gui.widgets.cell_container import CellContainer
+from audioknob_gui.knob_ids import (
+    AUDIO_GROUP_MEMBERSHIP,
+    PIPEWIRE_MLOCK_POLICY,
+    PIPEWIRE_PULSE_APP_RULES,
+    PIPEWIRE_RT_MODULE_TUNING,
+    PIPEWIRE_RT_SETUP,
+    POWER_PROFILE_PERFORMANCE,
+)
 
 
 class TableMixin:
@@ -496,7 +504,7 @@ class TableMixin:
         self._refresh_core_plan_summary()
         reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
         advanced_enabled = bool(self.state.get("advanced_mode_enabled", False))
-        group_pending = self._knob_statuses.get("audio_group_membership") == "pending_reboot"
+        group_pending = self._knob_statuses.get(AUDIO_GROUP_MEMBERSHIP) == "pending_reboot"
         desktop_kind = self._detect_desktop()
         advanced_knobs = self._advanced_knob_ids()
         visible_knobs = self._visible_knobs()
@@ -720,7 +728,7 @@ class TableMixin:
             elif k.id == "disable_baloo" and desktop_kind == "gnome":
                 not_applicable = True
                 not_applicable_reason = "Requires KDE desktop"
-            elif k.id == "power_profile_performance" and not_applicable:
+            elif k.id == POWER_PROFILE_PERFORMANCE and not_applicable:
                 backend = self._power_profile_backend_from_state()
                 if backend == "powerprofilesctl":
                     not_applicable_reason = "Requires powerprofilesctl"
@@ -774,12 +782,12 @@ class TableMixin:
                         "pipewire_clock_power_of_two",
                     )
                     requires_config = not any(self.state.get(key) is not None for key in state_keys)
-                elif k.id == "pipewire_mlock_policy":
+                elif k.id == PIPEWIRE_MLOCK_POLICY:
                     requires_config = not (
                         isinstance(self.state.get("pipewire_mlock_allow"), bool)
                         or isinstance(self.state.get("pipewire_mlock_all"), bool)
                     )
-                elif k.id == "pipewire_rt_module_tuning":
+                elif k.id == PIPEWIRE_RT_MODULE_TUNING:
                     state_keys = (
                         "pipewire_rt_prio",
                         "pipewire_rt_time_soft",
@@ -802,8 +810,8 @@ class TableMixin:
                         or isinstance(self.state.get("pipewire_pulse_min_quantum"), str)
                         and bool(str(self.state.get("pipewire_pulse_min_quantum")).strip())
                     )
-                elif k.id == "pipewire_pulse_app_rules":
-                    raw_rules = self.state.get("pipewire_pulse_app_rules")
+                elif k.id == PIPEWIRE_PULSE_APP_RULES:
+                    raw_rules = self.state.get(PIPEWIRE_PULSE_APP_RULES)
                     requires_config = not (
                         isinstance(raw_rules, list)
                         and any(isinstance(item, dict) for item in raw_rules)
@@ -998,7 +1006,7 @@ class TableMixin:
             if status_tip:
                 status_btn.setToolTip(status_tip)
             status_btn.setMinimumWidth(0)
-            if k.impl and k.impl.kind == "read_only" and k.id != "pipewire_rt_setup":
+            if k.impl and k.impl.kind == "read_only" and k.id != PIPEWIRE_RT_SETUP:
                 status_btn.setEnabled(False)
                 status_btn.setToolTip("Not applicable for read-only tests")
             else:

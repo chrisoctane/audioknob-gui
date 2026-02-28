@@ -21,6 +21,8 @@ import json
 import re
 import subprocess
 
+from audioknob_gui.knob_ids import PIPEWIRE_RT_SETUP
+
 
 class PipeWireQuantumDialog(QDialog):
     def __init__(self, current: int | None, parent: QWidget | None = None) -> None:
@@ -695,7 +697,7 @@ class PipeWireRtSetupDialog(QDialog):
         if parent is None:
             return
         try:
-            gui_status.show_cli_status(parent, "pipewire_rt_setup")
+            gui_status.show_cli_status(parent, PIPEWIRE_RT_SETUP)
         except Exception:
             pass
 

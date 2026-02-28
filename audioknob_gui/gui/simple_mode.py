@@ -2,10 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from audioknob_gui.knob_ids import (
+    AUDIO_GROUP_MEMBERSHIP,
+    IRQBALANCE_DISABLE,
+    PIPEWIRE_MLOCK_POLICY,
+    PIPEWIRE_RT_LIMITS_GROUP,
+    PIPEWIRE_RT_MODULE_TUNING,
+    PIPEWIRE_RT_SETUP,
+    POWER_PROFILE_PERFORMANCE,
+    RT_LIMITS_AUDIO_GROUP,
+)
 
 MIN_LEVEL = 0
 MAX_LEVEL = 11
-NON_QUEUE_KNOB_IDS: frozenset[str] = frozenset({"audio_group_membership"})
+NON_QUEUE_KNOB_IDS: frozenset[str] = frozenset({AUDIO_GROUP_MEMBERSHIP})
 
 
 @dataclass(frozen=True)
@@ -17,13 +27,13 @@ class SimpleSetting:
 
 
 SIMPLE_SETTINGS: tuple[SimpleSetting, ...] = (
-    SimpleSetting("audio_group_membership", "Audio Groups", 1, ("audio_group_membership",)),
+    SimpleSetting(AUDIO_GROUP_MEMBERSHIP, "Audio Groups", 1, (AUDIO_GROUP_MEMBERSHIP,)),
     SimpleSetting("inotify_max_watches", "Inotify Watches", 2, ("inotify_max_watches",)),
     SimpleSetting("swappiness", "Swappiness", 3, ("swappiness",)),
     SimpleSetting("dirty_bytes", "Dirty Bytes", 4, ("dirty_bytes",)),
     SimpleSetting("usb_autosuspend_disable", "USB Power", 5, ("usb_autosuspend_disable",)),
     SimpleSetting("cpu_dma_latency_udev", "DMA Latency", 6, ("cpu_dma_latency_udev",)),
-    SimpleSetting("power_profile_performance", "Power Profile", 7, ("power_profile_performance",)),
+    SimpleSetting(POWER_PROFILE_PERFORMANCE, "Power Profile", 7, (POWER_PROFILE_PERFORMANCE,)),
     SimpleSetting("realtime_clock_access", "Realtime Clock Access", 8, ("realtime_clock_access",)),
     SimpleSetting(
         "cpu_governor_performance_persistent",
@@ -32,14 +42,14 @@ SIMPLE_SETTINGS: tuple[SimpleSetting, ...] = (
         ("cpu_governor_performance_persistent",),
     ),
     SimpleSetting(
-        "pipewire_rt_setup",
+        PIPEWIRE_RT_SETUP,
         "Safety Latch: Safe RT Stack",
         10,
         (
-            "rt_limits_audio_group",
-            "pipewire_rt_limits_group",
-            "pipewire_rt_module_tuning",
-            "pipewire_mlock_policy",
+            RT_LIMITS_AUDIO_GROUP,
+            PIPEWIRE_RT_LIMITS_GROUP,
+            PIPEWIRE_RT_MODULE_TUNING,
+            PIPEWIRE_MLOCK_POLICY,
         ),
     ),
     SimpleSetting(
@@ -48,7 +58,7 @@ SIMPLE_SETTINGS: tuple[SimpleSetting, ...] = (
         11,
         (
             "kernel_threadirqs",
-            "irqbalance_disable",
+            IRQBALANCE_DISABLE,
             "rtirq_enable",
         ),
     ),
@@ -56,21 +66,21 @@ SIMPLE_SETTINGS: tuple[SimpleSetting, ...] = (
 
 # Stable ordering for queue rendering and deterministic serialization.
 ORDERED_QUEUE_KNOBS: tuple[str, ...] = (
-    "audio_group_membership",
+    AUDIO_GROUP_MEMBERSHIP,
     "inotify_max_watches",
     "swappiness",
     "dirty_bytes",
     "usb_autosuspend_disable",
     "cpu_dma_latency_udev",
-    "power_profile_performance",
+    POWER_PROFILE_PERFORMANCE,
     "realtime_clock_access",
     "cpu_governor_performance_persistent",
-    "rt_limits_audio_group",
-    "pipewire_rt_limits_group",
-    "pipewire_rt_module_tuning",
-    "pipewire_mlock_policy",
+    RT_LIMITS_AUDIO_GROUP,
+    PIPEWIRE_RT_LIMITS_GROUP,
+    PIPEWIRE_RT_MODULE_TUNING,
+    PIPEWIRE_MLOCK_POLICY,
     "kernel_threadirqs",
-    "irqbalance_disable",
+    IRQBALANCE_DISABLE,
     "rtirq_enable",
 )
 
@@ -78,7 +88,7 @@ SIMPLE_MANAGED_KNOB_IDS = frozenset(
     (set(ORDERED_QUEUE_KNOBS) - set(NON_QUEUE_KNOB_IDS))
     | {
         # Concept knob row that mirrors bundle status in full view.
-        "pipewire_rt_setup",
+        PIPEWIRE_RT_SETUP,
     }
 )
 
@@ -108,15 +118,15 @@ def compose_queue_ids(level: int, *, backend_is_tuned: bool) -> list[str]:
         queue_ids.update(setting.queue_knob_ids)
 
     # Hard dependency: RT limits require audio group membership.
-    if "rt_limits_audio_group" in selected_ids:
-        queue_ids.add("audio_group_membership")
+    if RT_LIMITS_AUDIO_GROUP in selected_ids:
+        queue_ids.add(AUDIO_GROUP_MEMBERSHIP)
 
     # Bundle dependency: RT setup always ensures group membership.
-    if "pipewire_rt_setup" in selected_ids:
-        queue_ids.add("audio_group_membership")
+    if PIPEWIRE_RT_SETUP in selected_ids:
+        queue_ids.add(AUDIO_GROUP_MEMBERSHIP)
 
     # Conflict gate: tuned should own governor policy.
-    if backend_is_tuned and "power_profile_performance" in queue_ids:
+    if backend_is_tuned and POWER_PROFILE_PERFORMANCE in queue_ids:
         queue_ids.discard("cpu_governor_performance_persistent")
 
     ordered = [kid for kid in ORDERED_QUEUE_KNOBS if kid in queue_ids]
@@ -163,10 +173,10 @@ def normalize_queue_actions(
 def apply_fixed_presets(state: dict, *, level: int) -> None:
     selected_ids = {s.id for s in settings_for_level(level)}
 
-    if "power_profile_performance" in selected_ids:
+    if POWER_PROFILE_PERFORMANCE in selected_ids:
         state["power_profile_backend"] = "auto"
 
-    if "pipewire_rt_setup" in selected_ids:
+    if PIPEWIRE_RT_SETUP in selected_ids:
         # Simple Safe RT preset: keep RTKit/portal paths, do not force
         # explicit module priority/time values.
         state["pipewire_limits_enabled"] = False
@@ -180,6 +190,6 @@ def apply_fixed_presets(state: dict, *, level: int) -> None:
         state["pipewire_rtportal_enabled"] = True
         state["pipewire_rt_setup_dirty"] = False
 
-    if "pipewire_mlock_policy" in selected_ids or "pipewire_rt_setup" in selected_ids:
+    if PIPEWIRE_MLOCK_POLICY in selected_ids or PIPEWIRE_RT_SETUP in selected_ids:
         state["pipewire_mlock_allow"] = True
         state["pipewire_mlock_all"] = False

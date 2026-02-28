@@ -5,6 +5,7 @@ import html as html_lib
 from PySide6.QtWidgets import QComboBox, QSizePolicy
 
 from audioknob_gui.gui.state import save_state
+from audioknob_gui.knob_ids import POWER_PROFILE_PERFORMANCE
 
 
 def build_backend_combo(ui, knob, ctx) -> QComboBox:
@@ -31,7 +32,7 @@ def build_backend_combo(ui, knob, ctx) -> QComboBox:
         ui.state["power_profile_backend"] = str(_combo.currentData())
         save_state(ui.state)
         # Config changed; force re-evaluation until apply succeeds.
-        ui._knob_statuses["power_profile_performance"] = "not_applied"
+        ui._knob_statuses[POWER_PROFILE_PERFORMANCE] = "not_applied"
         ui._refresh_statuses()
         ui._populate()
 

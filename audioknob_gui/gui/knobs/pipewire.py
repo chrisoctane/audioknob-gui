@@ -18,6 +18,14 @@ from audioknob_gui.gui.dialogs.pipewire import (
     WirePlumberAlsaDialog,
 )
 from audioknob_gui.gui.state import save_state
+from audioknob_gui.knob_ids import (
+    PIPEWIRE_MLOCK_POLICY,
+    PIPEWIRE_PULSE_APP_RULES,
+    PIPEWIRE_QUANTUM,
+    PIPEWIRE_RT_LIMITS_GROUP,
+    PIPEWIRE_RT_MODULE_TUNING,
+    PIPEWIRE_RT_SETUP,
+)
 
 
 def build_config_button(ui, knob_id: str, label: str = "Configure...") -> QPushButton:
@@ -50,10 +58,10 @@ def build_quantum_combo(ui, knob, ctx) -> QComboBox | None:
 
     def _on_change(_: int, *, _combo: QComboBox = combo) -> None:
         # Capture the correct combo; otherwise a later reassignment can cause late-binding bugs.
-        ui.state["pipewire_quantum"] = int(_combo.currentData())
+        ui.state[PIPEWIRE_QUANTUM] = int(_combo.currentData())
         save_state(ui.state)
         # Optimistic UI: config changed, so action should become Apply until proven otherwise.
-        ui._knob_statuses["pipewire_quantum"] = "not_applied"
+        ui._knob_statuses[PIPEWIRE_QUANTUM] = "not_applied"
         ui._refresh_statuses()
         ui._populate()
 
@@ -99,7 +107,7 @@ def configure_quantum_dialog(ui) -> None:
     if dialog.exec() != QDialog.Accepted:
         return
     chosen = dialog.selected_value()
-    ui.state["pipewire_quantum"] = chosen
+    ui.state[PIPEWIRE_QUANTUM] = chosen
     save_state(ui.state)
     QMessageBox.information(
         ui,
@@ -230,7 +238,7 @@ def configure_pulse_latency_dialog(ui) -> None:
 
 
 def configure_pulse_rules_dialog(ui) -> None:
-    current = ui.state.get("pipewire_pulse_app_rules")
+    current = ui.state.get(PIPEWIRE_PULSE_APP_RULES)
     dialog = PipeWirePulseRulesDialog(current=current if isinstance(current, list) else None, parent=ui)
     if dialog.exec() != QDialog.Accepted:
         return
@@ -239,7 +247,7 @@ def configure_pulse_rules_dialog(ui) -> None:
     except ValueError as exc:
         QMessageBox.warning(ui, "Invalid values", str(exc))
         return
-    ui.state["pipewire_pulse_app_rules"] = values
+    ui.state[PIPEWIRE_PULSE_APP_RULES] = values
     save_state(ui.state)
     QMessageBox.information(ui, "Saved", "Saved PipeWire pulse app rules. Apply to take effect.")
 
@@ -346,9 +354,9 @@ def configure_rt_setup_dialog(ui) -> None:
     ui.state["pipewire_cpu_zero_denormals"] = module.get("cpu_zero_denormals")
 
     ui.state["pipewire_rt_setup_dirty"] = True
-    ui._knob_statuses["pipewire_rt_limits_group"] = "not_applied"
-    ui._knob_statuses["pipewire_rt_module_tuning"] = "not_applied"
-    ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+    ui._knob_statuses[PIPEWIRE_RT_LIMITS_GROUP] = "not_applied"
+    ui._knob_statuses[PIPEWIRE_RT_MODULE_TUNING] = "not_applied"
+    ui._knob_statuses[PIPEWIRE_RT_SETUP] = "not_applied"
     save_state(ui.state)
     QMessageBox.information(ui, "Saved", "Saved PipeWire RT setup. Apply to take effect.")
 
@@ -410,7 +418,7 @@ def configure_pro_audio_dialog(ui) -> None:
 
 
 def apply_param_overrides(ui, knob, params: dict) -> None:
-    if knob.id == "pipewire_quantum":
+    if knob.id == PIPEWIRE_QUANTUM:
         quantum = ui._pipewire_quantum_from_state()
         if quantum is not None:
             params["quantum"] = quantum
@@ -439,7 +447,7 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
         if isinstance(pow2, bool):
             props["clock.power-of-two-quantum"] = pow2
         params["properties"] = props
-    if knob.id == "pipewire_mlock_policy":
+    if knob.id == PIPEWIRE_MLOCK_POLICY:
         props = dict(params.get("properties") or {})
         allow = ui.state.get("pipewire_mlock_allow")
         if isinstance(allow, bool):
@@ -448,7 +456,7 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
         if isinstance(mlock_all, bool):
             props["mem.mlock-all"] = mlock_all
         params["properties"] = props
-    if knob.id == "pipewire_rt_limits_group":
+    if knob.id == PIPEWIRE_RT_LIMITS_GROUP:
         group = ui.state.get("pipewire_limits_group")
         if isinstance(group, str) and group.strip():
             params["group"] = group.strip()
@@ -464,7 +472,7 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
             f"@{group_label}   -  nice      {nice_val}",
             f"@{group_label}   -  memlock   {memlock_val}",
         ]
-    if knob.id == "pipewire_rt_module_tuning":
+    if knob.id == PIPEWIRE_RT_MODULE_TUNING:
         args = dict(params.get("module_rt_args") or {})
         for key, state_key in (
             ("rt.prio", "pipewire_rt_prio"),
@@ -499,8 +507,8 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
                 props[prop] = raw.strip()
         params["properties"] = props
         params["properties_section"] = "pulse.properties"
-    if knob.id == "pipewire_pulse_app_rules":
-        raw_rules = ui.state.get("pipewire_pulse_app_rules")
+    if knob.id == PIPEWIRE_PULSE_APP_RULES:
+        raw_rules = ui.state.get(PIPEWIRE_PULSE_APP_RULES)
         if isinstance(raw_rules, list):
             rules: list[dict] = []
             for item in raw_rules:
@@ -556,11 +564,11 @@ def apply_param_overrides(ui, knob, params: dict) -> None:
 
 
 def add_info_buttons(ui, knob, dialog: QWidget, layout) -> None:
-    if knob.id == "pipewire_quantum":
+    if knob.id == PIPEWIRE_QUANTUM:
         config_btn = QPushButton("Configure Buffer Size...")
         config_btn.clicked.connect(lambda: (dialog.accept(), ui.on_configure_knob(knob.id)))
         layout.addWidget(config_btn)
-    if knob.id == "pipewire_rt_setup":
+    if knob.id == PIPEWIRE_RT_SETUP:
         status_btn = QPushButton("Status Check...")
         status_btn.clicked.connect(lambda: ui._show_cli_status(knob.id))
         layout.addWidget(status_btn)
@@ -584,10 +592,10 @@ def _status_label(status: str) -> str:
 
 def info_extra_html(ui, knob) -> str:
     kid = knob.id
-    if kid == "pipewire_rt_setup":
-        limits = _status_label(ui._knob_statuses.get("pipewire_rt_limits_group", "unknown"))
-        module = _status_label(ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown"))
-        overall = _status_label(ui._knob_statuses.get("pipewire_rt_setup", "unknown"))
+    if kid == PIPEWIRE_RT_SETUP:
+        limits = _status_label(ui._knob_statuses.get(PIPEWIRE_RT_LIMITS_GROUP, "unknown"))
+        module = _status_label(ui._knob_statuses.get(PIPEWIRE_RT_MODULE_TUNING, "unknown"))
+        overall = _status_label(ui._knob_statuses.get(PIPEWIRE_RT_SETUP, "unknown"))
         limits_enabled = ui.state.get("pipewire_limits_enabled")
         limits_mode = "enabled" if limits_enabled is not False else "disabled"
         return (
@@ -614,7 +622,7 @@ def info_extra_html(ui, knob) -> str:
             "</ul>"
             "<p><b>Tip:</b> Configure first, then Apply. Empty fields mean no change.</p>"
         )
-    if kid == "pipewire_mlock_policy":
+    if kid == PIPEWIRE_MLOCK_POLICY:
         return (
             "<h4>How it works</h4>"
             "<ul>"
@@ -623,7 +631,7 @@ def info_extra_html(ui, knob) -> str:
             "</ul>"
             "<p><b>Tip:</b> Configure first, then Apply.</p>"
         )
-    if kid == "pipewire_rt_limits_group":
+    if kid == PIPEWIRE_RT_LIMITS_GROUP:
         return (
             "<h4>How it works</h4>"
             "<ul>"
@@ -632,7 +640,7 @@ def info_extra_html(ui, knob) -> str:
             "</ul>"
             "<p><b>Note:</b> Log out/in or reboot for limits to take effect.</p>"
         )
-    if kid == "pipewire_rt_module_tuning":
+    if kid == PIPEWIRE_RT_MODULE_TUNING:
         return (
             "<h4>How it works</h4>"
             "<ul>"
@@ -650,7 +658,7 @@ def info_extra_html(ui, knob) -> str:
             "</ul>"
             "<p><b>Tip:</b> Configure first, then Apply.</p>"
         )
-    if kid == "pipewire_pulse_app_rules":
+    if kid == PIPEWIRE_PULSE_APP_RULES:
         return (
             "<h4>How it works</h4>"
             "<ul>"
@@ -739,9 +747,9 @@ def build_rt_setup_action(ui, knob, ctx):
     limits_enabled = ui.state.get("pipewire_limits_enabled")
     if limits_enabled is None:
         limits_enabled = True
-    target_ids = ["pipewire_rt_limits_group"] if limits_enabled else []
+    target_ids = [PIPEWIRE_RT_LIMITS_GROUP] if limits_enabled else []
     if _rt_module_configured(ui):
-        target_ids.append("pipewire_rt_module_tuning")
+        target_ids.append(PIPEWIRE_RT_MODULE_TUNING)
 
     def _queue_apply() -> None:
         if not limits_enabled and not _rt_module_configured(ui):
@@ -750,15 +758,15 @@ def build_rt_setup_action(ui, knob, ctx):
         ui.state["pipewire_rt_setup_dirty"] = False
         save_state(ui.state)
         if limits_enabled:
-            ui._on_queue_knob("pipewire_rt_limits_group", "apply")
+            ui._on_queue_knob(PIPEWIRE_RT_LIMITS_GROUP, "apply")
         if _rt_module_configured(ui):
-            ui._on_queue_knob("pipewire_rt_module_tuning", "apply")
+            ui._on_queue_knob(PIPEWIRE_RT_MODULE_TUNING, "apply")
 
     def _queue_reset() -> None:
         ui.state["pipewire_rt_setup_dirty"] = False
         save_state(ui.state)
-        ui._on_queue_knob("pipewire_rt_limits_group", "reset")
-        ui._on_queue_knob("pipewire_rt_module_tuning", "reset")
+        ui._on_queue_knob(PIPEWIRE_RT_LIMITS_GROUP, "reset")
+        ui._on_queue_knob(PIPEWIRE_RT_MODULE_TUNING, "reset")
 
     if applied:
         btn.clicked.connect(_queue_reset)

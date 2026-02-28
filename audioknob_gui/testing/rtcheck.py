@@ -18,6 +18,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from audioknob_gui.knob_ids import (
+    AUDIO_GROUP_MEMBERSHIP,
+    IRQBALANCE_DISABLE,
+    RT_LIMITS_AUDIO_GROUP,
+)
+
 
 class CheckStatus(Enum):
     PASS = "pass"
@@ -117,7 +123,7 @@ def check_audio_group() -> CheckResult:
             status=CheckStatus.FAIL,
             message="Not in 'audio' group",
             detail="RT limits won't apply. Logout/login after joining.",
-            fix_knob="audio_group_membership",
+            fix_knob=AUDIO_GROUP_MEMBERSHIP,
             fix_command="sudo usermod -aG audio $USER"
         )
     except KeyError:
@@ -139,7 +145,7 @@ def check_audio_group() -> CheckResult:
             status=CheckStatus.FAIL,
             message="No audio group exists",
             detail="Neither 'audio' nor 'realtime' group found.",
-            fix_knob="audio_group_membership"
+            fix_knob=AUDIO_GROUP_MEMBERSHIP
         )
 
 
@@ -372,7 +378,7 @@ def check_rtprio() -> CheckResult:
             status=CheckStatus.FAIL,
             message="No RT priority capability",
             detail="Check /etc/security/limits.d/ for @audio rtprio",
-            fix_knob="rt_limits_audio_group"
+            fix_knob=RT_LIMITS_AUDIO_GROUP
         )
     except (ImportError, OSError):
         return CheckResult(
@@ -413,7 +419,7 @@ def check_memlock() -> CheckResult:
             status=CheckStatus.WARN,
             message=f"memlock: {hard_mb:.0f}MB (low)",
             detail="Audio apps may need more locked memory",
-            fix_knob="rt_limits_audio_group"
+            fix_knob=RT_LIMITS_AUDIO_GROUP
         )
     except (ImportError, OSError):
         return CheckResult(
@@ -533,7 +539,7 @@ def check_irqbalance() -> CheckResult:
             status=CheckStatus.WARN,
             message="irqbalance is running",
             detail="Can cause IRQ thread migration during playback",
-            fix_knob="irqbalance_disable"
+            fix_knob=IRQBALANCE_DISABLE
         )
     if status in ("inactive", "failed", "deactivating"):
         return CheckResult(
@@ -559,7 +565,7 @@ def check_irqbalance() -> CheckResult:
             status=CheckStatus.WARN,
             message="irqbalance is running",
             detail="Detected irqbalance process (systemctl unavailable)",
-            fix_knob="irqbalance_disable"
+            fix_knob=IRQBALANCE_DISABLE
         )
 
     binary_paths = [

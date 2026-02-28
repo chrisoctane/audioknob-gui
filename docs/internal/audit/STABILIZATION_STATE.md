@@ -42,6 +42,11 @@ Allowed paths:
 - `docs/KNOB_SYSTEM_AUDIT_MAP.md`
 - `docs/knobs.md`
 - `audioknob_gui/__init__.py`
+- `audioknob_gui/knob_ids.py`
+- `audioknob_gui/gui/actions.py`
+- `audioknob_gui/gui/knobs/power_profile.py`
+- `audioknob_gui/gui/requirements.py`
+- `audioknob_gui/testing/rtcheck.py`
 - `scripts/check_repo_consistency.py`
 - `tests/test_gate_scripts.py`
 - `tests/test_simple_mode.py`

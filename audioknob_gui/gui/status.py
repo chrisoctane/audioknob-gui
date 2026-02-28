@@ -12,6 +12,14 @@ from pathlib import Path
 from copy import deepcopy
 
 from audioknob_gui.gui.logging_utils import _get_gui_logger
+from audioknob_gui.knob_ids import (
+    AUDIO_GROUP_MEMBERSHIP,
+    PIPEWIRE_RT_LIMITS_GROUP,
+    PIPEWIRE_RT_MODULE_TUNING,
+    PIPEWIRE_RT_SETUP,
+    POWER_PROFILE_PERFORMANCE,
+    RT_LIMITS_AUDIO_GROUP,
+)
 from audioknob_gui.gui.state import save_state
 from audioknob_gui.gui.system_info import _param_present
 from audioknob_gui.gui.worker_api import (
@@ -841,7 +849,7 @@ def on_restore_baseline(ui) -> None:
             continue
         if knob.impl is None or (knob.impl and knob.impl.kind == "read_only"):
             continue
-        if knob.id == "audio_group_membership":
+        if knob.id == AUDIO_GROUP_MEMBERSHIP:
             skipped.append(f"{knob.title}: group changes require manual action")
             continue
         if base in ("applied", "pending_reboot"):
@@ -1121,7 +1129,7 @@ def on_restore_factory(ui) -> None:
             continue
         if knob.impl is None or (knob.impl and knob.impl.kind == "read_only"):
             continue
-        if knob.id == "audio_group_membership":
+        if knob.id == AUDIO_GROUP_MEMBERSHIP:
             skipped.append(f"{knob.title}: group changes require manual action")
             continue
         if base in ("applied", "pending_reboot"):
@@ -1317,12 +1325,12 @@ def refresh_statuses(ui) -> None:
 
 
 def apply_session_dependent_statuses(ui) -> None:
-    status = ui._knob_statuses.get("rt_limits_audio_group")
+    status = ui._knob_statuses.get(RT_LIMITS_AUDIO_GROUP)
     if status == "applied" and not rt_limits_active(ui):
-        ui._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
-    status = ui._knob_statuses.get("audio_group_membership")
+        ui._knob_statuses[RT_LIMITS_AUDIO_GROUP] = "pending_reboot"
+    status = ui._knob_statuses.get(AUDIO_GROUP_MEMBERSHIP)
     if status == "applied" and not audio_groups_active(ui):
-        ui._knob_statuses["audio_group_membership"] = "pending_reboot"
+        ui._knob_statuses[AUDIO_GROUP_MEMBERSHIP] = "pending_reboot"
     _apply_pipewire_rt_setup_status(ui)
     apply_baseline_statuses(ui)
 
@@ -1341,56 +1349,56 @@ def _pipewire_rt_module_configured(ui) -> bool:
 
 
 def _apply_pipewire_rt_setup_status(ui) -> None:
-    if "pipewire_rt_setup" not in ui._knob_statuses and not any(
-        k.id == "pipewire_rt_setup" for k in ui.registry
+    if PIPEWIRE_RT_SETUP not in ui._knob_statuses and not any(
+        k.id == PIPEWIRE_RT_SETUP for k in ui.registry
     ):
         return
-    limits = ui._knob_statuses.get("pipewire_rt_limits_group", "unknown")
-    module = ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown")
+    limits = ui._knob_statuses.get(PIPEWIRE_RT_LIMITS_GROUP, "unknown")
+    module = ui._knob_statuses.get(PIPEWIRE_RT_MODULE_TUNING, "unknown")
     module_configured = _pipewire_rt_module_configured(ui)
     limits_enabled = ui.state.get("pipewire_limits_enabled")
     if limits_enabled is False:
         if module_configured:
             if module in ("running", "pending_reboot"):
-                ui._knob_statuses["pipewire_rt_setup"] = module
+                ui._knob_statuses[PIPEWIRE_RT_SETUP] = module
             elif module in ("applied",):
-                ui._knob_statuses["pipewire_rt_setup"] = "applied"
+                ui._knob_statuses[PIPEWIRE_RT_SETUP] = "applied"
             elif module in ("not_applied", "sys_default"):
-                ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+                ui._knob_statuses[PIPEWIRE_RT_SETUP] = "not_applied"
             elif module == "unknown":
-                ui._knob_statuses["pipewire_rt_setup"] = "unknown"
+                ui._knob_statuses[PIPEWIRE_RT_SETUP] = "unknown"
             else:
-                ui._knob_statuses["pipewire_rt_setup"] = "partial"
+                ui._knob_statuses[PIPEWIRE_RT_SETUP] = "partial"
         else:
-            ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+            ui._knob_statuses[PIPEWIRE_RT_SETUP] = "not_applied"
         return
 
     if limits in ("running", "pending_reboot"):
-        ui._knob_statuses["pipewire_rt_setup"] = limits
+        ui._knob_statuses[PIPEWIRE_RT_SETUP] = limits
         return
     if module_configured and module in ("running", "pending_reboot"):
-        ui._knob_statuses["pipewire_rt_setup"] = module
+        ui._knob_statuses[PIPEWIRE_RT_SETUP] = module
         return
     if module_configured:
         if limits in ("applied",) and module in ("applied",):
-            ui._knob_statuses["pipewire_rt_setup"] = "applied"
+            ui._knob_statuses[PIPEWIRE_RT_SETUP] = "applied"
             return
         if limits in ("not_applied", "sys_default") and module in ("not_applied", "sys_default"):
-            ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+            ui._knob_statuses[PIPEWIRE_RT_SETUP] = "not_applied"
             return
         if limits == "unknown" or module == "unknown":
-            ui._knob_statuses["pipewire_rt_setup"] = "unknown"
+            ui._knob_statuses[PIPEWIRE_RT_SETUP] = "unknown"
             return
-        ui._knob_statuses["pipewire_rt_setup"] = "partial"
+        ui._knob_statuses[PIPEWIRE_RT_SETUP] = "partial"
         return
 
     if limits in ("applied", "pending_reboot"):
-        ui._knob_statuses["pipewire_rt_setup"] = limits
+        ui._knob_statuses[PIPEWIRE_RT_SETUP] = limits
         return
     if limits in ("not_applied", "sys_default"):
-        ui._knob_statuses["pipewire_rt_setup"] = "not_applied"
+        ui._knob_statuses[PIPEWIRE_RT_SETUP] = "not_applied"
         return
-    ui._knob_statuses["pipewire_rt_setup"] = limits
+    ui._knob_statuses[PIPEWIRE_RT_SETUP] = limits
 
 
 def apply_baseline_statuses(ui) -> None:
@@ -1639,15 +1647,15 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
         apply_info_param_overrides(ui, knob, params)
     except Exception:
         pass
-    if knob.id == "pipewire_rt_setup":
+    if knob.id == PIPEWIRE_RT_SETUP:
         kind = "composite"
     lines.append(f"kind: {kind}")
-    if knob.id == "power_profile_performance":
+    if knob.id == POWER_PROFILE_PERFORMANCE:
         params["backend"] = ui._power_profile_backend_from_state()
 
-    if knob.id == "pipewire_rt_setup":
-        limits_status = ui._knob_statuses.get("pipewire_rt_limits_group", "unknown")
-        module_status = ui._knob_statuses.get("pipewire_rt_module_tuning", "unknown")
+    if knob.id == PIPEWIRE_RT_SETUP:
+        limits_status = ui._knob_statuses.get(PIPEWIRE_RT_LIMITS_GROUP, "unknown")
+        module_status = ui._knob_statuses.get(PIPEWIRE_RT_MODULE_TUNING, "unknown")
         module_configured = _pipewire_rt_module_configured(ui)
         limits_enabled = ui.state.get("pipewire_limits_enabled")
         limits_label = limits_status
@@ -1667,7 +1675,7 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                 lines.append("partial_reason: module-rt config does not match configured values.")
         lines.append("")
         lines.append("component checks:")
-        for sub_id in ("pipewire_rt_limits_group", "pipewire_rt_module_tuning"):
+        for sub_id in (PIPEWIRE_RT_LIMITS_GROUP, PIPEWIRE_RT_MODULE_TUNING):
             sub = next((k for k in ui.registry if k.id == sub_id), None)
             if not sub:
                 lines.append(f"  {sub_id}: missing from registry")

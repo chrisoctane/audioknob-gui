@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMessageBox
 from audioknob_gui.gui.actions import QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger, _log_gui_audit
 from audioknob_gui.gui.worker_api import _PKEXEC_CANCELLED, _run_pkexec_command_capture
+from audioknob_gui.knob_ids import AUDIO_GROUP_MEMBERSHIP, POWER_PROFILE_PERFORMANCE
 
 
 def refresh_user_groups(ui) -> None:
@@ -40,7 +41,7 @@ def knob_commands_ok(ui, k) -> bool:
     if not k.requires_commands:
         return True  # No commands required
     from audioknob_gui.platform.packages import check_command_available
-    if k.id == "power_profile_performance":
+    if k.id == POWER_PROFILE_PERFORMANCE:
         backend = ui._power_profile_backend_from_state()
         if backend == "powerprofilesctl":
             return check_command_available("powerprofilesctl")
@@ -58,7 +59,7 @@ def knob_missing_commands(ui, k) -> list[str]:
     if not k.requires_commands:
         return []
     from audioknob_gui.platform.packages import check_command_available
-    if k.id == "power_profile_performance":
+    if k.id == POWER_PROFILE_PERFORMANCE:
         backend = ui._power_profile_backend_from_state()
         if backend == "powerprofilesctl":
             return [] if check_command_available("powerprofilesctl") else ["powerprofilesctl"]
@@ -73,13 +74,59 @@ def knob_missing_commands(ui, k) -> list[str]:
     return [cmd for cmd in k.requires_commands if not check_command_available(cmd)]
 
 
+def _group_op_finish(
+    ui,
+    logger,
+    payload: object,
+    message: str,
+    *,
+    action_key: str,
+    action_label: str,
+    log_action: str,
+    audit_action: str,
+    user: str,
+) -> None:
+    """Shared completion handler for join/leave group operations."""
+    ui._busy_knobs.discard(AUDIO_GROUP_MEMBERSHIP)
+    errors: list[str] = []
+    changed: list[str] = []
+    if isinstance(payload, dict):
+        errors = payload.get("errors") or []
+        changed = payload.get(action_key) or []
+    if not changed and not errors and message:
+        errors = [message]
+
+    msg: list[str] = []
+    if changed:
+        msg.append(f"<b style='color: #2e7d32;'>{action_label}</b> {', '.join(changed)}")
+    if errors:
+        msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
+    if changed:
+        msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
+
+    QMessageBox.information(ui, "Group Membership", "".join(msg))
+    logger.info(
+        "%s user=%s %s=%s errors=%s",
+        log_action, user, action_key, ",".join(changed), "; ".join(errors),
+    )
+    if isinstance(payload, dict):
+        _log_gui_audit(audit_action, payload)
+
+    if changed:
+        ui._knob_statuses[AUDIO_GROUP_MEMBERSHIP] = "pending_reboot"
+        ui._update_reboot_banner()
+
+    ui._refresh_user_groups()
+    ui._populate()
+
+
 def on_join_groups(ui) -> None:
     """Add current user to audio groups."""
     from audioknob_gui.platform.detect import get_available_audio_groups, get_missing_groups
     from audioknob_gui.platform.packages import which_command
 
     logger = _get_gui_logger()
-    if "audio_group_membership" in ui._busy_knobs:
+    if AUDIO_GROUP_MEMBERSHIP in ui._busy_knobs:
         return
     missing = get_missing_groups()
     available = get_available_audio_groups()
@@ -130,8 +177,8 @@ def on_join_groups(ui) -> None:
         return
 
     user = os.environ.get("USER") or getpass.getuser()
-    ui._busy_knobs.add("audio_group_membership")
-    ui._knob_statuses["audio_group_membership"] = "running"
+    ui._busy_knobs.add(AUDIO_GROUP_MEMBERSHIP)
+    ui._knob_statuses[AUDIO_GROUP_MEMBERSHIP] = "running"
     ui._populate()
 
     def _task() -> tuple[bool, object, str]:
@@ -175,34 +222,14 @@ def on_join_groups(ui) -> None:
     worker = QueueTaskWorker(_task, parent=ui)
 
     def _on_done(success: bool, payload: object, message: str) -> None:
-        ui._busy_knobs.discard("audio_group_membership")
-        errors: list[str] = []
-        added: list[str] = []
-        if isinstance(payload, dict):
-            errors = payload.get("errors") or []
-            added = payload.get("added") or []
-        if not added and not errors and message:
-            errors = [message]
-
-        msg = []
-        if added:
-            msg.append(f"<b style='color: #2e7d32;'>Added to:</b> {', '.join(added)}")
-        if errors:
-            msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
-        if added:
-            msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
-
-        QMessageBox.information(ui, "Group Membership", "".join(msg))
-        logger.info("join groups user=%s added=%s errors=%s", user, ",".join(added), "; ".join(errors))
-        if isinstance(payload, dict):
-            _log_gui_audit("join-groups", payload)
-
-        if added:
-            ui._knob_statuses["audio_group_membership"] = "pending_reboot"
-            ui._update_reboot_banner()
-
-        ui._refresh_user_groups()
-        ui._populate()
+        _group_op_finish(
+            ui, logger, payload, message,
+            action_key="added",
+            action_label="Added to:",
+            log_action="join groups",
+            audit_action="join-groups",
+            user=user,
+        )
 
     worker.finished.connect(_on_done)
     worker.finished.connect(worker.deleteLater)
@@ -216,7 +243,7 @@ def on_leave_groups(ui) -> None:
     from audioknob_gui.platform.packages import which_command
 
     logger = _get_gui_logger()
-    if "audio_group_membership" in ui._busy_knobs:
+    if AUDIO_GROUP_MEMBERSHIP in ui._busy_knobs:
         return
     ui._refresh_user_groups()
     available = get_available_audio_groups()
@@ -256,8 +283,8 @@ def on_leave_groups(ui) -> None:
             },
         )
         return
-    ui._busy_knobs.add("audio_group_membership")
-    ui._knob_statuses["audio_group_membership"] = "running"
+    ui._busy_knobs.add(AUDIO_GROUP_MEMBERSHIP)
+    ui._knob_statuses[AUDIO_GROUP_MEMBERSHIP] = "running"
     ui._populate()
 
     def _task() -> tuple[bool, object, str]:
@@ -334,34 +361,14 @@ def on_leave_groups(ui) -> None:
     worker = QueueTaskWorker(_task, parent=ui)
 
     def _on_done(success: bool, payload: object, message: str) -> None:
-        ui._busy_knobs.discard("audio_group_membership")
-        errors: list[str] = []
-        removed: list[str] = []
-        if isinstance(payload, dict):
-            errors = payload.get("errors") or []
-            removed = payload.get("removed") or []
-        if not removed and not errors and message:
-            errors = [message]
-
-        msg = []
-        if removed:
-            msg.append(f"<b style='color: #2e7d32;'>Removed from:</b> {', '.join(removed)}")
-        if errors:
-            msg.append(f"<br/><b style='color: #d32f2f;'>Errors:</b><br/>{'<br/>'.join(errors)}")
-        if removed:
-            msg.append("<br/><br/><b>Reboot required for changes to take effect.</b>")
-
-        QMessageBox.information(ui, "Group Membership", "".join(msg))
-        logger.info("leave groups user=%s removed=%s errors=%s", user, ",".join(removed), "; ".join(errors))
-        if isinstance(payload, dict):
-            _log_gui_audit("leave-groups", payload)
-
-        if removed:
-            ui._knob_statuses["audio_group_membership"] = "pending_reboot"
-            ui._update_reboot_banner()
-
-        ui._refresh_user_groups()
-        ui._populate()
+        _group_op_finish(
+            ui, logger, payload, message,
+            action_key="removed",
+            action_label="Removed from:",
+            log_action="leave groups",
+            audit_action="leave-groups",
+            user=user,
+        )
 
     worker.finished.connect(_on_done)
     worker.finished.connect(worker.deleteLater)

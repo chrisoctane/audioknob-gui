@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QT
 
 from audioknob_gui.gui.logging_utils import _get_gui_logger
 from audioknob_gui.gui.state import save_state
+from audioknob_gui.knob_ids import RT_LIMITS_AUDIO_GROUP
 from audioknob_gui.gui.worker_api import (
     _PKEXEC_CANCELLED,
     _is_force_reset_error,
@@ -157,9 +158,9 @@ def on_knob_task_finished(
             QMessageBox.warning(ui, "Reset Failed", message or "Unknown error")
 
     ui._refresh_statuses()
-    if success and action == "apply" and knob_id == "rt_limits_audio_group":
+    if success and action == "apply" and knob_id == RT_LIMITS_AUDIO_GROUP:
         if not ui._rt_limits_active():
-            ui._knob_statuses["rt_limits_audio_group"] = "pending_reboot"
+            ui._knob_statuses[RT_LIMITS_AUDIO_GROUP] = "pending_reboot"
             ui._update_reboot_banner()
             QMessageBox.information(
                 ui,

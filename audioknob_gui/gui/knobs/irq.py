@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QDialog, QMessageBox, QPushButton
 
 from audioknob_gui.gui.dialogs.irq_pinning import IrqPinningDialog
 from audioknob_gui.gui.state import save_state
+from audioknob_gui.knob_ids import IRQ_PINNING
 
 
 def build_config_button(ui, knob_id: str) -> QPushButton:
@@ -51,7 +52,7 @@ def configure_dialog(ui) -> None:
     role = None
     role_fn = getattr(ui, "_core_plan_role_for_knob", None)
     if callable(role_fn):
-        role = role_fn("irq_pinning")
+        role = role_fn(IRQ_PINNING)
     linked_apply = getattr(ui, "_apply_linked_core_plan", None)
     linked = bool(ui.state.get("core_plan_linked", True))
     linked_used = False
@@ -63,10 +64,10 @@ def configure_dialog(ui) -> None:
     save_state(ui.state)
     ui._sync_core_plan_controls()
 
-    status = ui._knob_statuses.get("irq_pinning")
+    status = ui._knob_statuses.get(IRQ_PINNING)
     if status in ("applied", "pending_reboot"):
         _get_gui_logger().info("irq pinning config updated; reapplying")
-        ui._on_apply_knob("irq_pinning")
+        ui._on_apply_knob(IRQ_PINNING)
         return
     QMessageBox.information(
         ui,
