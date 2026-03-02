@@ -715,6 +715,69 @@ cat /proc/cmdline | tr ' ' '\n' | grep -E '^(threadirqs|audit=0|mitigations=off|
 3. Reboot
 4. Token absent in `/proc/cmdline`, GUI status "not_applied"
 
+### Tumbleweed VM empirical run (2026-02-20)
+
+Execution environment:
+- VM distro: openSUSE Tumbleweed (`ID=opensuse-tumbleweed`)
+- Kernel: `6.19.2-1-default`
+- Access mode: headless (`virsh` + SSH forwarded `127.0.0.1:2222`)
+
+Functional parity sweep protocol:
+- For each knob ID in registry:
+  - `preview --action apply`
+  - `apply`/`apply-user`
+  - status sample
+  - `restore-knob`
+  - status sample
+- Sweep result summary:
+  - total knobs: 56
+  - apply success: 35
+  - apply failures: 16
+  - restore success: 34
+  - restore failures: 17 (mostly no-transaction after failed applies)
+
+Primary failure classes in this VM:
+- missing services/packages/backends (`rtirq.service`, `powerprofilesctl` or `tuned-adm`, Tracker/Baloo tooling)
+- missing cpufreq sysfs on VM CPU (`cpu_governor_performance_persistent`)
+- configuration-required knobs without configured payload (`pipewire_pulse_*`, `pipewire_clock_constraints`, `pipewire_rt_module_tuning`, `pipewire_data_loop_affinity`, `pipewire_pro_audio_profile`)
+- core/device selector knobs with no configured targets (`irq_pinning`, isolation core-family knobs)
+
+Performance matrix protocol:
+- For each profile:
+  1. reset defaults (root + user)
+  2. reboot to guarantee runtime baseline
+  3. apply profile knobs
+  4. reboot when kernel cmdline knobs changed
+  5. run benchmark pack:
+     - idle cyclictest max
+     - loaded cyclictest max (under stress-ng CPU load)
+     - stress-ng throughput (`bogo ops/s`)
+
+One-pass profile results (max latency, us):
+- `baseline_clean`: idle 1049, loaded 100
+- `vm_memory`: idle 335, loaded 181
+- `rt_runtime`: idle 1568, loaded 440
+- `kernel_threaded`: idle 158, loaded 177
+- `kernel_threaded_preempt`: idle 1368, loaded 172
+- `kernel_low_jitter_diag_off`: idle 445, loaded 158
+- `kernel_aggressive`: idle 255, loaded 34
+
+Repeatability follow-up (3-run medians):
+- Baseline vs `kernel_aggressive`:
+  - idle max: `51 -> 57 us`
+  - loaded max: `106 -> 77 us`
+  - stress throughput: `8233.8 -> 8204.9 bogo/s`
+- Baseline vs `kernel_low_jitter_diag_off`:
+  - idle max: `370 -> 539 us`
+  - loaded max: `230 -> 96 us`
+  - stress throughput: `8234.38 -> 8216.21 bogo/s`
+
+Interpretation:
+- `kernel_rt_throttling_off` standalone showed degraded latency characteristics in this VM and should not be treated as a standalone recommendation.
+- Kernel bundle profiles produced more consistent loaded-latency gains than runtime-only single knobs.
+- `kernel_aggressive` gave the strongest loaded-latency improvement in this VM with small throughput regression, but includes high-risk security/diagnostic tradeoffs (`mitigations=off`, `nosmt`, `audit=0`, watchdog disable flags).
+- Treat VM data as directional; final defaults must be validated on real audio hardware workloads.
+
 ## 1. Project Vision & Principles
 
 ### The Problem We're Solving

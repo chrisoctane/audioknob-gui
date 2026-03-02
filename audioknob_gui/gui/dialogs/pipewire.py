@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -506,6 +507,27 @@ class SystemdServiceRtDialog(QDialog):
 
 
 class PipeWireRtSetupDialog(QDialog):
+    _PRESETS: dict[str, dict[str, str]] = {
+        "full_rt": {
+            "label": "Full RT  (PAM limits + fallbacks)",
+            "desc": (
+                "Recommended for audio workstations.  Writes PAM limits and enables all three "
+                "RT paths: rlimits \u2192 portal \u2192 RTKit.  Requires logout/reboot for limits to take effect."
+            ),
+        },
+        "safe_rt": {
+            "label": "Safe RT  (RTKit / portal only)",
+            "desc": (
+                "No PAM limits required.  Uses RTKit and the realtime portal as fallbacks.  "
+                "Works without group membership but may have a lower priority ceiling on some distros."
+            ),
+        },
+        "custom": {
+            "label": "Custom",
+            "desc": "Manually configure RT limits and module-rt args.  Leave fields blank to keep PipeWire defaults.",
+        },
+    }
+
     def __init__(
         self,
         limits_current: dict[str, object] | None,
@@ -514,27 +536,38 @@ class PipeWireRtSetupDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("PipeWire RT setup")
-        self.resize(560, 460)
+        self.resize(520, 600)
         limits_current = limits_current or {}
         module_current = module_current or {}
-        # Used by the Safe RT preset to restore text fields/combos after edits.
         self._limits_defaults = dict(limits_current)
         self._module_defaults = dict(module_current)
 
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("Configure PipeWire realtime limits and module-rt behavior."))
+        root.setSpacing(10)
 
+        # ── Preset ────────────────────────────────────────────────────────
         preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("Presets:"))
-        safe_btn = QPushButton("Safe RT (RTKit)")
-        safe_btn.setToolTip("Use RTKit/portal and disable direct RT limits for safer operation.")
-        safe_btn.clicked.connect(self._apply_safe_rt_preset)
-        preset_row.addWidget(safe_btn)
-        preset_row.addStretch(1)
+        preset_row.addWidget(QLabel("<b>Preset:</b>"))
+        self._preset_combo = QComboBox()
+        for key, info in self._PRESETS.items():
+            self._preset_combo.addItem(info["label"], key)
+        preset_row.addWidget(self._preset_combo, 1)
         root.addLayout(preset_row)
 
+        self._preset_desc = QLabel()
+        self._preset_desc.setWordWrap(True)
+        self._preset_desc.setMinimumHeight(40)
+        self._preset_desc.setStyleSheet("color: palette(mid);")
+        root.addWidget(self._preset_desc)
+
+        # ── RT Limits (permissions) ───────────────────────────────────────
         limits_box = QGroupBox("RT Limits (permissions)")
-        limits_layout = QFormLayout(limits_box)
+        limits_grid = QGridLayout(limits_box)
+        limits_grid.setSpacing(8)
+        limits_grid.setContentsMargins(10, 6, 10, 10)
+        limits_grid.setColumnStretch(1, 1)
+        limits_grid.setColumnStretch(3, 1)
+
         self.limits_enabled = QCheckBox("Enable RT limits (PAM limits)")
         limits_enabled = limits_current.get("enabled")
         self.limits_enabled.setChecked(bool(limits_enabled) if limits_enabled is not None else True)
@@ -543,65 +576,100 @@ class PipeWireRtSetupDialog(QDialog):
             "Disable to avoid writing limits; use Reset to remove existing limits."
         )
         self.limits_enabled.stateChanged.connect(self._on_limits_toggle)
-        limits_layout.addRow(self.limits_enabled)
+        limits_grid.addWidget(self.limits_enabled, 0, 0, 1, 4)
+
+        limits_grid.addWidget(QLabel("Group"), 1, 0)
         self.group = QComboBox()
-        self.group.addItem("Auto (pipewire -> audio -> realtime)", "")
-        for group in ["pipewire", "audio", "realtime"]:
-            self.group.addItem(group, group)
+        self.group.addItem("Auto (pipewire \u2192 audio \u2192 realtime)", "")
+        for g in ["pipewire", "audio", "realtime"]:
+            self.group.addItem(g, g)
         current_group = limits_current.get("group")
         if current_group:
             idx = self.group.findData(current_group)
             if idx >= 0:
                 self.group.setCurrentIndex(idx)
-        limits_layout.addRow("Group", self.group)
+        limits_grid.addWidget(self.group, 1, 1, 1, 3)
+
+        limits_grid.addWidget(QLabel("rtprio"), 2, 0)
         self.rtprio = QLineEdit(str(limits_current.get("rtprio") or ""))
-        limits_layout.addRow("rtprio", self.rtprio)
+        self.rtprio.setPlaceholderText("95")
+        limits_grid.addWidget(self.rtprio, 2, 1)
+        limits_grid.addWidget(QLabel("nice"), 2, 2)
         self.nice = QLineEdit(str(limits_current.get("nice") or ""))
-        limits_layout.addRow("nice", self.nice)
+        self.nice.setPlaceholderText("-19")
+        limits_grid.addWidget(self.nice, 2, 3)
+
+        limits_grid.addWidget(QLabel("memlock (KB)"), 3, 0)
         self.memlock = QLineEdit(str(limits_current.get("memlock") or ""))
-        limits_layout.addRow("memlock (KB)", self.memlock)
+        self.memlock.setPlaceholderText("4194304")
+        limits_grid.addWidget(self.memlock, 3, 1, 1, 3)
+
         root.addWidget(limits_box)
         self._on_limits_toggle()
 
+        # ── module-rt behavior ────────────────────────────────────────────
         module_box = QGroupBox("module-rt behavior")
-        module_layout = QFormLayout(module_box)
+        module_grid = QGridLayout(module_box)
+        module_grid.setSpacing(8)
+        module_grid.setContentsMargins(10, 6, 10, 10)
+        module_grid.setColumnStretch(1, 1)
+        module_grid.setColumnStretch(3, 1)
+
+        module_grid.addWidget(QLabel("rt.prio"), 0, 0)
         self.rt_prio = QLineEdit(str(module_current.get("rt_prio") or ""))
-        module_layout.addRow("rt.prio", self.rt_prio)
-        self.rt_soft = QLineEdit(str(module_current.get("rt_time_soft") or ""))
-        module_layout.addRow("rt.time.soft", self.rt_soft)
-        self.rt_hard = QLineEdit(str(module_current.get("rt_time_hard") or ""))
-        module_layout.addRow("rt.time.hard", self.rt_hard)
+        self.rt_prio.setPlaceholderText("88")
+        module_grid.addWidget(self.rt_prio, 0, 1)
+        module_grid.addWidget(QLabel("nice.level"), 0, 2)
         self.nice_level = QLineEdit(str(module_current.get("nice_level") or ""))
-        module_layout.addRow("nice.level", self.nice_level)
+        self.nice_level.setPlaceholderText("-11")
+        module_grid.addWidget(self.nice_level, 0, 3)
+
+        module_grid.addWidget(QLabel("rt.time.soft"), 1, 0)
+        self.rt_soft = QLineEdit(str(module_current.get("rt_time_soft") or ""))
+        self.rt_soft.setPlaceholderText("-1 (unlimited)")
+        module_grid.addWidget(self.rt_soft, 1, 1)
+        module_grid.addWidget(QLabel("rt.time.hard"), 1, 2)
+        self.rt_hard = QLineEdit(str(module_current.get("rt_time_hard") or ""))
+        self.rt_hard.setPlaceholderText("-1 (unlimited)")
+        module_grid.addWidget(self.rt_hard, 1, 3)
+
+        module_grid.addWidget(QLabel("uclamp.min"), 2, 0)
         self.uclamp_min = QLineEdit(str(module_current.get("uclamp_min") or ""))
-        module_layout.addRow("uclamp.min", self.uclamp_min)
+        module_grid.addWidget(self.uclamp_min, 2, 1)
+        module_grid.addWidget(QLabel("uclamp.max"), 2, 2)
         self.uclamp_max = QLineEdit(str(module_current.get("uclamp_max") or ""))
-        module_layout.addRow("uclamp.max", self.uclamp_max)
+        module_grid.addWidget(self.uclamp_max, 2, 3)
+
+        toggles_label = QLabel("RT mechanism toggles  (\u2015 = not set, uses PipeWire default = true):")
+        toggles_label.setStyleSheet("color: palette(mid);")
+        module_grid.addWidget(toggles_label, 3, 0, 1, 4)
 
         self.rlimits_enabled = QCheckBox("rlimits.enabled")
         self.rlimits_enabled.setTristate(True)
         _set_tristate_default(self.rlimits_enabled, module_current.get("rlimits_enabled"))
         self.rlimits_enabled.setToolTip(
-            "Use OS limits (PAM limits) when requesting realtime priority."
+            "Try to acquire realtime scheduling via OS/PAM limits (primary path).\n"
+            "Indeterminate (\u2015) = PipeWire default (true)."
         )
-        module_layout.addRow(self.rlimits_enabled)
+        module_grid.addWidget(self.rlimits_enabled, 4, 0, 1, 2)
 
-        module_layout.addRow(QLabel("Fallback paths (permissions / brokered access):"))
         self.rtkit_enabled = QCheckBox("rtkit.enabled")
         self.rtkit_enabled.setTristate(True)
         _set_tristate_default(self.rtkit_enabled, module_current.get("rtkit_enabled"))
         self.rtkit_enabled.setToolTip(
-            "Allow PipeWire to request realtime via RTKit if direct RT is not allowed."
+            "Fall back to the RTKit daemon for realtime scheduling.\n"
+            "Indeterminate (\u2015) = PipeWire default (true)."
         )
-        module_layout.addRow(self.rtkit_enabled)
+        module_grid.addWidget(self.rtkit_enabled, 4, 2, 1, 2)
 
         self.rtportal_enabled = QCheckBox("rtportal.enabled")
         self.rtportal_enabled.setTristate(True)
         _set_tristate_default(self.rtportal_enabled, module_current.get("rtportal_enabled"))
         self.rtportal_enabled.setToolTip(
-            "Allow PipeWire to request realtime via the Realtime portal (best for sandboxed apps)."
+            "Fall back to the XDG realtime portal for realtime scheduling.\n"
+            "Indeterminate (\u2015) = PipeWire default (true)."
         )
-        module_layout.addRow(self.rtportal_enabled)
+        module_grid.addWidget(self.rtportal_enabled, 5, 0, 1, 2)
 
         self.cpu_zero_denormals = QCheckBox("cpu.zero.denormals")
         self.cpu_zero_denormals.setTristate(True)
@@ -610,24 +678,61 @@ class PipeWireRtSetupDialog(QDialog):
             module_current.get("cpu_zero_denormals"),
         )
         self.cpu_zero_denormals.setToolTip(
-            "Set denormal handling hint for module-rt where supported."
+            "Set denormal handling hint for module-rt where supported.\n"
+            "Indeterminate (\u2015) = not set."
         )
-        module_layout.addRow(self.cpu_zero_denormals)
-        root.addWidget(module_box)
+        module_grid.addWidget(self.cpu_zero_denormals, 5, 2, 1, 2)
 
-        root.addWidget(QLabel("Tip: Leave fields blank to keep defaults."))
+        root.addWidget(module_box)
+        root.addStretch(1)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
-    def _on_limits_toggle(self, *_args) -> None:
-        enabled = self.limits_enabled.isChecked()
-        for widget in (self.group, self.rtprio, self.nice, self.memlock):
-            widget.setEnabled(enabled)
+        # Connect preset change last, after all widgets are constructed.
+        self._preset_combo.currentIndexChanged.connect(self._on_preset_changed)
+        self._update_preset_desc()
 
-    def _apply_safe_rt_preset(self) -> None:
+    # ── Preset helpers ────────────────────────────────────────────────────
+
+    def _update_preset_desc(self) -> None:
+        preset = self._preset_combo.currentData()
+        self._preset_desc.setText(self._PRESETS.get(preset or "", {}).get("desc", ""))
+
+    def _on_preset_changed(self) -> None:
+        preset = self._preset_combo.currentData()
+        self._update_preset_desc()
+        if preset == "full_rt":
+            self._apply_full_rt()
+        elif preset == "safe_rt":
+            self._apply_safe_rt()
+        # "custom" → leave form as-is
+
+    def _apply_full_rt(self) -> None:
+        """Populate form with the upstream-recommended Full RT settings."""
+        self.limits_enabled.setChecked(True)
+        self._on_limits_toggle()
+        idx = self.group.findData("pipewire")
+        if idx >= 0:
+            self.group.setCurrentIndex(idx)
+        self.rtprio.setText("95")
+        self.nice.setText("-19")
+        self.memlock.setText("4194304")
+        self.rt_prio.setText("88")
+        self.nice_level.setText("-11")
+        self.rt_soft.setText("")
+        self.rt_hard.setText("")
+        self.uclamp_min.setText("")
+        self.uclamp_max.setText("")
+        self.rlimits_enabled.setCheckState(Qt.Checked)
+        self.rtkit_enabled.setCheckState(Qt.Checked)
+        self.rtportal_enabled.setCheckState(Qt.Checked)
+        PipeWireRtModuleDialog._set_tristate(self.cpu_zero_denormals, None)
+
+    def _apply_safe_rt(self) -> None:
+        """Populate form with Safe RT (RTKit/portal only) settings."""
         self.limits_enabled.setChecked(False)
         self._on_limits_toggle()
         group = self._limits_defaults.get("group")
@@ -639,7 +744,6 @@ class PipeWireRtSetupDialog(QDialog):
         self.rtprio.setText(str(self._limits_defaults.get("rtprio") or ""))
         self.nice.setText(str(self._limits_defaults.get("nice") or ""))
         self.memlock.setText(str(self._limits_defaults.get("memlock") or ""))
-
         self.rt_prio.setText(str(self._module_defaults.get("rt_prio") or ""))
         self.rt_soft.setText(str(self._module_defaults.get("rt_time_soft") or ""))
         self.rt_hard.setText(str(self._module_defaults.get("rt_time_hard") or ""))
@@ -653,6 +757,13 @@ class PipeWireRtSetupDialog(QDialog):
             self.cpu_zero_denormals,
             self._module_defaults.get("cpu_zero_denormals"),
         )
+
+    # ── Slot / helpers ────────────────────────────────────────────────────
+
+    def _on_limits_toggle(self, *_args) -> None:
+        enabled = self.limits_enabled.isChecked()
+        for widget in (self.group, self.rtprio, self.nice, self.memlock):
+            widget.setEnabled(enabled)
 
     @staticmethod
     def _read_int(field: QLineEdit, label: str) -> int | None:

@@ -3021,6 +3021,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             "pipewire_rlimits_enabled",
             "pipewire_rtkit_enabled",
             "pipewire_rtportal_enabled",
+            "pipewire_uclamp_min",
+            "pipewire_uclamp_max",
+            "pipewire_cpu_zero_denormals",
         )
         module_configured = any(state.get(key) is not None for key in module_keys)
         limits_enabled = state.get("pipewire_limits_enabled")

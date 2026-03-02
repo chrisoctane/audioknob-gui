@@ -704,6 +704,90 @@ Only after non-root testing is stable:
 - udev rule knobs
 - kernel cmdline knobs (require reboot; do last)
 
+### Tumbleweed VM methodical validation (2026-02-20)
+
+Use this sequence when validating the app against a temporary openSUSE
+Tumbleweed VM.
+
+Phase 1: environment prep
+- Ensure SSH + sudo access to the VM.
+- Sync repo to VM working tree.
+- Install validation deps in VM:
+  - `jq`, `rt-tests`, `stress-ng`, `pipewire-tools`, `git-core`
+- Verify baseline commands:
+  - `python3 -m audioknob_gui.worker.cli --registry config/registry.json status`
+  - `sudo -n python3 -m audioknob_gui.testing.cyclictest`
+
+Phase 2: per-knob functional sweep
+- For each knob in `config/registry.json`, execute:
+  - `preview --action apply <knob>`
+  - `apply <knob>` (root knobs) or `apply-user <knob>` (user knobs)
+  - `status` check for that knob
+  - `restore-knob <knob>`
+  - `status` check after restore
+- Record command return codes, warnings, and status transitions.
+
+Phase 3: profile performance matrix
+- Always start each profile from a clean runtime baseline:
+  1. `reset-defaults --scope root` + `reset-defaults --scope user`
+  2. Reboot
+- Apply profile knobs, reboot when kernel cmdline knobs are involved, then
+  run benchmark pack:
+  - idle cyclictest max latency
+  - loaded cyclictest max latency (while stress-ng runs)
+  - stress-ng CPU throughput (`bogo ops/s`)
+
+Phase 4: repeatability pass for candidates
+- Re-test shortlisted profiles with at least 3 runs each vs clean baseline.
+- Compare medians (not single-run outliers) before recommending a default set.
+
+Latest VM snapshot summary (openSUSE Tumbleweed 20260218)
+- Functional sweep scope: 56 knobs.
+- Functional sweep outcome:
+  - apply success: 35
+  - apply failures: 16
+  - non-apply/read-only knobs: 5
+- Main non-app blockers observed in VM:
+  - missing backend/service/tooling (`powerprofilesctl`/`tuned-adm`, `rtirq.service`, tracker/baloo)
+  - no cpufreq sysfs governor path in this VM
+  - knobs that require explicit user config before apply (`pipewire_*` advanced config knobs, pro audio profile selector, IRQ/core selectors)
+- One-pass profile matrix (max latency in us):
+  - baseline_clean: idle 1049, loaded 100
+  - vm_memory: idle 335, loaded 181
+  - rt_runtime: idle 1568, loaded 440
+  - kernel_threaded: idle 158, loaded 177
+  - kernel_threaded_preempt: idle 1368, loaded 172
+  - kernel_low_jitter_diag_off: idle 445, loaded 158
+  - kernel_aggressive: idle 255, loaded 34
+- Repeatability check (3-run medians, cleaner signal):
+  - baseline vs aggressive:
+    - idle max: 51 -> 57 us (slightly worse)
+    - loaded max: 106 -> 77 us (better)
+    - stress throughput: 8233.8 -> 8204.9 bogo/s (~flat)
+  - baseline vs low-jitter (no mitigations/nosmt/audit-off):
+    - idle max: 370 -> 539 us (worse)
+    - loaded max: 230 -> 96 us (better)
+    - stress throughput: 8234.38 -> 8216.21 bogo/s (~flat)
+
+Interpretation for serious audio goal
+- `kernel_rt_throttling_off` alone underperformed in this VM (higher loaded
+  and idle latency spikes); treat as bundle-only candidate, not standalone.
+- Threaded IRQ/kernel bundles improved loaded-latency behavior more reliably
+  than standalone runtime-only knobs.
+- `kernel_aggressive` gave the best loaded-latency result in this VM repeat
+  pass, with near-flat CPU throughput, but carries higher risk due:
+  - `mitigations=off`, `nosmt`, `audit=0`, disabled watchdogs.
+- Practical recommendation:
+  - default candidate for mixed use: `kernel_low_jitter_diag_off`
+  - dedicated session candidate: `kernel_aggressive`
+  - keep both as explicit user-selected presets, not auto-applied.
+
+Known VM limitations
+- No physical audio interface/JACK/PipeWire real workload.
+- Virtual CPU scheduling noise is high; absolute latency values are less
+  important than repeated relative deltas.
+- Re-run the same matrix on target hardware before making final defaults.
+
 
 ---
 
@@ -743,4 +827,4 @@ See `audioknob_gui/testing/rtcheck.py`
 
 ---
 
-*Last updated: 2026-02-13*
+*Last updated: 2026-02-20*

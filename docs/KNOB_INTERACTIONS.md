@@ -162,6 +162,27 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ### Desktop indexers (Tracker / Baloo)
 - GNOME vs KDE only; not applicable outside their desktop environment.
 
+## Empirical VM findings (openSUSE Tumbleweed, 2026-02-20)
+- Test context:
+  - headless VM, kernel `6.19.2-1-default`, no physical audio interface
+  - cyclictest + stress-ng used for comparative latency/throughput trends
+- Findings are directional (VM-only), not final hardware truth.
+
+Observed interaction trends:
+- `kernel_rt_throttling_off` alone:
+  - showed worse idle/loaded latency behavior in this VM run.
+  - treat as bundle-only candidate rather than a standalone recommendation.
+- `kernel_threadirqs` and `kernel_threadirqs + kernel_preempt_full`:
+  - changed latency profile shape significantly across runs.
+  - loaded-latency did not consistently improve unless combined with broader kernel bundle tuning.
+- `kernel_low_jitter_diag_off` bundle (`threadirqs`, `preempt=full`, `clocksource=tsc`, `tsc=reliable`, `nmi_watchdog=0`, `nosoftlockup`):
+  - improved loaded-latency medians vs baseline in repeat checks.
+  - increased idle max-latency median in repeat checks.
+- `kernel_aggressive` bundle (`low_jitter_diag_off` + `mitigations=off`, `nosmt`, `audit=0`):
+  - best loaded-latency median in repeat checks.
+  - slight idle-latency regression and near-flat throughput delta.
+  - carries elevated security/diagnostic risk and should remain explicit opt-in.
+
 ## Blockers and silent failure sources
 - Missing commands or packages (e.g., tuned-adm, powerprofilesctl).
 - Missing WirePlumber/wpctl or pw-top for PipeWire dev tools.
