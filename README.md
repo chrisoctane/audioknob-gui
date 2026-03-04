@@ -12,7 +12,22 @@ GUI-first realtime audio tuning tool for Linux.
 
 ## Install
 
-The local package paths cover:
+Pre-built packages are available from [GitHub Releases](https://github.com/chrisoctane/audioknob-gui/releases):
+
+- **openSUSE Tumbleweed**: download `audioknob-gui-<version>.noarch.rpm`
+- **Debian/Ubuntu**: download `audioknob-gui_<version>_all.deb`
+
+```bash
+# openSUSE Tumbleweed
+sudo zypper --no-gpg-checks install -y ./audioknob-gui-*.noarch.rpm
+
+# Debian/Ubuntu
+sudo apt-get install -y ./audioknob-gui_*_all.deb
+```
+
+### Build from source
+
+If you prefer to build from source, the local package paths cover:
 
 - openSUSE Tumbleweed (RPM)
 - Debian/Ubuntu (DEB)

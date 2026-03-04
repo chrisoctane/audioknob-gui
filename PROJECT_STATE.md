@@ -61,7 +61,7 @@
 - **Reference partial handling** - reference status `partial` is treated as non-authoritative for preset-match hints.
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
 - **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity, pulse latency defaults/rules, profiler module). Separate RT limits/module knobs are hidden in the UI.
-- **PipeWire RT Setup presets** - Safe RT preset (RTKit/portal only) and RT limits toggle in the setup dialog.
+- **PipeWire RT Setup presets** - preset dropdown (Full RT, Safe RT, Custom) with descriptive labels, RT limits toggle, and module-rt fields in a compact two-column grid layout (520×600).
 - **Systemd RT service drop-ins (dev)** - PipeWire and WirePlumber per-service scheduling/CPU affinity drop-ins with configurable policy/priority/core lists.
 - **CPU/IRQ partitioning extras (Cores & IRQ)** - workqueue cpumask, `user.slice` AllowedCPUs, and irqbalance banned CPU list knobs now available in Cores & IRQ.
 - **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in

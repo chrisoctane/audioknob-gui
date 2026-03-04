@@ -235,7 +235,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - The **Main** tab also includes the TSC kernel timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock.
 - Use the **Cores & IRQ** tab to focus on core/IRQ tuning plus RT throttling, C-state limiters, and core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`).
 - The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, PipeWire pulse latency/rules, PipeWire profiler module, systemd service RT drop-ins, kernel RT extras excluding TSC timing knobs, RTKit placeholder). These are optional and may require manual configuration.
-- PipeWire **RT Setup** includes a Safe RT preset (RTKit/portal only), an RT limits toggle, and module-rt fields including uclamp and denormal handling toggles.
+- PipeWire **RT Setup** includes a preset dropdown (Full RT, Safe RT, Custom) with descriptive labels, an RT limits toggle, and module-rt fields including uclamp and denormal handling toggles. The dialog uses a compact two-column grid layout (520×600).
 - Several **Cores & IRQ** knobs are intentionally config-required before Apply (workqueue cpumask, user.slice AllowedCPUs, irqbalance banned CPUs).
 - Several **Dev** knobs are intentionally config-required before Apply (PipeWire/WirePlumber systemd RT, PipeWire pulse latency/rules).
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
@@ -827,4 +827,4 @@ See `audioknob_gui/testing/rtcheck.py`
 
 ---
 
-*Last updated: 2026-02-20*
+*Last updated: 2026-03-04*

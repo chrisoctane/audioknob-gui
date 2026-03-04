@@ -115,7 +115,11 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - Clock constraints and quantum/rate knobs can conflict if ranges disallow the chosen quantum/rate.
 - PW Memory Lock depends on PW RT Limits; low memlock limits can cause failures.
 - RT module tuning depends on RT limits and/or RTKit/portal behavior.
-- PW RT Setup combines RT limits + RT module tuning; if module fields are left blank, only limits are applied.
+- PW RT Setup combines RT limits + RT module tuning via a preset dropdown:
+  - **Full RT** (PAM limits + all three RT paths: rlimits → portal → RTKit)
+  - **Safe RT** (RTKit/portal only, no PAM limits required)
+  - **Custom** (manual field entry; blank fields keep PipeWire defaults)
+- If module fields are left blank, only limits are applied.
 - `pipewire_pulse_latency` sets global `pulse.properties` defaults; per-app
   `pipewire_pulse_app_rules` can intentionally override those defaults.
 - `pipewire_profiler_enable` is complementary to diagnostics (`pw-top`) but can

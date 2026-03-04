@@ -3,60 +3,41 @@
 Purpose:
 - Keep remediation work bounded, reproducible, and non-expansive.
 - Prevent open-ended audit/fix loops and uncontrolled file churn.
+- Act as a persistent guardrail for AI agents: scope-limit every session
+  so agents cannot silently expand beyond the approved work area.
 
 Mode: ON
-Batch ID: STAB-DEV-001
-Objective: Dev-tab expansion for advanced RT/audio tuning knobs and config paths.
-Max changed files: 200
+Batch ID: STAB-MAINT-001
+Objective: General maintenance — bug fixes, documentation updates, refactoring, and incremental improvements. Packaging and CI workflow changes require explicit user approval.
+Max changed files: 80
 
 Allowed paths:
 - `AGENTS.md`
+- `CLAUDE.md`
 - `PLAN.md`
 - `PROJECT_STATE.md`
-- `docs/KNOB_INTERACTIONS.md`
-- `docs/internal/audit/QUALITY_GATE.md`
-- `docs/internal/audit/STABILIZATION_STATE.md`
-- `docs/internal/audit/MULTI_AGENT_CONTROL_SYSTEM.md`
-- `docs/internal/audit/releases/`
-- `.github/workflows/consistency-check.yml`
-- `.github/workflows/release-quality-gate.yml`
 - `CHANGELOG.md`
+- `README.md`
 - `pyproject.toml`
-- `audioknob_gui/gui/main_window.py`
-- `audioknob_gui/gui/simple_mode.py`
-- `audioknob_gui/gui/app_info.py`
-- `audioknob_gui/gui/table.py`
-- `audioknob_gui/gui/state.py`
-- `audioknob_gui/gui/status.py`
-- `audioknob_gui/gui/conflicts.py`
-- `audioknob_gui/gui/dialogs/pipewire.py`
-- `audioknob_gui/gui/knobs/irq.py`
-- `audioknob_gui/gui/knobs/kernel.py`
-- `audioknob_gui/gui/knobs/pipewire.py`
-- `audioknob_gui/gui/knobs/qjackctl.py`
-- `audioknob_gui/gui/knobs/registry.py`
-- `audioknob_gui/worker/cli.py`
-- `audioknob_gui/worker/ops.py`
-- `audioknob_gui/data/registry.json`
-- `config/registry.json`
-- `docs/KNOB_SYSTEM_AUDIT_MAP.md`
-- `docs/knobs.md`
 - `audioknob_gui/__init__.py`
 - `audioknob_gui/knob_ids.py`
-- `audioknob_gui/gui/actions.py`
-- `audioknob_gui/gui/knobs/power_profile.py`
-- `audioknob_gui/gui/requirements.py`
-- `audioknob_gui/testing/rtcheck.py`
-- `scripts/check_repo_consistency.py`
-- `tests/test_gate_scripts.py`
-- `tests/test_simple_mode.py`
-- `tests/test_cli_commands.py`
-- `tests/test_conflicts.py`
-- `tests/test_core_plan_linking.py`
-- `tests/test_kernel_cmdline.py`
-- `tests/test_pipewire_config.py`
-- `tests/test_status_baseline.py`
-- `tests/test_sysfs_status.py`
+- `audioknob_gui/registry.py`
+- `audioknob_gui/gui/`
+- `audioknob_gui/worker/`
+- `audioknob_gui/testing/`
+- `audioknob_gui/data/registry.json`
+- `audioknob_gui/data/registry.schema.json`
+- `config/registry.json`
+- `config/registry.schema.json`
+- `tests/`
+- `docs/`
+- `scripts/`
+
+Excluded (require explicit user approval to modify):
+- `packaging/` (build scripts, spec files, debian control, desktop entries)
+- `.github/workflows/` (CI/CD pipelines)
+- `polkit/` (privilege escalation policy)
+- `bin/` (entry point scripts)
 
 Batch protocol:
 1. Use read-only audit -> approved-fix batch -> read-only verification (no mixed passes).
@@ -64,3 +45,10 @@ Batch protocol:
 3. If a new issue is discovered mid-batch, log it and defer unless it blocks current batch exit criteria.
 4. Keep edits within allowlisted paths and file-count cap.
 5. Waive only with explicit commit tag `stabilization-waiver:` and user approval.
+
+## Batch history
+
+### STAB-DEV-001 (closed)
+- Objective: Dev-tab expansion for advanced RT/audio tuning knobs and config paths.
+- Outcome: All dev-tab knobs implemented; merged as v0.7.10.
+- Max changed files: 200

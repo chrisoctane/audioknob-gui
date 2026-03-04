@@ -71,6 +71,8 @@ def check_docs_exist(repo: Path) -> list[str]:
     errors = []
     
     required = [
+        "AGENTS.md",
+        "CLAUDE.md",
         "PLAN.md",
         "PROJECT_STATE.md",
         "docs/internal/audit/STABILIZATION_STATE.md",
