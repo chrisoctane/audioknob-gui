@@ -4,6 +4,19 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.10] - 2026-03-04
+
+### Changed
+- PipeWire RT setup dialog redesigned with a preset dropdown (Full RT, Safe RT, Custom)
+  replacing the single Safe RT button; layout switched to a compact two-column grid (520×600).
+- Knob ID strings extracted to a new `knob_ids.py` constants module; 16 files updated
+  to use named constants instead of bare string literals.
+
+### Fixed
+- PipeWire module status check now correctly includes `uclamp_min`, `uclamp_max`, and
+  `cpu_zero_denormals` in `module_keys`; previously these fields were silently ignored,
+  causing RT setup to report as unconfigured when only uclamp/denormal settings were set.
+
 ## [0.7.9] - 2026-02-19
 
 ### Changed

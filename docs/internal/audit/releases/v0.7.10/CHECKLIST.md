@@ -1,0 +1,41 @@
+# Release Checklist
+
+Release version: 0.7.10
+Release date: 2026-03-04
+Branch: master
+Commit: pending-release-commit
+PR: n/a
+Tag: v0.7.10
+
+## Required checks
+
+1. G1 consistency
+- Command: `python3 scripts/check_repo_consistency.py`
+- Result: PASS
+
+2. G1 compile
+- Command: `python3 -m compileall -q audioknob_gui tests`
+- Result: PASS
+
+3. G3 full tests
+- Command: `.venv/bin/python -m pytest -q`
+- Result: PASS
+
+4. Changelog entry
+- Requirement: `CHANGELOG.md` contains heading `[0.7.10]`
+- Result: PASS
+
+5. Contract docs check
+- Requirement: user/technical contract docs updated if release behavior changed
+- Files: `PLAN.md`, `PROJECT_STATE.md`, `docs/KNOB_INTERACTIONS.md` (as applicable)
+- Result: PASS
+
+6. Packaging/build artifacts (if applicable)
+- Artifacts: audioknob-gui_0.7.10_all.deb, audioknob-gui-0.7.10-1.noarch.rpm
+- Result: pending
+
+## Notes
+- Waivers (if any): none
+- Residual risks: none
+
+Final status: pending
