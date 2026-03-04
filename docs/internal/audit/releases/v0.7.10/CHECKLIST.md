@@ -3,7 +3,7 @@
 Release version: 0.7.10
 Release date: 2026-03-04
 Branch: master
-Commit: pending-release-commit
+Commit: f97fa72
 PR: n/a
 Tag: v0.7.10
 
@@ -31,11 +31,11 @@ Tag: v0.7.10
 - Result: PASS
 
 6. Packaging/build artifacts (if applicable)
-- Artifacts: audioknob-gui_0.7.10_all.deb, audioknob-gui-0.7.10-1.noarch.rpm
-- Result: pending
+- Artifacts: audioknob-gui_0.7.10_all.deb, audioknob-gui-0.7.10-0.noarch.rpm
+- Result: PASS
 
 ## Notes
 - Waivers (if any): none
 - Residual risks: none
 
-Final status: pending
+Final status: PASS
