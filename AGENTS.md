@@ -3,6 +3,9 @@
 This file defines the required workflow for any AI agent working in this repo.
 It is for agent control only and does not change public docs.
 
+Note: `CLAUDE.md` is auto-loaded by Claude Code at session start and points here.
+Both files must stay aligned — update CLAUDE.md when changing key rules below.
+
 ## Sources of truth
 - Behavior: `audioknob_gui/**` (runtime code) is the source of truth.
 - UX/process: `PLAN.md` is the user-facing contract.
@@ -23,6 +26,9 @@ It is for agent control only and does not change public docs.
 - `docs/internal/archive/overseer.md` only when acting in an overseer/audit role.
 
 If any doc is stale or conflicts with code, update it before proceeding.
+
+Note: `docs/internal/audit/MULTI_AGENT_CONTROL_SYSTEM.md` is a future-vision
+design doc. It is not currently enforced or referenced by automation.
 
 ## Hard guardrails (no exceptions without explicit user approval)
 - No always-on background daemon/service or autonomous auto-tuning loop, no auto-apply workflows, no hidden state machines.

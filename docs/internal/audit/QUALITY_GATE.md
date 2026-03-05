@@ -32,6 +32,9 @@ Status model:
 Exit criteria:
 - All three checks complete.
 
+Note: G0 is agent-self-enforced via the start-of-session checklist in AGENTS.md.
+It is not automated by scripts or CI. Agents must complete G0 before making edits.
+
 ### G0.5 - Stabilization scope gate (required when `Mode: ON`)
 Source:
 - `docs/internal/audit/STABILIZATION_STATE.md`

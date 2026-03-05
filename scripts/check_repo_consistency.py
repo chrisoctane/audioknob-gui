@@ -495,6 +495,7 @@ def check_docs_updated_for_code_changes(repo: Path) -> list[str]:
         "packaging/",
         "scripts/check_repo_consistency.py",
         "scripts/run_quality_gate.py",
+        ".github/workflows/",
     ]
 
     doc_paths = {"PLAN.md", "PROJECT_STATE.md"}
