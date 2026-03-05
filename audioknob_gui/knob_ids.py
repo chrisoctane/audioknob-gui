@@ -32,3 +32,6 @@ PIPEWIRE_RT_LIMITS_GROUP = "pipewire_rt_limits_group"
 PIPEWIRE_RT_MODULE_TUNING = "pipewire_rt_module_tuning"
 PIPEWIRE_MLOCK_POLICY = "pipewire_mlock_policy"
 PIPEWIRE_PULSE_APP_RULES = "pipewire_pulse_app_rules"
+
+# Testing / monitoring
+ALSA_XRUN_MONITOR = "alsa_xrun_monitor"

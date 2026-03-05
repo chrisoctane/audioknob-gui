@@ -82,7 +82,9 @@ class XrunMonitorDialog(QDialog):
     def _set_always_on_top(self, enabled: bool) -> None:
         flags = self.windowFlags()
         if enabled:
-            flags |= Qt.WindowStaysOnTopHint
+            # Qt.Window promotes to a true top-level window so the hint
+            # applies above all desktop windows, not just the parent app.
+            flags |= Qt.Window | Qt.WindowStaysOnTopHint
         else:
             flags &= ~Qt.WindowStaysOnTopHint
         self.setWindowFlags(flags)

@@ -209,6 +209,9 @@ class TableMixin:
         if kind == "wpctl_profile":
             return "wpctl"
 
+        if kind == "alsa_xrun_debug":
+            return "/proc/asound"
+
         if kind == "read_only":
             what = str(params.get("what", "")).strip()
             return what or "read-only"

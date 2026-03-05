@@ -10,7 +10,7 @@
 
 ### What Works
 - **Release version**: 0.7.10
-- **56 knobs defined** (ALL 56 IMPLEMENTED, including Dev tab)
+- **57 knobs defined** (ALL 57 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Dependency-aware queue gating** - knobs with `depends_on` unlock when their dependency is already applied or queued for apply in the current queue.

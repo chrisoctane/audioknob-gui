@@ -1375,6 +1375,28 @@
     },
     {
       "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "testing",
+      "description": "[i] monitors ALSA xrun counts per sound card via /proc/asound.\n[+] tracks xruns at the ALSA driver level, independent of PipeWire.\n[-] enabling xrun_debug logging requires root (non-persistent, resets on reboot).",
+      "id": "alsa_xrun_monitor",
+      "impl": {
+        "kind": "alsa_xrun_debug",
+        "params": {
+          "what": "alsa-xrun"
+        }
+      },
+      "requires_commands": [],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "low",
+      "title": "ALSA XRUN Monitor"
+    },
+    {
+      "capabilities": {
         "apply": false,
         "read": true,
         "restore": false

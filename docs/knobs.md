@@ -539,3 +539,34 @@ Sources
 Notes from performance tuning guidance (user-provided)
 - Legacy tuning snippets exist but vary by distro/service templates; they are
   intentionally not part of the active app contract until verified per distro.
+
+
+---
+
+## ALSA XRUN Monitor (alsa_xrun_monitor) — IMPLEMENTED
+
+Goal
+- Monitor ALSA-level xrun counts per sound card, independent of PipeWire.
+
+Background
+- ALSA exposes per-PCM xrun counters at /proc/asound/cardN/pcm*/sub0/status
+  (xrun_counter field). Stream state, rate, period, buffer are also readable.
+- Enabling kernel xrun debug logging writes 1 to /proc/asound/cardN/pcm*/xrun_debug
+  (requires root, non-persistent, resets on reboot).
+
+Implementation
+- New worker kind: `alsa_xrun_debug`. Apply writes 1 to xrun_debug files for
+  the selected card; restore writes 0. Status reads xrun_debug values.
+- Card selection stored in GUI state as `alsa_xrun_card_index`.
+- AlsaXrunMonitorDialog reads /proc/asound directly (no subprocess) at 1s interval.
+- Compact mode: one-line per active stream (direction, state, xruns, rate, period, buffer).
+- Full mode: table with all PCM devices including delay and avail columns.
+- Always-on-top toggle, reset count baseline, card selector combo.
+
+Discovery / device-agnostic
+- Enumerates cards from /proc/asound/cards (all ALSA cards, any bus type).
+- PCM devices found via /proc/asound/cardN/pcm* glob.
+- No dependency on specific hardware or drivers.
+
+Sources
+- ALSA proc filesystem: https://www.kernel.org/doc/html/latest/sound/designs/procfile.html

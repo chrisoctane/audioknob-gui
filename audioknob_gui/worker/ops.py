@@ -472,6 +472,8 @@ def build_knob_paths(
                 targets.append({"type": "groups", "value": list(knob.requires_groups)})
         elif kind == "baloo_disable":
             targets.append({"type": "command", "value": "balooctl"})
+        elif kind == "alsa_xrun_debug":
+            targets.append({"type": "proc", "value": "/proc/asound/cardN/pcm*/xrun_debug"})
         elif kind == "read_only":
             what = str(params.get("what", ""))
             if what:
@@ -1822,6 +1824,18 @@ def preview(knob: Any, action: str) -> PreviewItem:
             cmds, more_notes = _baloo_disable_preview(params)
             would_run.extend(cmds)
             notes.extend(more_notes)
+        elif kind == "alsa_xrun_debug":
+            card_index = params.get("card_index")
+            if card_index is not None:
+                xrun_files = _list_alsa_xrun_debug_files(int(card_index))
+                if xrun_files:
+                    for f in xrun_files:
+                        would_write.append({"path": f, "content": "1"})
+                    notes.append(f"Enable ALSA xrun debug logging for card{card_index}.")
+                else:
+                    notes.append(f"No PCM xrun_debug files found for card{card_index}.")
+            else:
+                notes.append("No card selected; configure this knob before applying.")
         elif kind == "read_only":
             notes.append("Read-only knob; nothing to apply.")
         else:
@@ -2079,7 +2093,21 @@ def check_knob_status(knob: Any) -> str:
     
     if kind == "read_only":
         return "read_only"
-    
+
+    if kind == "alsa_xrun_debug":
+        card_index = params.get("card_index")
+        if card_index is None:
+            return "not_applied"
+        xrun_files = _list_alsa_xrun_debug_files(int(card_index))
+        if not xrun_files:
+            return "unknown"
+        enabled = sum(1 for f in xrun_files if _read_proc_int(f) > 0)
+        if enabled == len(xrun_files):
+            return "applied"
+        elif enabled > 0:
+            return "partial"
+        return "not_applied"
+
     if kind == "pam_limits_audio_group":
         path = Path(str(params.get("path", "")))
         wanted_lines = [str(x) for x in params.get("lines", [])]
@@ -2807,5 +2835,42 @@ def check_knob_status(knob: Any) -> str:
             return "not_applied"
         except Exception:
             return "unknown"
-    
+
     return "unknown"
+
+
+# ---------- ALSA xrun_debug helpers ----------
+
+
+def _list_alsa_xrun_debug_files(card_index: int) -> list[str]:
+    """Return all xrun_debug paths for a given ALSA card index."""
+    import glob as _glob
+
+    pattern = f"/proc/asound/card{card_index}/pcm*/xrun_debug"
+    return sorted(_glob.glob(pattern))
+
+
+def _read_proc_int(path: str) -> int:
+    """Read a single integer from a proc file, returning 0 on failure."""
+    try:
+        return int(Path(path).read_text(encoding="utf-8").strip())
+    except Exception:
+        return 0
+
+
+def apply_alsa_xrun_debug(card_index: int, enable: bool) -> tuple[bool, str]:
+    """Write xrun_debug value for all PCM devices on a card. Requires root."""
+    value = "1" if enable else "0"
+    xrun_files = _list_alsa_xrun_debug_files(card_index)
+    if not xrun_files:
+        return False, f"No xrun_debug files found for card{card_index}"
+    errors: list[str] = []
+    for path in xrun_files:
+        try:
+            Path(path).write_text(value + "\n", encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"{path}: {exc}")
+    if errors:
+        return False, "; ".join(errors)
+    action = "Enabled" if enable else "Disabled"
+    return True, f"{action} xrun_debug for {len(xrun_files)} PCM device(s) on card{card_index}"

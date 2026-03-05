@@ -44,6 +44,7 @@ from audioknob_gui.gui.worker_api import (
 from audioknob_gui.gui.dialogs.confirm import ConfirmDialog
 from audioknob_gui.gui.dialogs.jitter_monitor import JitterMonitorDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
+from audioknob_gui.gui.dialogs.alsa_xrun import AlsaXrunMonitorDialog
 from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
 from audioknob_gui.gui.conflicts import (
     CONFLICT_MAP,
@@ -3386,6 +3387,22 @@ class MainWindow(TableMixin, QMainWindow):
         dialog.activateWindow()
         self._xrun_dialog = dialog
 
+    def on_open_alsa_xrun_monitor(self) -> None:
+        dialog = getattr(self, "_alsa_xrun_dialog", None)
+        if dialog is not None and isValid(dialog):
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = AlsaXrunMonitorDialog(parent=self)
+        dialog.setModal(False)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.finished.connect(lambda _=None: setattr(self, "_alsa_xrun_dialog", None))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        self._alsa_xrun_dialog = dialog
+
     def on_open_jitter_monitor(self) -> None:
         dialog = getattr(self, "_jitter_dialog", None)
         if dialog is not None and isValid(dialog):
@@ -3429,7 +3446,7 @@ class MainWindow(TableMixin, QMainWindow):
                 pass
 
     def closeEvent(self, event) -> None:
-        for attr_name in ("_xrun_dialog", "_jitter_dialog"):
+        for attr_name in ("_xrun_dialog", "_jitter_dialog", "_alsa_xrun_dialog"):
             dialog = getattr(self, attr_name, None)
             if dialog is None:
                 continue

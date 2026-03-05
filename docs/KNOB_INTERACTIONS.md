@@ -160,6 +160,12 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ### XRUN Monitor (pw-top)
 - Requires pw-top and profiler data; missing modules show unknown output.
 
+### ALSA XRUN Monitor (/proc/asound)
+- Monitors ALSA-level xrun counts per card via /proc/asound/cardN/pcm*/sub0/status.
+- Enabling xrun_debug (apply) writes to /proc/asound/cardN/pcm*/xrun_debug (requires root).
+- Non-persistent: resets to 0 on reboot. No conflicts with other knobs.
+- Independent of PipeWire XRUN Monitor (pw-top measures PipeWire graph errors, not ALSA driver xruns).
+
 ### RTKit Daemon Tuning (On hold)
 - Distro-specific; blocked until verified against official docs.
 

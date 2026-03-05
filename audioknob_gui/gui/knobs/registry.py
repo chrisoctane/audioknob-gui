@@ -5,8 +5,9 @@ from typing import Callable
 
 from PySide6.QtWidgets import QPushButton
 
-from audioknob_gui.gui.knobs import irq, kernel, pipewire, power_profile, qjackctl, testing
+from audioknob_gui.gui.knobs import alsa, irq, kernel, pipewire, power_profile, qjackctl, testing
 from audioknob_gui.knob_ids import (
+    ALSA_XRUN_MONITOR,
     AUDIO_GROUP_MEMBERSHIP,
     IRQ_PINNING,
     KERNEL_IRQAFFINITY,
@@ -78,6 +79,8 @@ def get_action_override(knob_id: str):
         return ("post_lock", pipewire.build_rtkit_info_action)
     if knob_id == "blocker_check":
         return ("post_lock", _action_blocker_check)
+    if knob_id == ALSA_XRUN_MONITOR:
+        return ("post_lock", alsa.build_alsa_xrun_action)
     return (None, None)
 
 
@@ -116,6 +119,8 @@ def get_config_widget_builder(knob_id: str):
         return lambda ui, knob, ctx: irq.build_config_button(ui, knob.id)
     if knob_id in _KERNEL_CORE_KNOBS:
         return lambda ui, knob, ctx: kernel.build_config_button(ui, knob.id)
+    if knob_id == ALSA_XRUN_MONITOR:
+        return alsa.build_alsa_xrun_config
     return None
 
 

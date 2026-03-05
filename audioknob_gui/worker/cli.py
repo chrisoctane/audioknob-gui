@@ -780,6 +780,12 @@ def _apply_root_state_overrides(kid: str, params: dict[str, Any], state: dict) -
             new_params["post_apply"] = [["systemctl", "daemon-reload"]]
         return new_params
 
+    if kid == "alsa_xrun_monitor":
+        card_index = state.get("alsa_xrun_card_index")
+        if card_index is not None:
+            new_params["card_index"] = int(card_index)
+        return new_params
+
     return new_params
 
 
@@ -2231,6 +2237,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     "cmd": ["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"],
                 })
 
+        elif kind == "alsa_xrun_debug":
+            card_index = params.get("card_index")
+            if card_index is not None:
+                from audioknob_gui.worker.ops import apply_alsa_xrun_debug
+                ok, msg = apply_alsa_xrun_debug(int(card_index), enable=True)
+                if not ok:
+                    errors.append(msg)
+                else:
+                    changes_applied.append({"knob": kid, "message": msg})
+            else:
+                errors.append(f"{kid}: no card_index configured")
         elif kind == "read_only":
             pass
         else:
@@ -4611,6 +4628,13 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
         success, message = _force_reset_user_services([str(s) for s in services])
     elif kind == "baloo_disable":
         success, message = _force_reset_baloo_disable()
+    elif kind == "alsa_xrun_debug":
+        card_index = params.get("card_index")
+        if card_index is not None:
+            from audioknob_gui.worker.ops import apply_alsa_xrun_debug
+            success, message = apply_alsa_xrun_debug(int(card_index), enable=False)
+        else:
+            message = "No card_index configured"
     else:
         message = f"Force reset not supported for kind: {kind}"
 

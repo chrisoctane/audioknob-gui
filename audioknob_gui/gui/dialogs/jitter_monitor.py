@@ -99,7 +99,7 @@ class JitterMonitorDialog(QDialog):
     def _set_always_on_top(self, enabled: bool) -> None:
         flags = self.windowFlags()
         if enabled:
-            flags |= Qt.WindowStaysOnTopHint
+            flags |= Qt.Window | Qt.WindowStaysOnTopHint
         else:
             flags &= ~Qt.WindowStaysOnTopHint
         self.setWindowFlags(flags)
