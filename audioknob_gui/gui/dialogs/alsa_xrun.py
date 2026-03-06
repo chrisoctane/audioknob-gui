@@ -4,7 +4,7 @@ import re
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from audioknob_gui.gui.dialogs.keep_above import configure_on_top_checkbox
 
 
 def list_alsa_cards() -> list[dict[str, object]]:
@@ -154,8 +156,8 @@ class AlsaXrunMonitorDialog(QDialog):
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.stop_btn)
         self.on_top_toggle = QCheckBox("Always on top")
-        self.on_top_toggle.toggled.connect(self._set_always_on_top)
         btn_row.addWidget(self.on_top_toggle)
+        configure_on_top_checkbox(self, self.on_top_toggle)
         self.expand_btn = QPushButton("\u25a4")
         self.expand_btn.setFixedWidth(30)
         self.expand_btn.setToolTip("Toggle compact / full view")
@@ -199,17 +201,6 @@ class AlsaXrunMonitorDialog(QDialog):
         if idx < 0:
             return None
         return int(self.card_combo.itemData(idx))
-
-    def _set_always_on_top(self, enabled: bool) -> None:
-        flags = self.windowFlags()
-        if enabled:
-            flags |= Qt.Window | Qt.WindowStaysOnTopHint
-        else:
-            flags &= ~Qt.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
-        self.show()
-        self.raise_()
-        self.activateWindow()
 
     def _toggle_view(self) -> None:
         self._compact = not self._compact

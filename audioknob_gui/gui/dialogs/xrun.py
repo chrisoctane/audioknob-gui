@@ -4,7 +4,7 @@ import json
 import subprocess
 import time
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QWidget,
 )
+
+from audioknob_gui.gui.dialogs.keep_above import configure_on_top_checkbox
 
 
 class XrunMonitorDialog(QDialog):
@@ -52,8 +54,8 @@ class XrunMonitorDialog(QDialog):
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.stop_btn)
         self.on_top_toggle = QCheckBox("Always on top")
-        self.on_top_toggle.toggled.connect(self._set_always_on_top)
         btn_row.addWidget(self.on_top_toggle)
+        configure_on_top_checkbox(self, self.on_top_toggle)
         btn_row.addStretch(1)
         root.addLayout(btn_row)
 
@@ -78,20 +80,6 @@ class XrunMonitorDialog(QDialog):
         self._baseline_total: int | None = None
         self._current_total: int | None = None
         self._refresh()
-
-    def _set_always_on_top(self, enabled: bool) -> None:
-        flags = self.windowFlags()
-        if enabled:
-            # Qt.Window promotes to a true top-level window so the hint
-            # applies above all desktop windows, not just the parent app.
-            flags |= Qt.Window | Qt.WindowStaysOnTopHint
-        else:
-            flags &= ~Qt.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
-        # Re-show to apply window flag changes on all WMs.
-        self.show()
-        self.raise_()
-        self.activateWindow()
 
     def _update_status(self) -> None:
         state = "running" if self._running else "idle"

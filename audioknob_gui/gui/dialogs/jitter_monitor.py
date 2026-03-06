@@ -5,7 +5,7 @@ import statistics
 import time
 from collections import deque
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from audioknob_gui.gui.dialogs.keep_above import configure_on_top_checkbox
 from audioknob_gui.testing.cyclictest import run_cyclictest, to_json
 
 
@@ -68,8 +69,8 @@ class JitterMonitorDialog(QDialog):
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.stop_btn)
         self.on_top_toggle = QCheckBox("Always on top")
-        self.on_top_toggle.toggled.connect(self._set_always_on_top)
         btn_row.addWidget(self.on_top_toggle)
+        configure_on_top_checkbox(self, self.on_top_toggle)
         btn_row.addStretch(1)
         root.addLayout(btn_row)
 
@@ -95,17 +96,6 @@ class JitterMonitorDialog(QDialog):
         self._worker: JitterWorker | None = None
         self._act_history: dict[str, deque[int]] = {}
         self._refresh()
-
-    def _set_always_on_top(self, enabled: bool) -> None:
-        flags = self.windowFlags()
-        if enabled:
-            flags |= Qt.Window | Qt.WindowStaysOnTopHint
-        else:
-            flags &= ~Qt.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
-        self.show()
-        self.raise_()
-        self.activateWindow()
 
     def _update_status(self) -> None:
         state = "running" if self._running else "idle"
