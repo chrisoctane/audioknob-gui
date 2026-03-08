@@ -125,9 +125,11 @@ def compose_queue_ids(level: int, *, backend_is_tuned: bool) -> list[str]:
     if PIPEWIRE_RT_SETUP in selected_ids:
         queue_ids.add(AUDIO_GROUP_MEMBERSHIP)
 
-    # Conflict gate: tuned should own governor policy.
+    # Conflict gate: tuned should own governor/swappiness/dirty policy.
     if backend_is_tuned and POWER_PROFILE_PERFORMANCE in queue_ids:
         queue_ids.discard("cpu_governor_performance_persistent")
+        queue_ids.discard("swappiness")
+        queue_ids.discard("dirty_bytes")
 
     ordered = [kid for kid in ORDERED_QUEUE_KNOBS if kid in queue_ids]
     return ordered

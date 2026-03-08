@@ -108,8 +108,9 @@ def info_extra_html(ui, knob) -> str:
                         + "</p>"
                     )
                 extra += (
-                    "<p><b>Note:</b> tuned manages system power/governor settings. "
-                    "Avoid stacking overlapping knobs unless you know their combined effect.</p>"
+                    "<p><b>Note:</b> tuned (latency-performance) manages governor, "
+                    "C-states, swappiness, and dirty bytes. Overlapping knobs are "
+                    "locked while tuned is applied.</p>"
                 )
         else:
             extra += (

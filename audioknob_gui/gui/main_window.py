@@ -1759,6 +1759,16 @@ class MainWindow(TableMixin, QMainWindow):
             return ""
         return "Managed by AudioKnob. Use Tools -> Locks -> Release AudioKnob Locks."
 
+    def _tuned_managed_lock_reason(self, knob_id: str) -> str:
+        if knob_id not in self._tuned_conflict_ids():
+            return ""
+        pp_status = self._knob_statuses.get(POWER_PROFILE_PERFORMANCE, "unknown")
+        if pp_status not in ("applied", "pending_reboot"):
+            return ""
+        if not self._power_profile_backend_is_tuned():
+            return ""
+        return "Managed by tuned. Reset Power Profile to unlock."
+
     def _on_release_simple_locks(self) -> None:
         owned = self._simple_owned_knob_ids()
         if not owned:
@@ -1856,6 +1866,9 @@ class MainWindow(TableMixin, QMainWindow):
         simple_lock_reason = self._simple_owned_lock_reason(k.id, status)
         if simple_lock_reason:
             return False, "Managed by AudioKnob"
+        tuned_lock_reason = self._tuned_managed_lock_reason(k.id)
+        if tuned_lock_reason:
+            return False, tuned_lock_reason
         if status == "not_applicable":
             return False, "Not available on this system"
         reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
@@ -3233,6 +3246,8 @@ class MainWindow(TableMixin, QMainWindow):
             "cpu_governor_performance_persistent",
             "kernel_cstate_limit",
             "kernel_intel_idle_cstate_limit",
+            "swappiness",
+            "dirty_bytes",
         ]
 
     def _irq_pinning_devices_from_state(self) -> list[str]:

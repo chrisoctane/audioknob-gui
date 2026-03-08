@@ -4,6 +4,25 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.11] - 2026-03-08
+
+### Added
+- **Tuned ownership locks**: when Power Profile is applied with tuned backend,
+  overlapping knobs (CPU Governor, C-state limits, Swappiness, Dirty Bytes) are
+  locked with "via tuned" status and disabled action buttons. Locks are derived
+  (no persistent state) and release when Power Profile is reset.
+- Simple mode conflict gate extended to skip Swappiness and Dirty Bytes when
+  tuned is active, preventing config stacking.
+- Future enhancement logged: Live System State Probing (per-knob probe of actual
+  system values regardless of who applied them).
+
+### Fixed
+- Tuned-locked knobs now show disabled lock buttons instead of active
+  Apply/Reset buttons.
+- Status buttons on locked rows retain hover feedback and click behaviour.
+- Preset dots suppressed on tuned-managed knobs to avoid showing stale
+  reference/factory indicators.
+
 ## [0.7.10] - 2026-03-04
 
 ### Changed

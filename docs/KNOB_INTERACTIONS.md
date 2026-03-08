@@ -13,12 +13,17 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 ## Interaction map
 
 ### Power Profile (powerprofilesctl / tuned)
-- tuned (latency-performance) can override or duplicate:
+- tuned (latency-performance) manages and overrides:
   - CPU Performance (persistent governor)
   - CPU C-States / Intel C-States limiters
+  - Swappiness
+  - Dirty Bytes
+- When tuned is applied, the above knobs are locked ("Managed by tuned")
+  and cannot be independently applied or reset until Power Profile is reset.
 - powerprofilesctl can be changed by desktop UI (KDE taskbar / GNOME power).
 - If tuned is active, it should be treated as the authoritative power manager.
-- In Simple AudioKnob mode, queue composition skips CPU Performance when backend resolution is tuned.
+- In Simple AudioKnob mode, queue composition skips CPU Performance,
+  Swappiness, and Dirty Bytes when backend resolution is tuned.
 
 ### CPU Performance (persistent governor)
 - Conflicts with tuned profiles that manage CPU governor.

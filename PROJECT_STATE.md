@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.10
+- **Release version**: 0.7.11
 - **57 knobs defined** (ALL 57 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -90,11 +90,11 @@
 - **Conflict action precision** - row-level `Conflict` buttons use the same active/queued + backend filtering as the header conflict counter, preventing mismatch between row badges and header count.
 - **Conflict prompt clarity** - conflict dialogs include per-knob active/queued state labels so the reason for each conflict pair is explicit.
 - **Conflict gating** - conflicting knobs show a red Conflict action that queues a reset for that knob.
-- **Conflict coverage** - power profile vs governor/C-states, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and audio-isolation core mismatches (`isolcpus`/`nohz_full`/`rcu_nocbs`) surface as warnings.
-- **Simple conflict gate** - simple queue composition skips CPU governor when power-profile backend resolves to tuned
+- **Conflict coverage** - power profile vs governor/C-states/swappiness/dirty-bytes, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and audio-isolation core mismatches (`isolcpus`/`nohz_full`/`rcu_nocbs`) surface as warnings.
+- **Simple conflict gate** - simple queue composition skips CPU governor, swappiness, and dirty bytes when power-profile backend resolves to tuned
 - **Combo wheel safety** - combo-box settings ignore mouse-wheel input unless their dropdown menu is open, preventing accidental changes while scrolling.
 - **RT throttling** - kernel.sched_rt_runtime_us=-1 knob (advanced/high risk) to prevent RT thread throttling
-- **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
+- **Power profile** - sets performance profile via power-profiles-daemon or tuned; reset restores previous profile. Backend is configurable (auto/powerprofilesctl/tuned), and tuned conflicts prompt optional resets. When tuned is applied, overlapping knobs (governor, C-states, swappiness, dirty bytes) are locked as "Managed by tuned" and unlock automatically on reset. If power-profiles-daemon lacks a performance profile, the knob warns and makes no change.
 - **Power profile status** - Status/Check shows backend preference/resolution, current/target profile, service state, and available profiles.
 - **Power profile status fallback** - if the backend service is inactive, status shows not_applied; unknown is reserved for read errors.
 - **Sysctl/sysfs status** - Status/Check shows live sysctl values and sysfs summary counts alongside file content.
@@ -413,9 +413,11 @@ Tie-break implementation (draft policy):
 
 - Current simple-inclusion conflict review against `audioknob_gui/gui/conflicts.py`:
   - `power_profile_performance` <-> `cpu_governor_performance_persistent`
-- Queue rule for this pair:
-  - if simple preset backend resolution is `tuned`, queue `power_profile_performance` and skip `cpu_governor_performance_persistent`
-  - if backend resolution is not `tuned`, queue both
+  - `power_profile_performance` <-> `swappiness`
+  - `power_profile_performance` <-> `dirty_bytes`
+- Queue rule for these pairs:
+  - if simple preset backend resolution is `tuned`, queue `power_profile_performance` and skip `cpu_governor_performance_persistent`, `swappiness`, `dirty_bytes`
+  - if backend resolution is not `tuned`, queue all
 - No other pairwise conflicts exist in the current simple inclusion set.
 
 #### Simple ownership locks (planned)
@@ -539,6 +541,20 @@ preset extraction.
 - GUI shows different actions based on state
 
 **Status:** Proposal only. Not blocking for v1.0. Current workaround: only show Reset if transaction exists.
+
+#### Live System State Probing
+
+**Problem:** audioknob only knows what *it* applied (via backup files / sysctl drop-ins it created). If a setting is already at the target value from another source (distro default, user config, desktop environment), audioknob shows "not applied" even though the system state matches. Example: swappiness=10 set by a user sysctl file is invisible to audioknob.
+
+**Proposed Solution:** Each knob gains a `probe()` check that reads the live system value and compares it to the knob's target. On first launch (and optionally on refresh), knobs that are already at target show "active (external)" or similar, distinguishing audioknob-applied from externally-applied.
+
+**Considerations:**
+- Per-knob probe logic varies: sysctl read, sysfs read, service status, file existence, etc.
+- Must handle distro differences (different defaults, different config paths)
+- Relates to Three-State Model above — probe provides the `current_value` needed for state classification
+- Should not slow down startup; probes can be lazy or batched
+
+**Status:** TODO. Not blocking for v1.0.
 
 ---
 

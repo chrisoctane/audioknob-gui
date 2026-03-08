@@ -19,6 +19,8 @@ _RAW_CONFLICTS: dict[str, list[str]] = {
         "cpu_governor_performance_persistent",
         "kernel_cstate_limit",
         "kernel_intel_idle_cstate_limit",
+        "swappiness",
+        "dirty_bytes",
     ],
     IRQ_PINNING: [
         IRQBALANCE_DISABLE,
@@ -53,6 +55,8 @@ SECTION_MAP: dict[str, list[str]] = {
     "cpu_governor_performance_persistent": ["CPU Performance (persistent governor)"],
     "kernel_cstate_limit": ["CPU C-States / Intel C-States limiters"],
     "kernel_intel_idle_cstate_limit": ["CPU C-States / Intel C-States limiters"],
+    "swappiness": ["Power Profile (powerprofilesctl / tuned)"],
+    "dirty_bytes": ["Power Profile (powerprofilesctl / tuned)"],
     "pipewire_clock_constraints": [
         "PipeWire Clock Constraints / Mlock / RT Module / Data Loops",
         "PipeWire Quantum / Sample Rate",

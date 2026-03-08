@@ -769,6 +769,15 @@ class TableMixin:
                     simple_owned_reason = ""
             if simple_owned_reason:
                 locked = True
+            tuned_managed_reason = ""
+            tuned_fn = getattr(self, "_tuned_managed_lock_reason", None)
+            if callable(tuned_fn):
+                try:
+                    tuned_managed_reason = str(tuned_fn(k.id) or "")
+                except Exception:
+                    tuned_managed_reason = ""
+            if tuned_managed_reason:
+                locked = True
             requires_config = False
             if (
                 k.impl is not None
@@ -872,6 +881,8 @@ class TableMixin:
             lock_reason = ""
             if simple_owned_reason:
                 lock_reason = simple_owned_reason
+            elif tuned_managed_reason:
+                lock_reason = tuned_managed_reason
             elif group_pending_lock:
                 lock_reason = f"Groups pending reboot: {', '.join(k.requires_groups)}"
             elif reboot_dep_lock:
@@ -945,7 +956,7 @@ class TableMixin:
             # Column 5: Status (with color)
             status_tip = ""
             if locked:
-                status_text = "Locked"
+                status_text = "via tuned" if tuned_managed_reason else "Locked"
                 status_color = locked_fg.name()
                 status_tip = lock_reason
             elif not_applicable:
@@ -1015,6 +1026,8 @@ class TableMixin:
             else:
                 status_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
             reference_match, factory_match = self._preset_match_flags(k.id)
+            if tuned_managed_reason:
+                reference_match = factory_match = False
             if reference_match or factory_match:
                 status_wrap = QWidget()
                 status_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1139,6 +1152,12 @@ class TableMixin:
                 btn.setToolTip(lock_reason)
                 btn.setStyleSheet(locked_style)
                 self._set_action_cell(r, btn)
+            elif simple_owned_reason or tuned_managed_reason:
+                btn = self._make_action_button("🔒")
+                btn.setEnabled(False)
+                btn.setToolTip(lock_reason)
+                btn.setStyleSheet(locked_style)
+                self._set_action_cell(r, btn)
             elif conflict_lock:
                 btn = self._make_action_button("Conflict")
                 btn.setToolTip(lock_reason)
@@ -1184,7 +1203,7 @@ class TableMixin:
             # Column 3: Config widgets
             config_builder = get_config_widget_builder(k.id)
             config_widget = None
-            allow_config_row_dim = allow_config_when_row_dim(k.id, ctx) and not bool(simple_owned_reason)
+            allow_config_row_dim = allow_config_when_row_dim(k.id, ctx) and not bool(simple_owned_reason) and not bool(tuned_managed_reason)
             if config_builder:
                 config_widget = config_builder(self, k, ctx)
             if config_widget is not None:
@@ -1209,7 +1228,6 @@ class TableMixin:
                             continue
                         widget = content
                     if widget.property("status_button"):
-                        widget.setStyleSheet(locked_style)
                         continue
                     if col == 3 and allow_config:
                         if isinstance(widget, (QComboBox, QPushButton)):
