@@ -463,7 +463,7 @@ class TableMixin:
         
         mapping = {
             "applied": ("✓ Applied", "#2e7d32"),      # Green
-            "active_external": ("~ Active", "#4a90e2"),  # Blue - set outside audioknob
+            "active_external": ("~ External", "#4a90e2"),  # Blue - set outside audioknob
             "not_applied": ("—", "#757575"),          # Gray dash
             "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
             "partial": ("◐ Partial", "#f6c343"),      # Pastel yellow
@@ -615,7 +615,7 @@ class TableMixin:
         elif grouping_mode == "status":
             status_labels = {
                 "applied": "Applied",
-                "active_external": "Active (External)",
+                "active_external": "External",
                 "pending_reboot": "Reboot Required",
                 "partial": "Partial",
                 "not_applied": "Not Applied",
@@ -1021,6 +1021,8 @@ class TableMixin:
                 " background-color: #2a2a2a;"
                 "}"
             )
+            if not status_tip and status == "active_external":
+                status_tip = "Set outside audioknob (e.g. by distro config or another tool)"
             if status_tip:
                 status_btn.setToolTip(status_tip)
             status_btn.setMinimumWidth(0)
