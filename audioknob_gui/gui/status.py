@@ -46,6 +46,8 @@ def _status_for_preset_compare(value: object) -> str | None:
         return None
     if value in ("sys_default", "deviated"):
         return "not_applied"
+    if value == "active_external":
+        return "applied"
     if value.startswith("result:"):
         return None
     return value
@@ -1639,6 +1641,56 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
         lines.append(f"factory_preset_status: {factory_statuses.get(knob.id)}")
     lines.append("")
 
+    # Tuned management context
+    tuned_fn = getattr(ui, "_tuned_managed_lock_reason", None)
+    tuned_reason = ""
+    if callable(tuned_fn):
+        try:
+            tuned_reason = str(tuned_fn(knob.id) or "")
+        except Exception:
+            pass
+    if tuned_reason:
+        lines.append("── tuned ownership ──")
+        lines.append(f"lock: {tuned_reason}")
+        _tuned_knob_details = {
+            "cpu_governor_performance_persistent": [
+                ("governor", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+            ],
+            "kernel_cstate_limit": [
+                ("force_latency", "/dev/cpu_dma_latency"),
+            ],
+            "kernel_intel_idle_cstate_limit": [
+                ("force_latency", "/dev/cpu_dma_latency"),
+            ],
+            "swappiness": [
+                ("vm.swappiness", "/proc/sys/vm/swappiness"),
+            ],
+            "dirty_bytes": [
+                ("vm.dirty_ratio", "/proc/sys/vm/dirty_ratio"),
+                ("vm.dirty_background_ratio", "/proc/sys/vm/dirty_background_ratio"),
+                ("vm.dirty_bytes", "/proc/sys/vm/dirty_bytes"),
+                ("vm.dirty_background_bytes", "/proc/sys/vm/dirty_background_bytes"),
+            ],
+        }
+        details = _tuned_knob_details.get(knob.id, [])
+        for label, proc_path in details:
+            try:
+                val = Path(proc_path).read_text().strip()
+            except Exception:
+                val = "unreadable"
+            lines.append(f"  {label}: {val}")
+        try:
+            profile = subprocess.run(
+                ["tuned-adm", "active"],
+                capture_output=True, text=True, timeout=5,
+            )
+            active = profile.stdout.strip()
+            if active:
+                lines.append(f"  profile: {active}")
+        except Exception:
+            pass
+        lines.append("")
+
     kind = knob.impl.kind if knob.impl else ""
     params = dict(knob.impl.params) if knob.impl else {}
     try:
@@ -2061,21 +2113,28 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                     target = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
                 lines.append(f"current: {current or 'unknown'}")
                 lines.append(f"target: {target}")
-            try:
-                if backend["backend"] == "powerprofilesctl":
-                    r = subprocess.run([backend["cmd"], "list"], capture_output=True, text=True)
-                    output = (r.stdout or r.stderr or "").strip()
-                    if output:
-                        lines.append("available_profiles:")
-                        lines.extend(output.splitlines()[:20])
-                elif backend["backend"] == "tuned":
-                    r = subprocess.run([backend["cmd"], "list"], capture_output=True, text=True)
-                    output = (r.stdout or r.stderr or "").strip()
-                    if output:
-                        lines.append("available_profiles:")
-                        lines.extend(output.splitlines()[:20])
-            except Exception:
-                pass
+            # Show what tuned manages when active
+            if backend["backend"] == "tuned" and current == target:
+                lines.append("")
+                lines.append("── tuned-managed settings ──")
+                lines.append("tuned (latency-performance) controls these instead of audioknob:")
+                _tuned_reads: list[tuple[str, str, str]] = [
+                    ("CPU governor", "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "performance"),
+                    ("C-state force_latency", "", "via /dev/cpu_dma_latency"),
+                    ("vm.swappiness", "/proc/sys/vm/swappiness", "10"),
+                    ("vm.dirty_ratio", "/proc/sys/vm/dirty_ratio", "10"),
+                    ("vm.dirty_background_ratio", "/proc/sys/vm/dirty_background_ratio", "3"),
+                ]
+                for label, proc_path, tuned_target in _tuned_reads:
+                    if proc_path:
+                        try:
+                            val = Path(proc_path).read_text().strip()
+                        except Exception:
+                            val = "unreadable"
+                        match = "✓" if val == tuned_target else "✗"
+                        lines.append(f"  {match} {label}: {val} (tuned target: {tuned_target})")
+                    else:
+                        lines.append(f"  ~ {label}: {tuned_target}")
     elif kind == "systemd_unit_toggle":
         unit = str(params.get("unit", ""))
         if unit:

@@ -463,6 +463,7 @@ class TableMixin:
         
         mapping = {
             "applied": ("✓ Applied", "#2e7d32"),      # Green
+            "active_external": ("~ Active", "#4a90e2"),  # Blue - set outside audioknob
             "not_applied": ("—", "#757575"),          # Gray dash
             "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
             "partial": ("◐ Partial", "#f6c343"),      # Pastel yellow
@@ -518,13 +519,14 @@ class TableMixin:
             status = self._knob_statuses.get(k.id, "unknown")
             status_order = {
                 "applied": 0,
-                "pending_reboot": 1,
-                "partial": 2,
-                "not_applied": 3,
-                "not_applicable": 4,
-                "unknown": 5,
-                "sys_default": 3,
-                "deviated": 3,
+                "active_external": 1,
+                "pending_reboot": 2,
+                "partial": 3,
+                "not_applied": 4,
+                "not_applicable": 5,
+                "unknown": 6,
+                "sys_default": 4,
+                "deviated": 4,
             }
             risk_order = {"low": 0, "medium": 1, "high": 2}
 
@@ -613,6 +615,7 @@ class TableMixin:
         elif grouping_mode == "status":
             status_labels = {
                 "applied": "Applied",
+                "active_external": "Active (External)",
                 "pending_reboot": "Reboot Required",
                 "partial": "Partial",
                 "not_applied": "Not Applied",
@@ -622,6 +625,7 @@ class TableMixin:
             }
             status_order = [
                 "applied",
+                "active_external",
                 "pending_reboot",
                 "partial",
                 "not_applied",

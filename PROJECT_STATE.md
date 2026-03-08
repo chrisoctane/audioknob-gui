@@ -9,7 +9,7 @@
 ## Current Status (rolling)
 
 ### What Works
-- **Release version**: 0.7.11
+- **Release version**: 0.7.12
 - **57 knobs defined** (ALL 57 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
@@ -548,13 +548,14 @@ preset extraction.
 
 **Proposed Solution:** Each knob gains a `probe()` check that reads the live system value and compares it to the knob's target. On first launch (and optionally on refresh), knobs that are already at target show "active (external)" or similar, distinguishing audioknob-applied from externally-applied.
 
-**Considerations:**
-- Per-knob probe logic varies: sysctl read, sysfs read, service status, file existence, etc.
-- Must handle distro differences (different defaults, different config paths)
-- Relates to Three-State Model above — probe provides the `current_value` needed for state classification
-- Should not slow down startup; probes can be lazy or batched
+**Phase 1 (implemented):** sysctl_conf knobs probe `/proc/sys/` when audioknob's
+config file is absent. If live values match the target, status is `"active_external"`
+(displayed as "~ Active" in blue). Covers swappiness, dirty_bytes, inotify, rt_throttling.
 
-**Status:** TODO. Not blocking for v1.0.
+**Remaining phases (TODO):**
+- Phase 3: udev rule probing (stat device permissions)
+- Phase 4: PAM limits probing (resource.getrlimit)
+- Phase 5: PipeWire live probing (pw-dump, deferred)
 
 ---
 

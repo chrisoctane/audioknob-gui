@@ -4,6 +4,25 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.12] - 2026-03-08
+
+### Added
+- **Live system state probing** for sysctl knobs: when audioknob's config file
+  is absent but the live `/proc/sys/` value matches the target, status shows
+  "~ Active" (blue) instead of "not applied". Covers swappiness, dirty_bytes,
+  inotify, and rt_throttling.
+- **Tuned status details**: Power Profile status dialog shows a "tuned-managed
+  settings" section with live system values and match indicators. Individual
+  tuned-locked knob dialogs show tuned ownership context.
+
+### Fixed
+- **Power Profile backend switch**: applying tuned now disables ppd first;
+  resetting or force-resetting stops tuned and re-enables ppd with balanced
+  profile. Previously reset left tuned running.
+- **Stale config cleanup**: applying tuned automatically removes audioknob's
+  sysctl config files for swappiness and dirty_bytes (backed up in the
+  transaction for restore), preventing config stacking.
+
 ## [0.7.11] - 2026-03-08
 
 ### Added

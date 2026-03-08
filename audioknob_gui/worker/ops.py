@@ -2075,12 +2075,44 @@ def baloo_enable() -> None:
             return
 
 
+def _probe_sysctl_live(wanted_lines: list[str]) -> bool | None:
+    """Check if sysctl values are active in the running kernel.
+
+    Reads /proc/sys/ for each ``key=value`` line that looks like a real
+    sysctl key (contains a dot separator in a known namespace).
+
+    Returns True if ALL probed values match, False if any mismatch,
+    or None if no lines were probeable.
+    """
+    matched = 0
+    total = 0
+    for line in wanted_lines:
+        line = line.strip()
+        if "=" not in line or "." not in line.split("=", 1)[0]:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        proc_path = Path("/proc/sys") / key.replace(".", "/")
+        try:
+            current = proc_path.read_text().strip()
+        except Exception:
+            continue
+        total += 1
+        if current == value:
+            matched += 1
+    if total == 0:
+        return None
+    return matched == total
+
+
 def check_knob_status(knob: Any) -> str:
     """Check if a knob's changes are currently applied.
-    
+
     Returns one of:
     - "applied" - the knob's changes are in effect
     - "not_applied" - the knob's changes are not present
+    - "active_external" - live system matches target but not applied by audioknob
     - "partial" - some but not all changes are applied
     - "unknown" - can't determine status
     - "read_only" - this is a read-only/detection knob
@@ -2135,6 +2167,8 @@ def check_knob_status(knob: Any) -> str:
         if not path.exists():
             if clear_prefixes and not wanted_lines:
                 return "applied"
+            if wanted_lines and _probe_sysctl_live(wanted_lines) is True:
+                return "active_external"
             return "not_applied"
         try:
             content = path.read_text(encoding="utf-8")

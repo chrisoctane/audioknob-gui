@@ -1992,13 +1992,25 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     )
 
         elif kind == "power_profile":
-            from audioknob_gui.worker.ops import select_power_profile_backend, read_power_profile, systemd_enable_now
+            from audioknob_gui.worker.ops import select_power_profile_backend, read_power_profile, systemd_enable_now, systemd_disable_now
 
             backend = select_power_profile_backend(params)
             if not backend:
                 raise SystemExit("No power profile backend found (powerprofilesctl or tuned-adm).")
 
+            # When switching to tuned, stop ppd first (and record its state
+            # so restore can re-enable it).  Likewise for the reverse.
+            _peer_services = {
+                "tuned.service": "power-profiles-daemon.service",
+                "power-profiles-daemon.service": "tuned.service",
+            }
             service = backend.get("service")
+            peer = _peer_services.get(service or "", "")
+            if peer:
+                peer_effect = systemd_disable_now(peer)
+                peer_effect["knob_id"] = kid
+                effects.append(peer_effect)
+
             if service:
                 svc_effect = systemd_enable_now(service)
                 svc_effect["knob_id"] = kid
@@ -2044,6 +2056,17 @@ def cmd_apply(args: argparse.Namespace) -> int:
             else:
                 target = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
                 cmd = [backend["cmd"], "profile", target]
+
+                # Remove stale audioknob sysctl files for knobs that tuned
+                # now owns, preventing config stacking.
+                _tuned_overlap_files = [
+                    ("/etc/sysctl.d/99-audioknob-gui.conf", "swappiness"),
+                    ("/etc/sysctl.d/99-audioknob-dirty.conf", "dirty_bytes"),
+                ]
+                for overlap_path, overlap_kid in _tuned_overlap_files:
+                    if Path(overlap_path).exists():
+                        _backup_once(tx, backups, overlap_path, knob_id=overlap_kid)
+                        Path(overlap_path).unlink()
 
             result = subprocess.run(cmd, capture_output=True, text=True)
             effects.append(
@@ -4072,20 +4095,26 @@ def _force_reset_power_profile(params: dict[str, Any]) -> tuple[bool, str]:
         return True, f"Set power profile to {target} via powerprofilesctl"
 
     if backend_name == "tuned":
-        available = _list_tuned_profiles(cmd)
-        if available and target not in available:
-            return False, (
-                "Cannot safely reset tuned profile: "
-                f"'{target}' is not available (available: {', '.join(available)})."
+        # Stop tuned and re-enable ppd for a clean factory state
+        subprocess.run(["systemctl", "disable", "--now", "tuned.service"],
+                       capture_output=True, text=True)
+        subprocess.run(["systemctl", "enable", "--now", "power-profiles-daemon.service"],
+                       capture_output=True, text=True)
+        # Set ppd to balanced (the factory default)
+        ppd_cmd = worker_ops.detect_power_profile_backend()
+        if ppd_cmd and ppd_cmd.get("backend") == "powerprofilesctl":
+            result = subprocess.run(
+                [ppd_cmd["cmd"], "set", target],
+                capture_output=True, text=True,
             )
-        result = subprocess.run([cmd, "profile", target], capture_output=True, text=True)
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            return False, f"Failed to set tuned profile '{target}': {detail}"
-        current = worker_ops.read_power_profile(backend_name, cmd)
-        if current and current != target:
-            return False, f"Tuned profile verification failed (current: {current}, target: {target})."
-        return True, f"Set tuned profile to {target}"
+            if result.returncode != 0:
+                detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+                return False, f"Failed to set power profile '{target}': {detail}"
+            current = worker_ops.read_power_profile("powerprofilesctl", ppd_cmd["cmd"])
+            if current and current != target:
+                return False, f"Power profile verification failed (current: {current}, target: {target})."
+            return True, f"Stopped tuned, restored ppd to {target}"
+        return True, "Stopped tuned, re-enabled power-profiles-daemon"
 
     return False, f"Unsupported power profile backend: {backend_name}"
 
