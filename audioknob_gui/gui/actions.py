@@ -6,8 +6,9 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QTextEdit, QVBoxLayout, QPushButton
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QTextEdit, QPushButton
 
+from audioknob_gui.gui.chrome import build_dialog_root, set_label_tone, style_dialog_button_box, style_panel_surface
 from audioknob_gui.gui.logging_utils import _get_gui_logger
 from audioknob_gui.gui.state import save_state
 from audioknob_gui.knob_ids import RT_LIMITS_AUDIO_GROUP
@@ -449,22 +450,25 @@ def on_reset_defaults(ui) -> None:
     confirm_dialog = QDialog(ui)
     confirm_dialog.setWindowTitle("Factory Preset")
     confirm_dialog.resize(600, 350)
-    layout = QVBoxLayout(confirm_dialog)
+    layout = build_dialog_root(confirm_dialog, parent=ui)
 
     total_changes = file_count + effects_count
-    layout.addWidget(
-        QLabel(
-            f"<b>Reset {total_changes} change(s) to system defaults?</b><br/><br/>"
-            "<i>You'll be prompted for your password if root access is needed.</i>"
-        )
-    )
+    title = QLabel(f"Reset {total_changes} change(s) to system defaults?")
+    set_label_tone(title, "lead")
+    layout.addWidget(title)
+
+    note = QLabel("You'll be prompted for your password if root access is needed.")
+    set_label_tone(note, "muted")
+    layout.addWidget(note)
 
     text_widget = QTextEdit()
     text_widget.setReadOnly(True)
     text_widget.setPlainText("\n".join(summary_lines))
+    style_panel_surface(text_widget)
     layout.addWidget(text_widget)
 
     btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+    style_dialog_button_box(btns)
     layout.addWidget(btns)
 
     confirmed = [False]

@@ -288,24 +288,31 @@ class TableMixin:
 
 
     def _style_table_button(self, btn: QPushButton, *, row_dim: bool = False) -> None:
-        bg = "#1f1f1f" if row_dim else "#2a2a2a"
+        bg = "#20242b" if row_dim else "#262c34"
+        border = "#2f3641" if row_dim else "#3a4451"
+        hover_bg = "#2c333d" if row_dim else "#313b47"
+        pressed_bg = "#1d2228" if row_dim else "#232930"
         btn.setStyleSheet(
             "QPushButton {"
             f" background-color: {bg};"
-            " color: #e0e0e0;"
-            " border: 1px solid #1f1f1f;"
-            " border-radius: 6px;"
-            " padding: 2px 6px;"
+            " color: #edf1f7;"
+            f" border: 1px solid {border};"
+            " border-radius: 8px;"
+            " padding: 4px 10px;"
+            " min-height: 28px;"
+            " font-weight: 500;"
             "}"
             "QPushButton:hover {"
-            " background-color: #333333;"
+            f" background-color: {hover_bg};"
+            " border-color: #6f8fb7;"
             "}"
             "QPushButton:pressed {"
-            " background-color: #1f1f1f;"
+            f" background-color: {pressed_bg};"
             "}"
             "QPushButton:disabled {"
-            " color: #7a7a7a;"
-            " background-color: #1f1f1f;"
+            " color: #7d8796;"
+            " background-color: #1c2026;"
+            " border-color: #2a3038;"
             "}"
         )
 
@@ -314,25 +321,27 @@ class TableMixin:
         widget.setStyleSheet(
             """
             QComboBox, QSpinBox {
-                background-color: #2a2a2a;
-                color: #e0e0e0;
-                border: 1px solid #1f1f1f;
-                padding: 2px 6px;
-                border-radius: 6px;
+                background-color: #262c34;
+                color: #edf1f7;
+                border: 1px solid #3a4451;
+                padding: 4px 8px;
+                border-radius: 8px;
+                min-height: 28px;
             }
             QComboBox:disabled, QSpinBox:disabled {
-                background-color: #1f1f1f;
-                color: #7a7a7a;
-                border: 1px solid #2a2a2a;
+                background-color: #1c2026;
+                color: #7d8796;
+                border: 1px solid #2a3038;
             }
             QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {
-                border: 1px solid #1f1f1f;
-                background-color: #2a2a2a;
+                border: 1px solid #3a4451;
+                background-color: #2c333d;
+                border-radius: 6px;
             }
             QComboBox QAbstractItemView {
-                background-color: #2a2a2a;
-                color: #e0e0e0;
-                selection-background-color: #333333;
+                background-color: #262c34;
+                color: #edf1f7;
+                selection-background-color: #313b47;
             }
             """
         )
@@ -394,7 +403,7 @@ class TableMixin:
         container = CellContainer(self._row_bg_color(row))
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setContentsMargins(8, 5, 8, 5)
         if widget.sizePolicy().horizontalPolicy() in (QSizePolicy.Expanding, QSizePolicy.MinimumExpanding):
             layout.setAlignment(Qt.AlignVCenter)
             layout.addWidget(widget, 1)
@@ -403,6 +412,34 @@ class TableMixin:
             layout.addWidget(widget)
         self._install_hover_tracking(container, row)
         self.table.setCellWidget(row, col, container)
+
+
+    def _status_button_stylesheet(self, text_color: str, *, row_dim: bool = False, accent: str | None = None) -> str:
+        background = "#20242b" if row_dim else "#222934"
+        hover_background = "#2b333f" if row_dim else "#2d3846"
+        border = accent or "#425066"
+        disabled_background = "#1c2026"
+        return (
+            "QPushButton {"
+            " text-align: center;"
+            f" color: {text_color};"
+            f" background-color: {background};"
+            f" border: 1px solid {border};"
+            " border-radius: 9px;"
+            " padding: 4px 10px;"
+            " min-height: 28px;"
+            " font-weight: 600;"
+            "}"
+            "QPushButton:hover {"
+            f" background-color: {hover_background};"
+            " border-color: #86a7d2;"
+            "}"
+            "QPushButton:disabled {"
+            " color: #8e96a3;"
+            f" background-color: {disabled_background};"
+            " border-color: #313844;"
+            "}"
+        )
 
 
     def _set_info_cell(self, row: int, widget: QWidget) -> None:
@@ -682,17 +719,18 @@ class TableMixin:
             if isinstance(k, tuple) and k and k[0] is CATEGORY_HEADER:
                 label = str(k[1])
                 tooltip = str(k[2]) if len(k) > 2 and k[2] else ""
-                header_bg = QColor("#1f1f1f")
+                header_bg = QColor("#181c22")
                 for c in range(self.table.columnCount()):
                     self.table.removeCellWidget(r, c)
                 self.table.setSpan(r, 0, 1, self.table.columnCount())
                 header_item = QTableWidgetItem(label)
                 header_item.setFlags(Qt.NoItemFlags)
-                header_item.setForeground(QColor("#cfcfcf"))
+                header_item.setForeground(QColor("#e5ebf5"))
                 header_item.setBackground(header_bg)
                 header_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                 header_font = header_item.font()
                 header_font.setBold(True)
+                header_font.setPointSize(max(header_font.pointSize(), 11))
                 header_item.setFont(header_font)
                 if tooltip:
                     header_item.setToolTip(tooltip)
@@ -702,14 +740,18 @@ class TableMixin:
                     filler.setFlags(Qt.NoItemFlags)
                     filler.setBackground(header_bg)
                     self.table.setItem(r, c, filler)
+                try:
+                    self.table.setRowHeight(r, 34)
+                except Exception:
+                    pass
                 continue
             if k is CATEGORY_SEPARATOR:
-                sep_bg = QColor("#1f1f1f")
+                sep_bg = QColor("#161a20")
                 for c in range(self.table.columnCount()):
                     self.table.removeCellWidget(r, c)
                 sep = QTableWidgetItem("")
                 sep.setFlags(Qt.NoItemFlags)
-                sep.setForeground(QColor("#9e9e9e"))
+                sep.setForeground(QColor("#576272"))
                 sep.setBackground(sep_bg)
                 sep.setTextAlignment(Qt.AlignCenter)
                 self.table.setSpan(r, 0, 1, self.table.columnCount())
@@ -720,7 +762,7 @@ class TableMixin:
                     filler.setBackground(sep_bg)
                     self.table.setItem(r, c, filler)
                 try:
-                    self.table.setRowHeight(r, 10)
+                    self.table.setRowHeight(r, 14)
                 except Exception:
                     pass
                 continue
@@ -746,9 +788,24 @@ class TableMixin:
             locked_bg = QColor("#1f1f1f")
             locked_fg = QColor("#7a7a7a")
             locked_style = (
-                "QPushButton { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 2px 6px; }"
-                "QPushButton:hover { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
-                "QPushButton:pressed { background-color: #1f1f1f; color: #7a7a7a; border: 1px solid #2a2a2a; }"
+                "QPushButton {"
+                " background-color: #1c2026;"
+                " color: #7d8796;"
+                " border: 1px solid #2a3038;"
+                " border-radius: 8px;"
+                " padding: 4px 10px;"
+                " min-height: 28px;"
+                "}"
+                "QPushButton:hover {"
+                " background-color: #1c2026;"
+                " color: #7d8796;"
+                " border: 1px solid #2a3038;"
+                "}"
+                "QPushButton:pressed {"
+                " background-color: #1c2026;"
+                " color: #7d8796;"
+                " border: 1px solid #2a3038;"
+                "}"
             )
 
             # Check requirements
@@ -927,7 +984,7 @@ class TableMixin:
             
             # Column 0: Info button
             info_btn = QPushButton("i")
-            info_btn.setFixedWidth(28)
+            info_btn.setFixedWidth(32)
             info_btn.setToolTip("Show details")
             info_btn.setFocusPolicy(Qt.NoFocus)
             self._style_table_button(info_btn, row_dim=row_dim)
@@ -1002,24 +1059,13 @@ class TableMixin:
             status_btn.setProperty("status_button", True)
             status_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             status_btn.setCursor(Qt.PointingHandCursor)
-            button_bg = "#2a2a2a"
-            if row_dim:
-                button_bg = "#1f1f1f"
+            accent_color = "#d32f2f" if conflict_ids else status_color
             status_btn.setStyleSheet(
-                "QPushButton {"
-                f" text-align: center; color: {status_color};"
-                f" background-color: {button_bg};"
-                " border: 1px solid #1f1f1f;"
-                " border-radius: 6px;"
-                " padding: 2px 6px;"
-                "}"
-                "QPushButton:hover {"
-                " background-color: #333333;"
-                "}"
-                "QPushButton:disabled {"
-                " color: #9e9e9e;"
-                " background-color: #2a2a2a;"
-                "}"
+                self._status_button_stylesheet(
+                    status_color,
+                    row_dim=row_dim,
+                    accent=accent_color,
+                )
             )
             if not status_tip and status == "active_external":
                 status_tip = "Set outside audioknob (e.g. by distro config or another tool)"
@@ -1170,14 +1216,17 @@ class TableMixin:
                 btn.setCursor(Qt.PointingHandCursor)
                 btn.setStyleSheet(
                     "QPushButton {"
-                    " color: #d32f2f;"
-                    " background-color: #2a2a2a;"
-                    " border: 1px solid #3a3a3a;"
-                    " border-radius: 6px;"
-                    " padding: 2px 6px;"
+                    " color: #ff8f8f;"
+                    " background-color: #2b2124;"
+                    " border: 1px solid #92434d;"
+                    " border-radius: 8px;"
+                    " padding: 4px 10px;"
+                    " min-height: 28px;"
+                    " font-weight: 600;"
                     "}"
                     "QPushButton:hover {"
-                    " background-color: #333333;"
+                    " background-color: #38282c;"
+                    " border-color: #c96a76;"
                     "}"
                 )
                 btn.clicked.connect(lambda _, kid=k.id: self._confirm_conflict_reset(kid))
@@ -1319,30 +1368,30 @@ class TableMixin:
         sys_texts = [self._sys_label_for_knob(k) for k in self.registry] + ["CLI"]
         sys_width = max(_w(t[:24] + ("..." if len(t) > 24 else "")) for t in sys_texts)
 
-        action_texts = ["Apply", "Reset", "Install", "View", "Test", "Scan", "Join", "Leave", "Action"]
+        action_texts = ["Apply", "Reset", "Install", "Conflict", "View", "Test", "Scan", "Join", "Leave", "Action"]
         action_width = max(_w(t, pad=40) for t in action_texts)
-        action_width = max(action_width, 100)
+        action_width = max(action_width, 116)
 
-        config_texts = ["Config", "Cores", "Devices", "44100 Hz", "192000 Hz", "512", "1024"]
+        config_texts = ["Config", "Cores", "Devices", "44100 Hz", "192000 Hz", "pipewire", "4194304", "1024"]
         config_width = max(_w(t, pad=44) for t in config_texts)
-        config_width = max(config_width, 128)
+        config_width = max(config_width, 152)
 
-        status_width = max(status_width, _w("Status", pad=60))
+        status_width = max(status_width, _w("Status", pad=72))
 
         self._min_column_widths = {
-            0: 32,
+            0: 40,
             2: action_width,
             3: config_width,
             5: status_width,
         }
 
-        self.table.setColumnWidth(0, 32)  # Info button
-        self.table.setColumnWidth(1, knob_width)
+        self.table.setColumnWidth(0, 40)  # Info button
+        self.table.setColumnWidth(1, max(knob_width, 220))
         self.table.setColumnWidth(2, action_width)
         self.table.setColumnWidth(3, config_width)
         self.table.setColumnWidth(4, requirements_width)
         self.table.setColumnWidth(5, status_width)
-        self.table.setColumnWidth(6, category_width)
+        self.table.setColumnWidth(6, max(category_width, 110))
         self.table.setColumnWidth(7, risk_width)
         self.table.setColumnWidth(8, sys_width)
         self._enforce_min_column_widths()

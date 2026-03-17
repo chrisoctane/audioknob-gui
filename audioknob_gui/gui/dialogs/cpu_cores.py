@@ -5,11 +5,20 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
+)
+
+from audioknob_gui.gui.chrome import (
+    build_dialog_root,
+    set_button_role,
+    set_label_tone,
+    style_dialog_button_box,
+    style_section_box,
 )
 
 
@@ -36,14 +45,16 @@ class CpuCoreDialog(QDialog):
         self._auto_cb: QCheckBox | None = None
         self._auto_hint: QLabel | None = None
 
-        root = QVBoxLayout(self)
+        root = build_dialog_root(self, parent=parent)
         if lines is None:
             lines = [
                 "Select CPU cores to pin JACK to (taskset -c).",
                 "Tip: cores 0-1 are often busiest (IRQs/system tasks).",
             ]
         for line in lines:
-            root.addWidget(QLabel(line))
+            label = QLabel(line)
+            set_label_tone(label, "muted")
+            root.addWidget(label)
 
         if allow_auto:
             label = auto_label or "Auto"
@@ -52,11 +63,19 @@ class CpuCoreDialog(QDialog):
             self._auto_cb.setChecked(bool(auto_enabled))
             root.addWidget(self._auto_cb)
             self._auto_hint = QLabel(hint)
-            self._auto_hint.setWordWrap(True)
+            set_label_tone(self._auto_hint, "muted")
             root.addWidget(self._auto_hint)
+
+        selection_box = QGroupBox("CPU cores")
+        style_section_box(selection_box)
+        selection_layout = QVBoxLayout(selection_box)
+        selection_layout.setContentsMargins(14, 18, 14, 14)
+        selection_layout.setSpacing(10)
 
         grid_wrap = QWidget()
         grid = QGridLayout(grid_wrap)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(10)
 
         cols = 4
         for core in range(self._cpu_count):
@@ -65,15 +84,18 @@ class CpuCoreDialog(QDialog):
             self._checks.append(cb)
             grid.addWidget(cb, core // cols, core % cols)
 
-        root.addWidget(grid_wrap)
+        selection_layout.addWidget(grid_wrap)
 
         btn_row = QHBoxLayout()
         btn_all = QPushButton("Select all")
         btn_none = QPushButton("Clear all")
+        set_button_role(btn_all, "subtle")
+        set_button_role(btn_none, "subtle")
         btn_row.addWidget(btn_all)
         btn_row.addWidget(btn_none)
         btn_row.addStretch(1)
-        root.addLayout(btn_row)
+        selection_layout.addLayout(btn_row)
+        root.addWidget(selection_box)
 
         def _set_all(v: bool) -> None:
             for cb in self._checks:
@@ -93,6 +115,7 @@ class CpuCoreDialog(QDialog):
             _apply_auto(self._auto_cb.isChecked())
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)

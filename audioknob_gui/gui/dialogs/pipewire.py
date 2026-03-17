@@ -23,6 +23,13 @@ import json
 import re
 import subprocess
 
+from audioknob_gui.gui.chrome import (
+    build_dialog_root,
+    set_button_role,
+    set_label_tone,
+    style_dialog_button_box,
+    style_panel_surface,
+)
 from audioknob_gui.knob_ids import PIPEWIRE_RT_SETUP
 
 
@@ -32,9 +39,13 @@ class PipeWireQuantumDialog(QDialog):
         self.setWindowTitle("Configure PipeWire buffer (quantum)")
         self.resize(420, 160)
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Select PipeWire buffer size (quantum)."))
-        root.addWidget(QLabel("Recommended: 128 or 256. Smaller can underrun; larger adds latency."))
+        root = build_dialog_root(self, parent=parent, compact=True)
+        intro = QLabel("Select PipeWire buffer size (quantum).")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
+        hint = QLabel("Recommended: 128 or 256. Smaller can underrun; larger adds latency.")
+        set_label_tone(hint, "muted")
+        root.addWidget(hint)
 
         self.combo = QComboBox()
         self._values = [32, 64, 128, 256, 512, 1024]
@@ -46,6 +57,7 @@ class PipeWireQuantumDialog(QDialog):
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         self.ok_btn = btns.button(QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -60,9 +72,13 @@ class PipeWireSampleRateDialog(QDialog):
         self.setWindowTitle("Configure PipeWire sample rate")
         self.resize(420, 160)
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Select PipeWire default sample rate."))
-        root.addWidget(QLabel("Common: 48000 Hz. Higher rates for high-res audio."))
+        root = build_dialog_root(self, parent=parent, compact=True)
+        intro = QLabel("Select PipeWire default sample rate.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
+        hint = QLabel("Common: 48000 Hz. Higher rates for high-res audio.")
+        set_label_tone(hint, "muted")
+        root.addWidget(hint)
 
         self.combo = QComboBox()
         self._values = [44100, 48000, 88200, 96000, 192000]
@@ -74,6 +90,8 @@ class PipeWireSampleRateDialog(QDialog):
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         status_btn = btns.addButton("Status Check...", QDialogButtonBox.ActionRole)
+        style_dialog_button_box(btns)
+        set_button_role(status_btn, "subtle")
         status_btn.clicked.connect(self._show_status_check)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
@@ -90,9 +108,13 @@ class PipeWireClockConstraintsDialog(QDialog):
         self.resize(520, 320)
         current = current or {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Advanced clock constraints. Leave fields empty to keep defaults."))
-        root.addWidget(QLabel("Note: allowed-rates is disabled by default in PipeWire due to kernel/Bluetooth quirks."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Advanced clock constraints. Leave fields empty to keep defaults.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
+        hint = QLabel("Note: allowed-rates is disabled by default in PipeWire due to kernel/Bluetooth quirks.")
+        set_label_tone(hint, "muted")
+        root.addWidget(hint)
 
         form = QFormLayout()
         self.allowed_rates = QLineEdit()
@@ -132,6 +154,7 @@ class PipeWireClockConstraintsDialog(QDialog):
         root.addLayout(form)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -182,9 +205,13 @@ class PipeWireMlockDialog(QDialog):
         self.resize(420, 200)
         current = current or {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Enable PipeWire memory locking (advanced)."))
-        root.addWidget(QLabel("If memlock limits are low, mlock-all may fail."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Enable PipeWire memory locking (advanced).")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
+        hint = QLabel("If memlock limits are low, mlock-all may fail.")
+        set_label_tone(hint, "muted")
+        root.addWidget(hint)
 
         self.allow_mlock = QCheckBox("Allow mlock")
         self.allow_mlock.setTristate(True)
@@ -210,6 +237,7 @@ class PipeWireMlockDialog(QDialog):
         root.addWidget(self.mlock_all)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -234,8 +262,10 @@ class PipeWireRtModuleDialog(QDialog):
         self.resize(520, 360)
         current = current or {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Set module.rt args (advanced). Leave fields empty to keep defaults."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Set module.rt args (advanced). Leave fields empty to keep defaults.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
 
         form = QFormLayout()
         self.rt_prio = QLineEdit(str(current.get("rt_prio") or ""))
@@ -274,6 +304,7 @@ class PipeWireRtModuleDialog(QDialog):
         root.addLayout(form)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -326,9 +357,13 @@ class PipeWirePulseLatencyDialog(QDialog):
         self.resize(520, 260)
         current = current or {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Configure global pipewire-pulse latency properties."))
-        root.addWidget(QLabel("Examples: 64/48000, 128/48000, 256/48000"))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Configure global pipewire-pulse latency properties.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
+        hint = QLabel("Examples: 64/48000, 128/48000, 256/48000")
+        set_label_tone(hint, "muted")
+        root.addWidget(hint)
 
         form = QFormLayout()
         self.min_req = QLineEdit(str(current.get("min_req") or ""))
@@ -345,6 +380,7 @@ class PipeWirePulseLatencyDialog(QDialog):
         root.addLayout(form)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -367,9 +403,13 @@ class PipeWirePulseRulesDialog(QDialog):
         self.setWindowTitle("PipeWire pulse app rules")
         self.resize(660, 460)
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Configure per-app pipewire-pulse latency rules as JSON."))
-        root.addWidget(QLabel("Each rule needs 'match' (object) and 'latency' (string)."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Configure per-app pipewire-pulse latency rules as JSON.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
+        hint = QLabel("Each rule needs 'match' (object) and 'latency' (string).")
+        set_label_tone(hint, "muted")
+        root.addWidget(hint)
 
         self.rules_edit = QTextEdit()
         if isinstance(current, list):
@@ -386,9 +426,11 @@ class PipeWirePulseRulesDialog(QDialog):
                     indent=2,
                 )
             )
+        style_panel_surface(self.rules_edit)
         root.addWidget(self.rules_edit)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -438,8 +480,10 @@ class SystemdServiceRtDialog(QDialog):
         self.resize(540, 300)
         current = current or {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Configure systemd scheduling + affinity drop-in values."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Configure systemd scheduling + affinity drop-in values.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
 
         form = QFormLayout()
         self.policy = QComboBox()
@@ -469,6 +513,7 @@ class SystemdServiceRtDialog(QDialog):
         root.addLayout(form)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -645,7 +690,7 @@ class PipeWireRtSetupDialog(QDialog):
         self._preset_buttons: dict[str, QPushButton] = {}
         self._selected_preset = "safe_rt"
 
-        root = QVBoxLayout(self)
+        root = build_dialog_root(self, parent=parent)
         root.setSpacing(12)
 
         intro = QLabel(
@@ -861,6 +906,8 @@ class PipeWireRtSetupDialog(QDialog):
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         status_btn = btns.addButton("Status Check...", QDialogButtonBox.ActionRole)
+        style_dialog_button_box(btns)
+        set_button_role(status_btn, "subtle")
         status_btn.clicked.connect(self._show_status_check)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
@@ -1088,9 +1135,13 @@ class PipeWireDataLoopsDialog(QDialog):
         self.resize(600, 420)
         current = current or {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Configure context.data-loops (advanced)."))
-        root.addWidget(QLabel("Enter JSON for the data-loops list (leave empty to unset)."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Configure context.data-loops (advanced).")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
+        hint = QLabel("Enter JSON for the data-loops list (leave empty to unset).")
+        set_label_tone(hint, "muted")
+        root.addWidget(hint)
 
         form = QFormLayout()
         self.num_loops = QLineEdit(str(current.get("num_data_loops") or ""))
@@ -1103,9 +1154,11 @@ class PipeWireDataLoopsDialog(QDialog):
         if isinstance(loops_value, list):
             self.loops.setText(json.dumps(loops_value, indent=2))
         self.loops.setPlaceholderText('[{"thread.affinity":[2,3],"loop.rt-prio":88}]')
+        style_panel_surface(self.loops)
         root.addWidget(self.loops)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -1141,8 +1194,10 @@ class PipeWireRtLimitsGroupDialog(QDialog):
         self.setWindowTitle("PipeWire RT limits group")
         self.resize(420, 180)
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Select which group should receive PipeWire RT limits."))
+        root = build_dialog_root(self, parent=parent, compact=True)
+        intro = QLabel("Select which group should receive PipeWire RT limits.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
 
         self.combo = QComboBox()
         self.combo.addItem("Auto (pipewire -> audio -> realtime)", "")
@@ -1155,6 +1210,7 @@ class PipeWireRtLimitsGroupDialog(QDialog):
         root.addWidget(self.combo)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -1171,8 +1227,10 @@ class WirePlumberAlsaDialog(QDialog):
         self.resize(480, 260)
         current = current or {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Tune ALSA USB properties (advanced). Leave empty to keep defaults."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Tune ALSA USB properties (advanced). Leave empty to keep defaults.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
 
         form = QFormLayout()
         self.period_size = QLineEdit(str(current.get("period_size") or ""))
@@ -1196,6 +1254,7 @@ class WirePlumberAlsaDialog(QDialog):
         root.addLayout(form)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
@@ -1230,19 +1289,22 @@ class ProAudioProfileDialog(QDialog):
         self.setWindowTitle("PipeWire Pro Audio profile")
         self.resize(520, 300)
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Select a device to switch to the Pro Audio profile."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Select a device to switch to the Pro Audio profile.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
 
         row = QHBoxLayout()
         self.combo = QComboBox()
         row.addWidget(self.combo)
         refresh_btn = QPushButton("Refresh")
+        set_button_role(refresh_btn, "subtle")
         refresh_btn.clicked.connect(self._refresh_devices)
         row.addWidget(refresh_btn)
         root.addLayout(row)
 
         self.status = QLabel("")
-        self.status.setWordWrap(True)
+        set_label_tone(self.status, "muted")
         root.addWidget(self.status)
 
         self.ok_btn: QPushButton | None = None
@@ -1257,6 +1319,7 @@ class ProAudioProfileDialog(QDialog):
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         self.ok_btn = btns.button(QDialogButtonBox.Ok)
+        style_dialog_button_box(btns)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)

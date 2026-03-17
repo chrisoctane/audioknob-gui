@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from copy import deepcopy
 
+from audioknob_gui.gui.chrome import build_dialog_root, set_button_role, set_label_tone, style_panel_surface
 from audioknob_gui.gui.logging_utils import _get_gui_logger
 from audioknob_gui.knob_ids import (
     AUDIO_GROUP_MEMBERSHIP,
@@ -2641,28 +2642,34 @@ def show_cli_status(ui, knob_id: str) -> None:
     dialog = QDialog(ui)
     dialog.setWindowTitle(f"{k.title} Status Check")
     dialog.resize(640, 460)
-    layout = QVBoxLayout(dialog)
+    layout = build_dialog_root(dialog, parent=ui)
 
-    header = QLabel(f"<b>{k.title}</b>")
+    header = QLabel(k.title)
+    set_label_tone(header, "lead")
     layout.addWidget(header)
 
     gui_status_label = QLabel(f"GUI status: {ui._knob_statuses.get(k.id, 'unknown')}")
+    set_label_tone(gui_status_label, "muted")
     layout.addWidget(gui_status_label)
 
     cli_status_label = QLabel("CLI status: (not run yet)")
+    set_label_tone(cli_status_label, "muted")
     layout.addWidget(cli_status_label)
 
     text = QTextEdit()
     text.setReadOnly(True)
     text.setPlainText("Click Refresh to run CLI status and preview checks.")
+    style_panel_surface(text)
     layout.addWidget(text)
 
     btn_row = QHBoxLayout()
     refresh_btn = QPushButton("Refresh")
+    set_button_role(refresh_btn, "primary")
     refresh_btn.setFocusPolicy(Qt.NoFocus)
     btn_row.addWidget(refresh_btn)
     btn_row.addStretch(1)
     close_btn = QPushButton("Close")
+    set_button_role(close_btn, "subtle")
     close_btn.setFocusPolicy(Qt.NoFocus)
     close_btn.clicked.connect(dialog.reject)
     btn_row.addWidget(close_btn)

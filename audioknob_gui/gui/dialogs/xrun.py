@@ -13,12 +13,18 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QTextEdit,
-    QVBoxLayout,
     QHBoxLayout,
     QWidget,
 )
 
 from audioknob_gui.gui.dialogs.keep_above import configure_on_top_checkbox
+from audioknob_gui.gui.chrome import (
+    build_dialog_root,
+    set_button_role,
+    set_label_tone,
+    style_dialog_button_box,
+    style_panel_surface,
+)
 
 
 class XrunMonitorDialog(QDialog):
@@ -27,28 +33,37 @@ class XrunMonitorDialog(QDialog):
         self.setWindowTitle("PipeWire XRUN Monitor")
         self.resize(700, 480)
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel("Live XRUN/ERR counter via pw-top (batch mode)."))
+        root = build_dialog_root(self, parent=parent)
+        intro = QLabel("Live XRUN/ERR counter via pw-top (batch mode).")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
 
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
         root.addWidget(self.summary)
 
         self.status = QLabel("Status: idle | Last update: —")
+        set_label_tone(self.status, "muted")
         root.addWidget(self.status)
 
         self.output = QTextEdit()
         self.output.setReadOnly(True)
         self.output.setLineWrapMode(QTextEdit.NoWrap)
         self.output.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        style_panel_surface(self.output)
         root.addWidget(self.output)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         self.refresh_btn = QPushButton("Refresh")
         self.reset_btn = QPushButton("Reset Count")
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setEnabled(False)
+        set_button_role(self.refresh_btn, "subtle")
+        set_button_role(self.reset_btn, "subtle")
+        set_button_role(self.start_btn, "primary")
+        set_button_role(self.stop_btn, "warning")
         btn_row.addWidget(self.refresh_btn)
         btn_row.addWidget(self.reset_btn)
         btn_row.addWidget(self.start_btn)
@@ -60,6 +75,7 @@ class XrunMonitorDialog(QDialog):
         root.addLayout(btn_row)
 
         btns = QDialogButtonBox(QDialogButtonBox.Close)
+        style_dialog_button_box(btns)
         btns.rejected.connect(self.reject)
         btns.accepted.connect(self.accept)
         root.addWidget(btns)

@@ -15,11 +15,17 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QTextEdit,
-    QVBoxLayout,
     QWidget,
 )
 
 from audioknob_gui.gui.dialogs.keep_above import configure_on_top_checkbox
+from audioknob_gui.gui.chrome import (
+    build_dialog_root,
+    set_button_role,
+    set_label_tone,
+    style_dialog_button_box,
+    style_panel_surface,
+)
 
 
 def list_alsa_cards() -> list[dict[str, object]]:
@@ -122,10 +128,15 @@ class AlsaXrunMonitorDialog(QDialog):
         self.setWindowTitle("ALSA XRUN Monitor")
         self.resize(420, 260)
 
-        root = QVBoxLayout(self)
+        root = build_dialog_root(self, parent=parent)
+
+        intro = QLabel("Track ALSA XRUN counters and live PCM device state.")
+        set_label_tone(intro, "muted")
+        root.addWidget(intro)
 
         # Device selector
         card_row = QHBoxLayout()
+        card_row.setSpacing(8)
         card_row.addWidget(QLabel("Card:"))
         self.card_combo = QComboBox()
         self.card_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
@@ -137,20 +148,27 @@ class AlsaXrunMonitorDialog(QDialog):
         root.addWidget(self.summary)
 
         self.status_label = QLabel("Status: idle | Last update: —")
+        set_label_tone(self.status_label, "muted")
         root.addWidget(self.status_label)
 
         self.output = QTextEdit()
         self.output.setReadOnly(True)
         self.output.setLineWrapMode(QTextEdit.NoWrap)
         self.output.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        style_panel_surface(self.output)
         root.addWidget(self.output)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         self.refresh_btn = QPushButton("Refresh")
         self.reset_btn = QPushButton("Reset Count")
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setEnabled(False)
+        set_button_role(self.refresh_btn, "subtle")
+        set_button_role(self.reset_btn, "subtle")
+        set_button_role(self.start_btn, "primary")
+        set_button_role(self.stop_btn, "warning")
         btn_row.addWidget(self.refresh_btn)
         btn_row.addWidget(self.reset_btn)
         btn_row.addWidget(self.start_btn)
@@ -158,15 +176,16 @@ class AlsaXrunMonitorDialog(QDialog):
         self.on_top_toggle = QCheckBox("Always on top")
         btn_row.addWidget(self.on_top_toggle)
         configure_on_top_checkbox(self, self.on_top_toggle)
-        self.expand_btn = QPushButton("\u25a4")
-        self.expand_btn.setFixedWidth(30)
-        self.expand_btn.setToolTip("Toggle compact / full view")
+        self.expand_btn = QPushButton("Full View")
+        set_button_role(self.expand_btn, "subtle")
+        self.expand_btn.setToolTip("Show more device details")
         self.expand_btn.clicked.connect(self._toggle_view)
         btn_row.addWidget(self.expand_btn)
         btn_row.addStretch(1)
         root.addLayout(btn_row)
 
         btns = QDialogButtonBox(QDialogButtonBox.Close)
+        style_dialog_button_box(btns)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
@@ -185,6 +204,7 @@ class AlsaXrunMonitorDialog(QDialog):
         self._last_update: float | None = None
         self._baseline_totals: dict[str, int] = {}
 
+        self._update_expand_button()
         self._populate_cards()
         self._refresh()
 
@@ -208,7 +228,16 @@ class AlsaXrunMonitorDialog(QDialog):
             self.resize(420, 260)
         else:
             self.resize(700, 400)
+        self._update_expand_button()
         self._refresh()
+
+    def _update_expand_button(self) -> None:
+        if self._compact:
+            self.expand_btn.setText("Full View")
+            self.expand_btn.setToolTip("Show more device details")
+        else:
+            self.expand_btn.setText("Compact View")
+            self.expand_btn.setToolTip("Return to the compact monitor")
 
     def _update_status(self) -> None:
         state = "running" if self._running else "idle"

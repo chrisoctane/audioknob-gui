@@ -46,6 +46,14 @@ from audioknob_gui.gui.dialogs.jitter_monitor import JitterMonitorDialog
 from audioknob_gui.gui.dialogs.tests import jitter_test_summary
 from audioknob_gui.gui.dialogs.alsa_xrun import AlsaXrunMonitorDialog
 from audioknob_gui.gui.dialogs.xrun import XrunMonitorDialog
+from audioknob_gui.gui.chrome import (
+    build_dialog_root,
+    set_button_role,
+    set_label_tone,
+    style_dialog_button_box,
+    style_panel_surface,
+    style_section_box,
+)
 from audioknob_gui.gui.conflicts import (
     CONFLICT_MAP,
     build_conflict_details,
@@ -957,10 +965,9 @@ class MainWindow(TableMixin, QMainWindow):
             housekeeping = sorted(set(self._kernel_cores_from_state(KERNEL_IRQAFFINITY) or []))
 
         dialog = QDialog(self)
-        dialog.setStyleSheet(self.styleSheet())
         dialog.setWindowTitle("IRQ Overview")
         dialog.resize(720, 520)
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
 
         overview_font_row = QHBoxLayout()
         overview_font_label = QLabel("Overview font:")
@@ -979,10 +986,11 @@ class MainWindow(TableMixin, QMainWindow):
         summary = QLabel(
             f"Audio cores: {audio_text} | Housekeeping ({mode}): {hk_text}"
         )
-        summary.setWordWrap(True)
+        set_label_tone(summary, "muted")
         layout.addWidget(summary)
 
         grid_box = QGroupBox("Core map")
+        style_section_box(grid_box)
         grid_layout = QGridLayout(grid_box)
         grid_layout.setHorizontalSpacing(6)
         grid_layout.setVerticalSpacing(6)
@@ -1011,7 +1019,7 @@ class MainWindow(TableMixin, QMainWindow):
         layout.addWidget(grid_box)
 
         legend = QLabel("Legend: green fill = housekeeping cores, blue outline = audio cores.")
-        legend.setWordWrap(True)
+        set_label_tone(legend, "muted")
         layout.addWidget(legend)
 
         irq_lines = _read_interrupts_map()
@@ -1149,7 +1157,8 @@ class MainWindow(TableMixin, QMainWindow):
             table.verticalHeader().setMinimumSectionSize(12)
 
             guide_hint = QLabel("Guide: hover a cell to show a row/column crosshair; click to lock, click again to unlock.")
-            guide_hint.setWordWrap(True)
+            set_label_tone(guide_hint, "muted")
+            style_panel_surface(table)
             layout.addWidget(guide_hint)
 
             for row, (irq, affinity, mode, counts, desc) in enumerate(irq_rows):
@@ -1172,7 +1181,7 @@ class MainWindow(TableMixin, QMainWindow):
             layout.addWidget(table)
         else:
             empty = QLabel("No IRQs found.")
-            empty.setWordWrap(True)
+            set_label_tone(empty, "muted")
             layout.addWidget(empty)
 
         def _apply_overview_font_size(size: int) -> None:
@@ -1320,6 +1329,7 @@ class MainWindow(TableMixin, QMainWindow):
         _apply_overview_font_size(int(overview_font_spinner.value()))
 
         btns = QDialogButtonBox(QDialogButtonBox.Close)
+        style_dialog_button_box(btns)
         btns.rejected.connect(dialog.reject)
         btns.accepted.connect(dialog.accept)
         layout.addWidget(btns)
@@ -1991,22 +2001,29 @@ class MainWindow(TableMixin, QMainWindow):
         dialog.setWindowTitle("Logs")
         dialog.resize(720, 520)
 
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
+        intro = QLabel("Combined GUI, worker, and root logs for copy/paste and cleanup.")
+        set_label_tone(intro, "muted")
+        layout.addWidget(intro)
         text = QTextEdit()
         text.setReadOnly(True)
         text.setLineWrapMode(QTextEdit.NoWrap)
         text.setPlainText(self._collect_log_text())
+        style_panel_surface(text)
         layout.addWidget(text)
 
         btn_row = QHBoxLayout()
         copy_btn = QPushButton("Copy to Clipboard")
+        set_button_role(copy_btn, "subtle")
         copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(text.toPlainText()))
         btn_row.addWidget(copy_btn)
         clear_btn = QPushButton("Clear Logs")
+        set_button_role(clear_btn, "warning")
         clear_btn.clicked.connect(lambda: self._on_clear_logs(text, clear_btn))
         btn_row.addWidget(clear_btn)
         btn_row.addStretch(1)
         close_btn = QPushButton("Close")
+        set_button_role(close_btn, "subtle")
         close_btn.clicked.connect(dialog.reject)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
@@ -2015,18 +2032,18 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _on_discover_system(self) -> None:
         dialog = QDialog(self)
-        dialog.setStyleSheet(self.styleSheet())
         dialog.setWindowTitle("System Discovery")
         dialog.resize(760, 560)
 
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
         summary = QLabel("Running system discovery...")
-        summary.setWordWrap(True)
+        set_label_tone(summary, "muted")
         layout.addWidget(summary)
 
         text = QTextEdit()
         text.setReadOnly(True)
         text.setLineWrapMode(QTextEdit.NoWrap)
+        style_panel_surface(text)
         layout.addWidget(text)
 
         btn_row = QHBoxLayout()
@@ -2034,6 +2051,10 @@ class MainWindow(TableMixin, QMainWindow):
         copy_btn = QPushButton("Copy to Clipboard")
         save_btn = QPushButton("Save...")
         close_btn = QPushButton("Close")
+        set_button_role(refresh_btn, "primary")
+        set_button_role(copy_btn, "subtle")
+        set_button_role(save_btn, "subtle")
+        set_button_role(close_btn, "subtle")
         btn_row.addWidget(refresh_btn)
         btn_row.addWidget(copy_btn)
         btn_row.addWidget(save_btn)
@@ -2318,7 +2339,7 @@ class MainWindow(TableMixin, QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Tx History")
         dialog.resize(780, 520)
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
 
         baseline_ts = self.state.get("baseline_captured_at") or "-"
         baseline_user = self.state.get("baseline_txid_user") or "-"
@@ -2326,15 +2347,18 @@ class MainWindow(TableMixin, QMainWindow):
         baseline_label = QLabel(
             f"{status.REFERENCE_PRESET_LABEL}: {baseline_ts} (user txid: {baseline_user}, root txid: {baseline_root})"
         )
+        set_label_tone(baseline_label, "muted")
         layout.addWidget(baseline_label)
         factory_ts = self.state.get("factory_captured_at") or "-"
         factory_source = self.state.get("factory_source") or "-"
         factory_label = QLabel(
             f"{status.FACTORY_PRESET_LABEL}: {factory_ts} (source: {factory_source})"
         )
+        set_label_tone(factory_label, "muted")
         layout.addWidget(factory_label)
 
         table = QTableWidget(0, 8)
+        style_panel_surface(table)
         table.setHorizontalHeaderLabels(
             ["TxID", "Scope", "When", "Knobs", "Knob IDs", "Files", "Effects", "Restore"]
         )
@@ -2349,9 +2373,11 @@ class MainWindow(TableMixin, QMainWindow):
 
         btn_row = QHBoxLayout()
         refresh_btn = QPushButton("Refresh")
+        set_button_role(refresh_btn, "primary")
         btn_row.addWidget(refresh_btn)
         btn_row.addStretch(1)
         close_btn = QPushButton("Close")
+        set_button_role(close_btn, "subtle")
         close_btn.clicked.connect(dialog.reject)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
@@ -3187,6 +3213,38 @@ class MainWindow(TableMixin, QMainWindow):
                 border-radius: 12px;
                 padding: 10px 12px;
             }
+            QLabel[tone="lead"] {
+                color: #f2f6fb;
+                font-weight: 600;
+            }
+            QLabel[tone="muted"] {
+                color: #aeb8c4;
+            }
+            QLabel[tone="warning"] {
+                color: #f3c88a;
+                font-weight: 600;
+            }
+            QGroupBox[card="true"] {
+                background-color: #20252b;
+                border: 1px solid #313842;
+                border-radius: 12px;
+                margin-top: 10px;
+            }
+            QGroupBox[card="true"]::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 6px;
+                color: #f2f6fb;
+                font-weight: 600;
+            }
+            QTextEdit[surface="panel"], QListWidget[surface="panel"], QTableWidget[surface="panel"], QScrollArea[surface="panel"] {
+                background-color: #181c22;
+                border: 1px solid #313842;
+                border-radius: 12px;
+            }
+            QTextEdit[surface="panel"], QListWidget[surface="panel"] {
+                padding: 6px;
+            }
             QWidget#ViewTabsChrome {
                 background-color: #20252b;
                 border: 1px solid #313842;
@@ -3720,15 +3778,21 @@ class MainWindow(TableMixin, QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Conflicts")
         dialog.resize(680, 520)
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
+        intro = QLabel("Current conflicts detected between active or queued knobs.")
+        set_label_tone(intro, "muted")
+        layout.addWidget(intro)
         summary = QTextEdit()
         summary.setReadOnly(True)
         summary.setPlainText("Current conflicts:\n\n" + "\n".join(lines))
+        style_panel_surface(summary)
         layout.addWidget(summary)
 
         pick_label = QLabel("Choose knobs to reset (unchecked knobs will be kept):")
+        set_label_tone(pick_label, "muted")
         layout.addWidget(pick_label)
         pick_list = QListWidget()
+        style_panel_surface(pick_list)
         pick_list.setSelectionMode(QAbstractItemView.NoSelection)
         for kid in sorted(conflict_ids):
             title = by_id.get(kid).title if kid in by_id else kid
@@ -3743,6 +3807,9 @@ class MainWindow(TableMixin, QMainWindow):
         reset_btn = btns.addButton("Queue selected resets", QDialogButtonBox.AcceptRole)
         detail_btn = btns.addButton("See details", QDialogButtonBox.ActionRole)
         close_btn = btns.addButton(QDialogButtonBox.Close)
+        set_button_role(reset_btn, "primary")
+        set_button_role(detail_btn, "subtle")
+        style_dialog_button_box(btns)
         layout.addWidget(btns)
 
         def _queue_resets() -> None:
@@ -3840,11 +3907,16 @@ class MainWindow(TableMixin, QMainWindow):
             dialog = QDialog(self)
             dialog.setWindowTitle("Audio Stack Detection")
             dialog.resize(600, 450)
-            layout = QVBoxLayout(dialog)
+            layout = build_dialog_root(dialog, parent=self)
+
+            intro = QLabel("Detected PipeWire, WirePlumber, JACK, and ALSA playback devices.")
+            set_label_tone(intro, "muted")
+            layout.addWidget(intro)
             
             text = QTextEdit()
             text.setReadOnly(True)
             text.setHtml(html)
+            style_panel_surface(text)
             layout.addWidget(text)
             
             # Button row
@@ -3864,11 +3936,13 @@ class MainWindow(TableMixin, QMainWindow):
                 QApplication.clipboard().setText("\n".join(plain))
             
             copy_btn = QPushButton("Copy to Clipboard")
+            set_button_role(copy_btn, "subtle")
             copy_btn.clicked.connect(copy_to_clipboard)
             btn_layout.addWidget(copy_btn)
             btn_layout.addStretch()
             
             close_btn = QPushButton("Close")
+            set_button_role(close_btn, "subtle")
             close_btn.clicked.connect(dialog.reject)
             btn_layout.addWidget(close_btn)
             layout.addLayout(btn_layout)
@@ -4035,17 +4109,19 @@ class MainWindow(TableMixin, QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle(k.title)
         dialog.resize(500, 400)
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
 
         text = QTextEdit()
         text.setReadOnly(True)
         text.setHtml(html)
+        style_panel_surface(text)
         layout.addWidget(text)
 
         # Add config/sample buttons for knobs that support them.
         add_info_buttons(self, k, dialog, layout)
 
         btns = QDialogButtonBox(QDialogButtonBox.Close)
+        style_dialog_button_box(btns)
         btns.rejected.connect(dialog.reject)
         layout.addWidget(btns)
 
@@ -4055,7 +4131,11 @@ class MainWindow(TableMixin, QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Jitter Test Samples")
         dialog.resize(640, 420)
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
+
+        intro = QLabel("Captured per-thread jitter samples from the last run.")
+        set_label_tone(intro, "muted")
+        layout.addWidget(intro)
 
         text = QTextEdit()
         text.setReadOnly(True)
@@ -4071,9 +4151,11 @@ class MainWindow(TableMixin, QMainWindow):
         if not lines:
             lines.append("No samples captured.")
         text.setPlainText("\n".join(lines))
+        style_panel_surface(text)
         layout.addWidget(text)
 
         btns = QDialogButtonBox(QDialogButtonBox.Close)
+        style_dialog_button_box(btns)
         btns.rejected.connect(dialog.reject)
         layout.addWidget(btns)
 
@@ -4090,13 +4172,15 @@ class MainWindow(TableMixin, QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("RT Config Scan")
         dialog.resize(600, 400)
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
         status_label = QLabel("Running scan...")
+        set_label_tone(status_label, "muted")
         layout.addWidget(status_label)
 
         text = QTextEdit()
         text.setReadOnly(True)
         text.setPlainText("Collecting system info...")
+        style_panel_surface(text)
         layout.addWidget(text)
 
         # Button row with Show Full Scan option
@@ -4111,11 +4195,13 @@ class MainWindow(TableMixin, QMainWindow):
 
         full_btn = QPushButton("Show Full Scan")
         full_btn.setEnabled(False)
+        set_button_role(full_btn, "subtle")
         full_btn.clicked.connect(show_full_scan)
         btn_layout.addWidget(full_btn)
         btn_layout.addStretch()
 
         close_btn = QPushButton("Close")
+        set_button_role(close_btn, "subtle")
         close_btn.clicked.connect(dialog.reject)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
@@ -4289,12 +4375,14 @@ class MainWindow(TableMixin, QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("Conflict details")
         dialog.resize(640, 460)
-        layout = QVBoxLayout(dialog)
+        layout = build_dialog_root(dialog, parent=self)
         text = QTextEdit()
         text.setReadOnly(True)
         text.setPlainText(details)
+        style_panel_surface(text)
         layout.addWidget(text)
         btns = QDialogButtonBox(QDialogButtonBox.Close)
+        style_dialog_button_box(btns)
         btns.rejected.connect(dialog.reject)
         layout.addWidget(btns)
         dialog.exec()
