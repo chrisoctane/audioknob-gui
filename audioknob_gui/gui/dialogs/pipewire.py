@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -506,25 +507,125 @@ class SystemdServiceRtDialog(QDialog):
         }
 
 
+PIPEWIRE_RT_FULL_LIMITS: dict[str, object] = {
+    "enabled": True,
+    "group": "pipewire",
+    "rtprio": 95,
+    "nice": -19,
+    "memlock": 4194304,
+}
+
+PIPEWIRE_RT_FULL_MODULE: dict[str, object] = {
+    "rt_prio": 88,
+    "rt_time_soft": None,
+    "rt_time_hard": None,
+    "nice_level": -11,
+    "rlimits_enabled": True,
+    "rtkit_enabled": True,
+    "rtportal_enabled": True,
+    "uclamp_min": None,
+    "uclamp_max": None,
+    "cpu_zero_denormals": None,
+}
+
+PIPEWIRE_RT_SAFE_LIMITS: dict[str, object] = {
+    "enabled": False,
+}
+
+PIPEWIRE_RT_SAFE_MODULE: dict[str, object] = {
+    "rt_prio": 88,
+    "rt_time_soft": None,
+    "rt_time_hard": None,
+    "nice_level": -11,
+    "rlimits_enabled": False,
+    "rtkit_enabled": True,
+    "rtportal_enabled": True,
+    "uclamp_min": None,
+    "uclamp_max": None,
+    "cpu_zero_denormals": None,
+}
+
+PIPEWIRE_RT_MUTED_TEXT_STYLE = "color: #aeb8c4;"
+
+
+def _normalized_pipewire_rt_limits(current: dict[str, object] | None) -> dict[str, object]:
+    current = current or {}
+    enabled = current.get("enabled")
+    return {
+        "enabled": bool(enabled) if enabled is not None else True,
+        "group": str(current.get("group") or "pipewire"),
+        "rtprio": int(current.get("rtprio") or 95),
+        "nice": int(current.get("nice") or -19),
+        "memlock": int(current.get("memlock") or 4194304),
+    }
+
+
+def _normalized_pipewire_rt_module(current: dict[str, object] | None) -> dict[str, object]:
+    current = current or {}
+    return {
+        "rt_prio": int(current.get("rt_prio") or 88),
+        "rt_time_soft": current.get("rt_time_soft"),
+        "rt_time_hard": current.get("rt_time_hard"),
+        "nice_level": int(current.get("nice_level") or -11),
+        "rlimits_enabled": (
+            bool(current.get("rlimits_enabled"))
+            if current.get("rlimits_enabled") is not None
+            else True
+        ),
+        "rtkit_enabled": (
+            bool(current.get("rtkit_enabled"))
+            if current.get("rtkit_enabled") is not None
+            else True
+        ),
+        "rtportal_enabled": (
+            bool(current.get("rtportal_enabled"))
+            if current.get("rtportal_enabled") is not None
+            else True
+        ),
+        "uclamp_min": current.get("uclamp_min"),
+        "uclamp_max": current.get("uclamp_max"),
+        "cpu_zero_denormals": current.get("cpu_zero_denormals"),
+    }
+
+
+def infer_pipewire_rt_preset(
+    limits_current: dict[str, object] | None,
+    module_current: dict[str, object] | None,
+) -> str:
+    limits = _normalized_pipewire_rt_limits(limits_current)
+    module = _normalized_pipewire_rt_module(module_current)
+    if limits == PIPEWIRE_RT_FULL_LIMITS and module == PIPEWIRE_RT_FULL_MODULE:
+        return "full_rt"
+
+    safe_limits_ok = limits.get("enabled") is False
+    safe_module_ok = all(module.get(key) == value for key, value in PIPEWIRE_RT_SAFE_MODULE.items())
+    if safe_limits_ok and safe_module_ok:
+        return "safe_rt"
+    return "custom"
+
+
 class PipeWireRtSetupDialog(QDialog):
     _PRESETS: dict[str, dict[str, str]] = {
-        "full_rt": {
-            "label": "Full RT  (PAM limits + fallbacks)",
+        "safe_rt": {
+            "label": "Safe RT",
+            "brief": "Best default for most systems",
             "desc": (
-                "Recommended for audio workstations.  Writes PAM limits and enables all three "
-                "RT paths: rlimits \u2192 portal \u2192 RTKit.  Requires logout/reboot for limits to take effect."
+                "Lower-friction setup. Does not write PAM limits and relies on RTKit/portal "
+                "fallbacks instead."
             ),
         },
-        "safe_rt": {
-            "label": "Safe RT  (RTKit / portal only)",
+        "full_rt": {
+            "label": "Full RT",
+            "brief": "Use PAM limits for stronger RT access",
             "desc": (
-                "No PAM limits required.  Uses RTKit and the realtime portal as fallbacks.  "
-                "Works without group membership but may have a lower priority ceiling on some distros."
+                "Best for dedicated audio machines. Writes PAM limits and keeps all three "
+                "PipeWire realtime paths available."
             ),
         },
         "custom": {
             "label": "Custom",
-            "desc": "Manually configure RT limits and module-rt args.  Leave fields blank to keep PipeWire defaults.",
+            "brief": "Fine-tune the technical details",
+            "desc": "Use this if you need to tune priorities, limits, or fallback behavior yourself.",
         },
     }
 
@@ -535,38 +636,95 @@ class PipeWireRtSetupDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("PipeWire RT setup")
-        self.resize(520, 600)
-        limits_current = limits_current or {}
-        module_current = module_current or {}
+        self.setWindowTitle("PipeWire RT")
+        self.resize(560, 620)
+        limits_current = _normalized_pipewire_rt_limits(limits_current)
+        module_current = _normalized_pipewire_rt_module(module_current)
         self._limits_defaults = dict(limits_current)
         self._module_defaults = dict(module_current)
+        self._preset_buttons: dict[str, QPushButton] = {}
+        self._selected_preset = "safe_rt"
 
         root = QVBoxLayout(self)
-        root.setSpacing(10)
+        root.setSpacing(12)
 
-        # ── Preset ────────────────────────────────────────────────────────
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("<b>Preset:</b>"))
-        self._preset_combo = QComboBox()
-        for key, info in self._PRESETS.items():
-            self._preset_combo.addItem(info["label"], key)
-        preset_row.addWidget(self._preset_combo, 1)
-        root.addLayout(preset_row)
+        intro = QLabel(
+            "<b>Pick a PipeWire realtime mode.</b><br>"
+            "Start with Safe RT for most systems. Use Full RT if you want PAM limits and the strongest RT path."
+        )
+        intro.setTextFormat(Qt.RichText)
+        intro.setWordWrap(True)
+        root.addWidget(intro)
+
+        mode_box = QGroupBox("PipeWire RT Mode")
+        self._style_section_box(mode_box)
+        mode_layout = QVBoxLayout(mode_box)
+        mode_layout.setSpacing(10)
+        mode_layout.setContentsMargins(12, 24, 12, 12)
+
+        picker_hint = QLabel("Choose the level of control you want.")
+        picker_hint.setWordWrap(True)
+        picker_hint.setStyleSheet(PIPEWIRE_RT_MUTED_TEXT_STYLE)
+        mode_layout.addWidget(picker_hint)
+
+        preset_cards = QHBoxLayout()
+        preset_cards.setSpacing(8)
+        for preset_key in ("safe_rt", "full_rt", "custom"):
+            preset_cards.addWidget(self._build_preset_button(preset_key), 1)
+        mode_layout.addLayout(preset_cards)
 
         self._preset_desc = QLabel()
         self._preset_desc.setWordWrap(True)
-        self._preset_desc.setMinimumHeight(40)
-        self._preset_desc.setStyleSheet("color: palette(mid);")
-        root.addWidget(self._preset_desc)
+        self._preset_desc.setStyleSheet(PIPEWIRE_RT_MUTED_TEXT_STYLE)
+        mode_layout.addWidget(self._preset_desc)
+
+        self._preset_summary = QLabel()
+        self._preset_summary.setWordWrap(True)
+        self._preset_summary.setTextFormat(Qt.RichText)
+        self._preset_summary.setStyleSheet(
+            "background-color: #20252b; border: 1px solid #323840; border-radius: 10px; padding: 10px 12px;"
+        )
+        mode_layout.addWidget(self._preset_summary)
+
+        advanced_row = QHBoxLayout()
+        self._advanced_toggle = QToolButton()
+        self._advanced_toggle.setText("Advanced tuning")
+        self._advanced_toggle.setCheckable(True)
+        self._advanced_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._advanced_toggle.setArrowType(Qt.RightArrow)
+        advanced_row.addWidget(self._advanced_toggle, 0, Qt.AlignLeft)
+        advanced_row.addStretch(1)
+        mode_layout.addLayout(advanced_row)
+
+        self._advanced_hint = QLabel(
+            "Open this only if you want to change exact limits or fallback flags. "
+            "CPU affinity and core pinning live in the Cores & IRQ tab."
+        )
+        self._advanced_hint.setWordWrap(True)
+        self._advanced_hint.setStyleSheet(PIPEWIRE_RT_MUTED_TEXT_STYLE)
+        mode_layout.addWidget(self._advanced_hint)
+        root.addWidget(mode_box)
+
+        self._advanced_panel = QWidget()
+        advanced_root = QVBoxLayout(self._advanced_panel)
+        advanced_root.setContentsMargins(0, 0, 0, 0)
+        advanced_root.setSpacing(10)
 
         # ── RT Limits (permissions) ───────────────────────────────────────
-        limits_box = QGroupBox("RT Limits (permissions)")
+        limits_box = QGroupBox("RT Permissions")
+        self._style_section_box(limits_box)
         limits_grid = QGridLayout(limits_box)
         limits_grid.setSpacing(8)
-        limits_grid.setContentsMargins(10, 6, 10, 10)
+        limits_grid.setContentsMargins(12, 24, 12, 12)
         limits_grid.setColumnStretch(1, 1)
         limits_grid.setColumnStretch(3, 1)
+
+        limits_intro = QLabel(
+            "Only needed for Full RT or a custom setup that writes PAM limits."
+        )
+        limits_intro.setWordWrap(True)
+        limits_intro.setStyleSheet(PIPEWIRE_RT_MUTED_TEXT_STYLE)
+        limits_grid.addWidget(limits_intro, 0, 0, 1, 4)
 
         self.limits_enabled = QCheckBox("Enable RT limits (PAM limits)")
         limits_enabled = limits_current.get("enabled")
@@ -576,9 +734,9 @@ class PipeWireRtSetupDialog(QDialog):
             "Disable to avoid writing limits; use Reset to remove existing limits."
         )
         self.limits_enabled.stateChanged.connect(self._on_limits_toggle)
-        limits_grid.addWidget(self.limits_enabled, 0, 0, 1, 4)
+        limits_grid.addWidget(self.limits_enabled, 1, 0, 1, 4)
 
-        limits_grid.addWidget(QLabel("Group"), 1, 0)
+        limits_grid.addWidget(QLabel("Group"), 2, 0)
         self.group = QComboBox()
         self.group.addItem("Auto (pipewire \u2192 audio \u2192 realtime)", "")
         for g in ["pipewire", "audio", "realtime"]:
@@ -588,140 +746,243 @@ class PipeWireRtSetupDialog(QDialog):
             idx = self.group.findData(current_group)
             if idx >= 0:
                 self.group.setCurrentIndex(idx)
-        limits_grid.addWidget(self.group, 1, 1, 1, 3)
+        limits_grid.addWidget(self.group, 2, 1, 1, 3)
 
-        limits_grid.addWidget(QLabel("rtprio"), 2, 0)
+        limits_grid.addWidget(QLabel("RT priority ceiling"), 3, 0)
         self.rtprio = QLineEdit(str(limits_current.get("rtprio") or ""))
         self.rtprio.setPlaceholderText("95")
-        limits_grid.addWidget(self.rtprio, 2, 1)
-        limits_grid.addWidget(QLabel("nice"), 2, 2)
+        limits_grid.addWidget(self.rtprio, 3, 1)
+        limits_grid.addWidget(QLabel("Nice limit"), 3, 2)
         self.nice = QLineEdit(str(limits_current.get("nice") or ""))
         self.nice.setPlaceholderText("-19")
-        limits_grid.addWidget(self.nice, 2, 3)
+        limits_grid.addWidget(self.nice, 3, 3)
 
-        limits_grid.addWidget(QLabel("memlock (KB)"), 3, 0)
+        limits_grid.addWidget(QLabel("Memory lock limit (KB)"), 4, 0)
         self.memlock = QLineEdit(str(limits_current.get("memlock") or ""))
         self.memlock.setPlaceholderText("4194304")
-        limits_grid.addWidget(self.memlock, 3, 1, 1, 3)
+        limits_grid.addWidget(self.memlock, 4, 1, 1, 3)
 
-        root.addWidget(limits_box)
+        advanced_root.addWidget(limits_box)
         self._on_limits_toggle()
 
         # ── module-rt behavior ────────────────────────────────────────────
-        module_box = QGroupBox("module-rt behavior")
+        module_box = QGroupBox("Advanced PipeWire RT Options")
+        self._style_section_box(module_box)
         module_grid = QGridLayout(module_box)
         module_grid.setSpacing(8)
-        module_grid.setContentsMargins(10, 6, 10, 10)
+        module_grid.setContentsMargins(12, 24, 12, 12)
         module_grid.setColumnStretch(1, 1)
         module_grid.setColumnStretch(3, 1)
 
-        module_grid.addWidget(QLabel("rt.prio"), 0, 0)
+        module_intro = QLabel(
+            "Fine-tune how PipeWire asks for realtime scheduling. Leave blanks to keep PipeWire defaults."
+        )
+        module_intro.setWordWrap(True)
+        module_intro.setStyleSheet(PIPEWIRE_RT_MUTED_TEXT_STYLE)
+        module_grid.addWidget(module_intro, 0, 0, 1, 4)
+
+        module_grid.addWidget(QLabel("PipeWire RT priority"), 1, 0)
         self.rt_prio = QLineEdit(str(module_current.get("rt_prio") or ""))
         self.rt_prio.setPlaceholderText("88")
-        module_grid.addWidget(self.rt_prio, 0, 1)
-        module_grid.addWidget(QLabel("nice.level"), 0, 2)
+        module_grid.addWidget(self.rt_prio, 1, 1)
+        module_grid.addWidget(QLabel("Nice level"), 1, 2)
         self.nice_level = QLineEdit(str(module_current.get("nice_level") or ""))
         self.nice_level.setPlaceholderText("-11")
-        module_grid.addWidget(self.nice_level, 0, 3)
+        module_grid.addWidget(self.nice_level, 1, 3)
 
-        module_grid.addWidget(QLabel("rt.time.soft"), 1, 0)
+        module_grid.addWidget(QLabel("Soft RT budget"), 2, 0)
         self.rt_soft = QLineEdit(str(module_current.get("rt_time_soft") or ""))
-        self.rt_soft.setPlaceholderText("-1 (unlimited)")
-        module_grid.addWidget(self.rt_soft, 1, 1)
-        module_grid.addWidget(QLabel("rt.time.hard"), 1, 2)
+        self.rt_soft.setPlaceholderText("leave blank")
+        module_grid.addWidget(self.rt_soft, 2, 1)
+        module_grid.addWidget(QLabel("Hard RT budget"), 2, 2)
         self.rt_hard = QLineEdit(str(module_current.get("rt_time_hard") or ""))
-        self.rt_hard.setPlaceholderText("-1 (unlimited)")
-        module_grid.addWidget(self.rt_hard, 1, 3)
+        self.rt_hard.setPlaceholderText("leave blank")
+        module_grid.addWidget(self.rt_hard, 2, 3)
 
-        module_grid.addWidget(QLabel("uclamp.min"), 2, 0)
+        module_grid.addWidget(QLabel("Util clamp min"), 3, 0)
         self.uclamp_min = QLineEdit(str(module_current.get("uclamp_min") or ""))
-        module_grid.addWidget(self.uclamp_min, 2, 1)
-        module_grid.addWidget(QLabel("uclamp.max"), 2, 2)
+        self.uclamp_min.setPlaceholderText("leave blank")
+        module_grid.addWidget(self.uclamp_min, 3, 1)
+        module_grid.addWidget(QLabel("Util clamp max"), 3, 2)
         self.uclamp_max = QLineEdit(str(module_current.get("uclamp_max") or ""))
-        module_grid.addWidget(self.uclamp_max, 2, 3)
+        self.uclamp_max.setPlaceholderText("leave blank")
+        module_grid.addWidget(self.uclamp_max, 3, 3)
 
-        toggles_label = QLabel("RT mechanism toggles  (\u2015 = not set, uses PipeWire default = true):")
-        toggles_label.setStyleSheet("color: palette(mid);")
-        module_grid.addWidget(toggles_label, 3, 0, 1, 4)
+        toggles_label = QLabel("Fallback paths and optional hints  (\u2015 = keep PipeWire default)")
+        toggles_label.setStyleSheet(PIPEWIRE_RT_MUTED_TEXT_STYLE)
+        module_grid.addWidget(toggles_label, 4, 0, 1, 4)
 
-        self.rlimits_enabled = QCheckBox("rlimits.enabled")
+        self.rlimits_enabled = QCheckBox("Use PAM/rlimits path")
         self.rlimits_enabled.setTristate(True)
         _set_tristate_default(self.rlimits_enabled, module_current.get("rlimits_enabled"))
         self.rlimits_enabled.setToolTip(
+            "Underlying key: rlimits.enabled\n"
             "Try to acquire realtime scheduling via OS/PAM limits (primary path).\n"
             "Indeterminate (\u2015) = PipeWire default (true)."
         )
-        module_grid.addWidget(self.rlimits_enabled, 4, 0, 1, 2)
+        module_grid.addWidget(self.rlimits_enabled, 5, 0, 1, 2)
 
-        self.rtkit_enabled = QCheckBox("rtkit.enabled")
+        self.rtkit_enabled = QCheckBox("Allow RTKit fallback")
         self.rtkit_enabled.setTristate(True)
         _set_tristate_default(self.rtkit_enabled, module_current.get("rtkit_enabled"))
         self.rtkit_enabled.setToolTip(
+            "Underlying key: rtkit.enabled\n"
             "Fall back to the RTKit daemon for realtime scheduling.\n"
             "Indeterminate (\u2015) = PipeWire default (true)."
         )
-        module_grid.addWidget(self.rtkit_enabled, 4, 2, 1, 2)
+        module_grid.addWidget(self.rtkit_enabled, 5, 2, 1, 2)
 
-        self.rtportal_enabled = QCheckBox("rtportal.enabled")
+        self.rtportal_enabled = QCheckBox("Allow realtime portal fallback")
         self.rtportal_enabled.setTristate(True)
         _set_tristate_default(self.rtportal_enabled, module_current.get("rtportal_enabled"))
         self.rtportal_enabled.setToolTip(
+            "Underlying key: rtportal.enabled\n"
             "Fall back to the XDG realtime portal for realtime scheduling.\n"
             "Indeterminate (\u2015) = PipeWire default (true)."
         )
-        module_grid.addWidget(self.rtportal_enabled, 5, 0, 1, 2)
+        module_grid.addWidget(self.rtportal_enabled, 6, 0, 1, 2)
 
-        self.cpu_zero_denormals = QCheckBox("cpu.zero.denormals")
+        self.cpu_zero_denormals = QCheckBox("Zero denormals hint")
         self.cpu_zero_denormals.setTristate(True)
         PipeWireRtModuleDialog._set_tristate(
             self.cpu_zero_denormals,
             module_current.get("cpu_zero_denormals"),
         )
         self.cpu_zero_denormals.setToolTip(
+            "Underlying key: cpu.zero.denormals\n"
             "Set denormal handling hint for module-rt where supported.\n"
             "Indeterminate (\u2015) = not set."
         )
-        module_grid.addWidget(self.cpu_zero_denormals, 5, 2, 1, 2)
+        module_grid.addWidget(self.cpu_zero_denormals, 6, 2, 1, 2)
 
-        root.addWidget(module_box)
+        advanced_root.addWidget(module_box)
+        root.addWidget(self._advanced_panel)
         root.addStretch(1)
 
         btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        status_btn = btns.addButton("Status Check...", QDialogButtonBox.ActionRole)
+        status_btn.clicked.connect(self._show_status_check)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
-        # Connect preset change last, after all widgets are constructed.
-        self._preset_combo.currentIndexChanged.connect(self._on_preset_changed)
-        self._update_preset_desc()
+        preset_key = infer_pipewire_rt_preset(limits_current, module_current)
+        self._advanced_toggle.toggled.connect(self._on_advanced_toggled)
+        self._select_preset(preset_key, apply_values=False, reveal_advanced=False)
 
     # ── Preset helpers ────────────────────────────────────────────────────
 
-    def _update_preset_desc(self) -> None:
-        preset = self._preset_combo.currentData()
-        self._preset_desc.setText(self._PRESETS.get(preset or "", {}).get("desc", ""))
+    @staticmethod
+    def _style_section_box(box: QGroupBox) -> None:
+        box.setStyleSheet(
+            """
+            QGroupBox {
+                background-color: #232629;
+                border: 1px solid #343942;
+                border-radius: 10px;
+                margin-top: 16px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 6px;
+                color: #f0f0f0;
+                font-weight: 600;
+            }
+            """
+        )
 
-    def _on_preset_changed(self) -> None:
-        preset = self._preset_combo.currentData()
-        self._update_preset_desc()
-        if preset == "full_rt":
+    def _build_preset_button(self, preset_key: str) -> QPushButton:
+        info = self._PRESETS[preset_key]
+        btn = QPushButton(f"{info['label']}\n{info['brief']}")
+        btn.setCheckable(True)
+        btn.setMinimumHeight(72)
+        btn.setStyleSheet(
+            """
+            QPushButton {
+                text-align: left;
+                padding: 10px 12px;
+                border-radius: 10px;
+                border: 1px solid #343942;
+                background-color: #20252b;
+                color: #e8e8e8;
+            }
+            QPushButton:hover {
+                background-color: #252b33;
+            }
+            QPushButton:checked {
+                background-color: #273649;
+                border: 1px solid #6b93bf;
+                color: #f3f6fb;
+            }
+            """
+        )
+        btn.clicked.connect(lambda _checked=False, key=preset_key: self._on_preset_button_clicked(key))
+        self._preset_buttons[preset_key] = btn
+        return btn
+
+    def _update_preset_copy(self) -> None:
+        preset = self._selected_preset
+        self._preset_desc.setText(self._PRESETS.get(preset or "", {}).get("desc", ""))
+        if preset == "safe_rt":
+            summary = (
+                "<b>Best for:</b> most systems and first-time setup.<br>"
+                "<b>Changes:</b> keeps PipeWire on RTKit/portal fallbacks and does not write PAM limits."
+            )
+        elif preset == "full_rt":
+            summary = (
+                "<b>Best for:</b> dedicated audio machines where you want the strongest RT path.<br>"
+                "<b>Changes:</b> writes PAM limits, then keeps rlimits, portal, and RTKit available."
+            )
+        else:
+            summary = (
+                "<b>Best for:</b> uncommon setups that need manual limits or fallback tuning.<br>"
+                "<b>Tip:</b> start from Safe RT or Full RT, then open Advanced tuning only if you need to fine-tune."
+            )
+        self._preset_summary.setText(summary)
+
+    def _set_advanced_visible(self, visible: bool) -> None:
+        self._advanced_toggle.blockSignals(True)
+        self._advanced_toggle.setChecked(bool(visible))
+        self._advanced_toggle.blockSignals(False)
+        self._advanced_panel.setVisible(visible)
+        self._advanced_toggle.setArrowType(Qt.DownArrow if visible else Qt.RightArrow)
+
+    def _select_preset(self, preset: str, *, apply_values: bool, reveal_advanced: bool) -> None:
+        self._selected_preset = preset
+        for key, btn in self._preset_buttons.items():
+            btn.blockSignals(True)
+            btn.setChecked(key == preset)
+            btn.blockSignals(False)
+        self._update_preset_copy()
+        if apply_values and preset == "full_rt":
             self._apply_full_rt()
-        elif preset == "safe_rt":
+        elif apply_values and preset == "safe_rt":
             self._apply_safe_rt()
-        # "custom" → leave form as-is
+        self._set_advanced_visible(reveal_advanced)
+
+    def _on_preset_button_clicked(self, preset: str) -> None:
+        self._select_preset(
+            preset,
+            apply_values=preset in ("safe_rt", "full_rt"),
+            reveal_advanced=(preset == "custom"),
+        )
+
+    def _on_advanced_toggled(self, checked: bool) -> None:
+        self._set_advanced_visible(bool(checked))
 
     def _apply_full_rt(self) -> None:
         """Populate form with the upstream-recommended Full RT settings."""
         self.limits_enabled.setChecked(True)
         self._on_limits_toggle()
-        idx = self.group.findData("pipewire")
+        idx = self.group.findData(PIPEWIRE_RT_FULL_LIMITS["group"])
         if idx >= 0:
             self.group.setCurrentIndex(idx)
-        self.rtprio.setText("95")
-        self.nice.setText("-19")
-        self.memlock.setText("4194304")
-        self.rt_prio.setText("88")
-        self.nice_level.setText("-11")
+        self.rtprio.setText(str(PIPEWIRE_RT_FULL_LIMITS["rtprio"]))
+        self.nice.setText(str(PIPEWIRE_RT_FULL_LIMITS["nice"]))
+        self.memlock.setText(str(PIPEWIRE_RT_FULL_LIMITS["memlock"]))
+        self.rt_prio.setText(str(PIPEWIRE_RT_FULL_MODULE["rt_prio"]))
+        self.nice_level.setText(str(PIPEWIRE_RT_FULL_MODULE["nice_level"]))
         self.rt_soft.setText("")
         self.rt_hard.setText("")
         self.uclamp_min.setText("")
@@ -729,33 +990,33 @@ class PipeWireRtSetupDialog(QDialog):
         self.rlimits_enabled.setCheckState(Qt.Checked)
         self.rtkit_enabled.setCheckState(Qt.Checked)
         self.rtportal_enabled.setCheckState(Qt.Checked)
-        PipeWireRtModuleDialog._set_tristate(self.cpu_zero_denormals, None)
+        PipeWireRtModuleDialog._set_tristate(
+            self.cpu_zero_denormals,
+            PIPEWIRE_RT_FULL_MODULE["cpu_zero_denormals"],
+        )
 
     def _apply_safe_rt(self) -> None:
         """Populate form with Safe RT (RTKit/portal only) settings."""
         self.limits_enabled.setChecked(False)
         self._on_limits_toggle()
         group = self._limits_defaults.get("group")
-        if group:
-            idx = self.group.findData(group)
-            self.group.setCurrentIndex(idx if idx >= 0 else 0)
-        else:
-            self.group.setCurrentIndex(0)
+        idx = self.group.findData(group) if group else -1
+        self.group.setCurrentIndex(idx if idx >= 0 else 0)
         self.rtprio.setText(str(self._limits_defaults.get("rtprio") or ""))
         self.nice.setText(str(self._limits_defaults.get("nice") or ""))
         self.memlock.setText(str(self._limits_defaults.get("memlock") or ""))
-        self.rt_prio.setText(str(self._module_defaults.get("rt_prio") or ""))
-        self.rt_soft.setText(str(self._module_defaults.get("rt_time_soft") or ""))
-        self.rt_hard.setText(str(self._module_defaults.get("rt_time_hard") or ""))
-        self.nice_level.setText(str(self._module_defaults.get("nice_level") or ""))
-        self.uclamp_min.setText(str(self._module_defaults.get("uclamp_min") or ""))
-        self.uclamp_max.setText(str(self._module_defaults.get("uclamp_max") or ""))
+        self.rt_prio.setText(str(PIPEWIRE_RT_SAFE_MODULE["rt_prio"]))
+        self.rt_soft.setText("")
+        self.rt_hard.setText("")
+        self.nice_level.setText(str(PIPEWIRE_RT_SAFE_MODULE["nice_level"]))
+        self.uclamp_min.setText("")
+        self.uclamp_max.setText("")
         self.rlimits_enabled.setCheckState(Qt.Unchecked)
         self.rtkit_enabled.setCheckState(Qt.Checked)
         self.rtportal_enabled.setCheckState(Qt.Checked)
         PipeWireRtModuleDialog._set_tristate(
             self.cpu_zero_denormals,
-            self._module_defaults.get("cpu_zero_denormals"),
+            PIPEWIRE_RT_SAFE_MODULE["cpu_zero_denormals"],
         )
 
     # ── Slot / helpers ────────────────────────────────────────────────────

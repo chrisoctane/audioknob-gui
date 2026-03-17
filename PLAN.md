@@ -241,11 +241,11 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - The **Main** tab also includes the TSC kernel timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock.
-- Use the **Cores & IRQ** tab to focus on core/IRQ tuning plus RT throttling, C-state limiters, and core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`).
-- The **Dev** tab exposes experimental knobs (PipeWire/WirePlumber advanced tuning, PipeWire pulse latency/rules, PipeWire profiler module, systemd service RT drop-ins, kernel RT extras excluding TSC timing knobs, RTKit placeholder). These are optional and may require manual configuration.
-- PipeWire **RT Setup** includes a preset dropdown (Full RT, Safe RT, Custom) with descriptive labels, an RT limits toggle, and module-rt fields including uclamp and denormal handling toggles. The dialog uses a compact two-column grid layout (520×600).
+- Use the **Cores & IRQ** tab to focus on core/IRQ tuning plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and PipeWire/WirePlumber affinity controls (`pipewire_data_loop_affinity`, `systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`).
+- The **Dev** tab exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber advanced tuning, PipeWire pulse latency/rules, PipeWire profiler module, kernel RT extras excluding TSC timing knobs, RTKit placeholder). These are optional and may require manual configuration.
+- PipeWire **RT** is the single guided entry point for PipeWire realtime setup. The dialog leads with `Safe RT`, `Full RT`, and `Custom` presets in plain language, keeps advanced limits/module fields behind an explicit reveal, and points CPU-affinity tuning back to **Cores & IRQ**.
 - Several **Cores & IRQ** knobs are intentionally config-required before Apply (workqueue cpumask, user.slice AllowedCPUs, irqbalance banned CPUs).
-- Several **Dev** knobs are intentionally config-required before Apply (PipeWire/WirePlumber systemd RT, PipeWire pulse latency/rules).
+- Several **Dev** knobs are intentionally config-required before Apply (PipeWire pulse latency/rules).
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - **Linked core plan** is enabled by default and ties core-selection knobs to one shared model:
   - audio-role knobs use the selected audio cores

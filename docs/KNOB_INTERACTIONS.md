@@ -129,6 +129,7 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
   - **Full RT** (PAM limits + all three RT paths: rlimits → portal → RTKit)
   - **Safe RT** (RTKit/portal only, no PAM limits required)
   - **Custom** (manual field entry; blank fields keep PipeWire defaults)
+- The visible `PipeWire RT` dialog is preset-first and keeps the detailed fields behind an explicit advanced reveal.
 - If module fields are left blank, only limits are applied.
 - `pipewire_pulse_latency` sets global `pulse.properties` defaults; per-app
   `pipewire_pulse_app_rules` can intentionally override those defaults.
@@ -138,6 +139,7 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
   with module-rt policy; keep scheduling priorities consistent to avoid
   contradictory policy layers.
 - Data loop affinity should align with CPU isolation/pinning choices to avoid jitter.
+- Affinity-oriented PipeWire knobs (`pipewire_data_loop_affinity`, `systemd_*_service_rt`) are surfaced in the **Cores & IRQ** tab for shared CPU-planning workflow.
 - Simple AudioKnob uses a fixed Safe RT preset bundle (group `audio`, conservative RT-module fields, fixed mlock policy).
 
 ### Realtime clock device access

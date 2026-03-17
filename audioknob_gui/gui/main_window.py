@@ -444,11 +444,8 @@ class MainWindow(TableMixin, QMainWindow):
             "kernel_nmi_watchdog_off",
             "kernel_nosoftlockup",
             "kernel_nosmt",
-            "systemd_pipewire_service_rt",
-            "systemd_wireplumber_service_rt",
             "pipewire_clock_constraints",
             PIPEWIRE_MLOCK_POLICY,
-            "pipewire_data_loop_affinity",
             "wireplumber_alsa_usb_tuning",
             "pipewire_pro_audio_profile",
             "pipewire_pulse_latency",
@@ -477,6 +474,9 @@ class MainWindow(TableMixin, QMainWindow):
             "kernel_workqueue_cpumask",
             "cgroup_user_slice_allowed_cpus",
             "irqbalance_banned_cpulist",
+            "systemd_pipewire_service_rt",
+            "systemd_wireplumber_service_rt",
+            "pipewire_data_loop_affinity",
         }
 
     def _on_view_tab_changed(self, index: int) -> None:

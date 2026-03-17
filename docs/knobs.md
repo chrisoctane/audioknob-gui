@@ -181,7 +181,7 @@ Sources
 Decision (`AG-003` resolved in `docs/internal/audit/2026-02-11/ALIGNMENT_GAP_TRACKER.md`)
 - Keep a conservative fixed preset as the default policy:
   - `rtprio=95`, `nice=-19`, `memlock=4194304`.
-- Allow explicit override via PipeWire RT Setup config fields when users need
+- Allow explicit override via PipeWire RT config fields when users need
   different values.
 - Keep dependency rule explicit in docs and UI behavior: RLIMIT RT priority
   must be at or above `module.rt.args rt.prio`; otherwise PipeWire falls back
@@ -227,10 +227,10 @@ Notes
   - /usr/share/pipewire/client-rt.conf
   - /usr/share/pipewire/jack.conf
   Use drop-ins rather than editing these vendor files.
-- UI note: the app now exposes a combined **PipeWire RT Setup** knob that configures
-  RT limits and module-rt together for simpler setup; the standalone knobs are
-  hidden in the UI but retained for worker operations. RT limits can be disabled
-  in the setup dialog (Safe RT preset uses RTKit/portal only).
+- UI note: the app now exposes a combined **PipeWire RT** knob that configures
+  RT limits and module-rt together through a preset-first guided dialog; the
+  standalone knobs are hidden in the UI but retained for worker operations.
+  RT limits can be disabled in the setup dialog (Safe RT preset uses RTKit/portal only).
 
 -------------------------------------------------------------------------------
 ## WirePlumber ALSA USB Period/Buffer Tuning

@@ -60,17 +60,17 @@
 - **Preset menu dot markers** - Tools → Presets menu and actions include matching blue/green dot icons for quick identification.
 - **Reference partial handling** - reference status `partial` is treated as non-authoritative for preset-match hints.
 - **Distro-aware kernel cmdline** - detects boot system (GRUB2-BLS, GRUB2, systemd-boot)
-- **PipeWire configuration** - quantum/sample rate plus advanced dev knobs (clock constraints, mlock policy, RT setup, data loop affinity, pulse latency defaults/rules, profiler module). Separate RT limits/module knobs are hidden in the UI.
-- **PipeWire RT Setup presets** - preset dropdown (Full RT, Safe RT, Custom) with descriptive labels, RT limits toggle, and module-rt fields in a compact two-column grid layout (520×600).
-- **Systemd RT service drop-ins (dev)** - PipeWire and WirePlumber per-service scheduling/CPU affinity drop-ins with configurable policy/priority/core lists.
-- **CPU/IRQ partitioning extras (Cores & IRQ)** - workqueue cpumask, `user.slice` AllowedCPUs, and irqbalance banned CPU list knobs now available in Cores & IRQ.
+- **PipeWire configuration** - quantum/sample rate plus advanced knobs for clock constraints, mlock policy, PipeWire RT, pulse latency defaults/rules, profiler module, and affinity-oriented PipeWire/WirePlumber tuning. Separate RT limits/module knobs remain hidden in the UI behind the composite PipeWire RT row.
+- **PipeWire RT guided dialog** - the visible `PipeWire RT` row opens a preset-first dialog (`Safe RT`, `Full RT`, `Custom`) with plain-language summaries, an explicit advanced-fields reveal, and a cue that CPU-affinity tuning lives in `Cores & IRQ`.
+- **Systemd RT service drop-ins (Cores & IRQ)** - PipeWire and WirePlumber per-service scheduling/CPU affinity drop-ins with configurable policy/priority/core lists.
+- **CPU/IRQ partitioning extras (Cores & IRQ)** - workqueue cpumask, `user.slice` AllowedCPUs, irqbalance banned CPU list knobs, and PipeWire/WirePlumber affinity-related controls (`pipewire_data_loop_affinity`, `systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`) are available in Cores & IRQ.
 - **WirePlumber tuning (dev)** - ALSA USB period/buffer rules via drop-in
 - **Pro Audio profile (dev)** - per-device toggle via wpctl with pactl fallback; reset restores prior profile
 - **XRUN monitor** - streams live `pw-top` data into the app (uses the latest batch iteration to avoid zeroed metrics; pw-dump fallback for QUANT/RATE when batch output is blank; ERR summary lists ERR/ID/NAME; Reset Count sets a local baseline)
 - Jitter monitor is modeless, shows a live per-thread table with rolling Act samples (min/median/avg/p95/max), and includes an Always-on-top toggle.
 - **User service masking** - disable GNOME Tracker, KDE Baloo
 - **IRQ pinning** - per-device IRQ affinity for audio devices (PCI direct; USB controller opt-in) plus a housekeeping sweep that moves other IRQs off audio cores; persists via a boot-time systemd oneshot
-- **Cores & IRQ view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), plus RT throttling, C-state limiters, and core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`); the IRQ Overview button is in the Audio Core Plan header so it remains available while the plan body is collapsed
+- **Cores & IRQ view** - focused view with an Audio Core Plan (auto-set core selection preferring cores 2+ and keeping SMT sibling cores together, auto housekeeping toggle, and auto-queue Apply for affected knobs), plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and the PipeWire/WirePlumber affinity knobs; the IRQ Overview button is in the Audio Core Plan header so it remains available while the plan body is collapsed
 - **Linked core plan (default ON)** - core-selection knobs are tied to one shared audio/housekeeping plan by default: audio-role knobs reuse the selected audio cores, housekeeping-role knobs use the inverse set; users can disable linking for expert per-knob overrides.
 - **Core clear-on-apply behavior** - clearing core selections and applying now executes explicit clear/reset behavior for core-policy knobs: kernel core cmdline params are removed, IRQ pinning resets to kernel default masks, irqbalance banned CPU policy entries are removed, `user.slice` AllowedCPUs drop-in is removed, and workqueue cpumask resets to all present CPUs.
 - **IRQ Overview table layout** - IRQ assignments use fixed-width aligned columns (IRQ, Affinity, Mode, per-core count columns `0..N-1`, Description) with horizontal scrolling; per-core counts are separated from description text, core-map cells are fixed-size so larger values do not shift alignment, the IRQ ID column keeps enough width for common 3-4 digit IRQ IDs, IRQ rows use compact heights, very large per-core counts render truncated with tooltip access to full values, header height scales with the overview font so titles do not clip, a hover crosshair guide (click-lock/unlock) helps map IRQ rows to core columns, and a dialog-local font spinner adjusts only this overview
@@ -81,7 +81,7 @@
 - **System parity audit map (draft)** - `docs/KNOB_SYSTEM_AUDIT_MAP.md` defines system-by-system parity rules and audit checklists for errors/conflicts/improvements.
 - **Info warnings** - RTIRQ info warns if IRQs are not threaded; IRQ Pinning info warns if irqbalance is active
 - **PipeWire dev info** - PipeWire dev knobs include clearer info text describing what each knob changes, when it applies, and whether configuration is required.
-- **PipeWire RT Setup dirty state** - changing RT setup config marks the knob as needing apply so the action shows Apply even if the last status was applied.
+- **PipeWire RT dirty state** - changing PipeWire RT config marks the knob as needing apply so the action shows Apply even if the last status was applied.
 - **PipeWire config status** - unconfigured PipeWire/WirePlumber knobs report not_applied; Pro Audio reports not_applied when no device is selected.
 - **Conflict map** - `docs/KNOB_INTERACTIONS.md` lists conflicts, dependencies, and blockers; UI warnings align with it
 - **Conflict prompt** - apply flow detects known conflicts and offers Apply + reset conflicts / Apply anyway / Cancel / Details.
@@ -117,7 +117,7 @@ Notes:
   - **Full mode**: existing tabbed table UI
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by `Tools -> Locks -> Advanced knobs`.
 - Req./Risk/CLI are technical columns hidden by default; enable them with `Tools -> Locks -> Technical columns`.
-- Header tabs switch between **Main**, **Cores & IRQ**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates and includes TSC timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock, the Cores & IRQ view filters to core-related knobs plus RT throttling, C-state limiters, and core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`) and shows the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs (PipeWire/WirePlumber tuning, kernel RT extras excluding TSC timing knobs, RTKit placeholder). Preset actions live in Tools → Presets.
+- Header tabs switch between **Main**, **Cores & IRQ**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates and includes TSC timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock, the Cores & IRQ view filters to core-related knobs plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and PipeWire/WirePlumber affinity controls while showing the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber tuning, kernel RT extras excluding TSC timing knobs, RTKit placeholder). Preset actions live in Tools → Presets.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Cores & IRQ view.
 - Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
@@ -126,7 +126,7 @@ Notes:
 - Dependent knobs are locked until dependencies are applied; tooltip shows required knob names.
 - PipeWire config knobs (clock constraints, memory lock, RT module, pulse latency, pulse app rules, data loops) show a locked Apply action until configured; Configure stays available.
 - Core partition knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`) show a locked Apply action until configured; Configure stays available.
-- New Dev service-RT knobs (`systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`) show a locked Apply action until configured; Configure stays available.
+- New Cores & IRQ service-RT knobs (`systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`) show a locked Apply action until configured; Configure stays available.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Status keeps grouped headers by default; Req./Risk grouping is available when technical columns are shown.
@@ -200,7 +200,7 @@ Next phases (planned, incremental):
 - QjackCtl info popup now reports the active preset explicitly and suppresses default/preserved preset noise when none are active.
 - Root worker reads GUI state from the invoking user when run via pkexec, so root knobs with per-user config (IRQ pinning) apply correctly.
 - RT Limits now shows “Reboot required” until the session limits are active (logout/login or reboot).
-- PipeWire RT Setup Safe RT preset now resets all fields in the setup dialog back to the preset/default values.
+- PipeWire RT Safe RT preset now resets all fields in the setup dialog back to the preset/default values.
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - Power Profile tuned mode now masks `power-profiles-daemon.service` so D-Bus activation cannot stop tuned after apply/reboot, and reset/factory restore unmask ppd before restoring the prior backend/profile.
 - openSUSE local RPM builds now package tracked working-tree content instead of `git HEAD`, so local uncommitted fixes are included in the built package; untracked files remain excluded on purpose.

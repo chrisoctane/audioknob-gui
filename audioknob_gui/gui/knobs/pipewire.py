@@ -358,7 +358,7 @@ def configure_rt_setup_dialog(ui) -> None:
     ui._knob_statuses[PIPEWIRE_RT_MODULE_TUNING] = "not_applied"
     ui._knob_statuses[PIPEWIRE_RT_SETUP] = "not_applied"
     save_state(ui.state)
-    QMessageBox.information(ui, "Saved", "Saved PipeWire RT setup. Apply to take effect.")
+    QMessageBox.information(ui, "Saved", "Saved PipeWire RT settings. Apply to take effect.")
 
 
 def configure_data_loops_dialog(ui) -> None:
@@ -601,9 +601,9 @@ def info_extra_html(ui, knob) -> str:
         return (
             "<h4>What this does</h4>"
             "<ul>"
+            "<li>Guides PipeWire realtime setup from one dialog.</li>"
             "<li>Sets RT limits (permissions) and module-rt behavior together.</li>"
-            "<li>Limits can be disabled; Safe RT preset uses RTKit/portal only.</li>"
-            "<li>Module-rt settings apply only for fields you fill in.</li>"
+            "<li>Affinity-related PipeWire tuning now lives in the Cores & IRQ tab.</li>"
             "</ul>"
             "<p><b>Status:</b></p>"
             "<ul>"
@@ -611,7 +611,7 @@ def info_extra_html(ui, knob) -> str:
             f"<li>RT module: {module}</li>"
             f"<li>Overall: {overall}</li>"
             "</ul>"
-            "<p><b>Tip:</b> Configure first, then Apply. Use Reset to remove existing limits.</p>"
+            "<p><b>Tip:</b> Pick Safe RT or Full RT first, then open advanced fields only if you need manual tuning.</p>"
         )
     if kid == "pipewire_clock_constraints":
         return (

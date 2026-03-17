@@ -66,6 +66,8 @@ class _DummyViewFilter:
             SimpleNamespace(id="kernel_tsc_reliable"),
             SimpleNamespace(id="kernel_preempt_full"),
             SimpleNamespace(id="systemd_pipewire_service_rt"),
+            SimpleNamespace(id="systemd_wireplumber_service_rt"),
+            SimpleNamespace(id="pipewire_data_loop_affinity"),
             SimpleNamespace(id="swappiness"),
         ]
 
@@ -135,7 +137,9 @@ def test_core_partition_knobs_are_in_cores_tab() -> None:
     assert "kernel_workqueue_cpumask" in visible
     assert "cgroup_user_slice_allowed_cpus" in visible
     assert "irqbalance_banned_cpulist" in visible
-    assert "systemd_pipewire_service_rt" not in visible
+    assert "systemd_pipewire_service_rt" in visible
+    assert "systemd_wireplumber_service_rt" in visible
+    assert "pipewire_data_loop_affinity" in visible
 
 
 def test_core_partition_knobs_are_not_in_dev_tab() -> None:
@@ -146,7 +150,9 @@ def test_core_partition_knobs_are_not_in_dev_tab() -> None:
     assert "kernel_workqueue_cpumask" not in visible
     assert "cgroup_user_slice_allowed_cpus" not in visible
     assert "irqbalance_banned_cpulist" not in visible
-    assert "systemd_pipewire_service_rt" in visible
+    assert "systemd_pipewire_service_rt" not in visible
+    assert "systemd_wireplumber_service_rt" not in visible
+    assert "pipewire_data_loop_affinity" not in visible
 
 
 def test_tsc_knobs_are_in_main_tab() -> None:

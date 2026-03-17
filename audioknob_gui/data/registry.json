@@ -1037,7 +1037,7 @@
       "depends_on": [
         "audio_group_membership"
       ],
-      "description": "[i] configures PipeWire RT limits + module-rt behavior together.\n[r] configure before apply; module-rt fields are optional.\n[+] simplifies realtime setup for PipeWire.\n[-] requires log out/in or reboot for limits to take effect.",
+      "description": "[i] guided PipeWire RT setup for permissions and fallback behavior.\n[r] configure before apply; advanced fields are optional.\n[+] keeps the main PipeWire RT choices in one place.\n[-] enabling PAM limits still requires log out/in or reboot.",
       "id": "pipewire_rt_setup",
       "impl": {
         "kind": "read_only",
@@ -1050,7 +1050,7 @@
       "requires_reboot": false,
       "requires_root": true,
       "risk_level": "medium",
-      "title": "PipeWire RT Setup"
+      "title": "PipeWire RT"
     },
     {
       "capabilities": {
