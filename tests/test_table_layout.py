@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from audioknob_gui.gui.main_window import resolve_info_panel_knob_id
 from audioknob_gui.gui.table import (
+    TABLE_CELL_H_MARGIN,
     TABLE_CELL_V_MARGIN,
     TABLE_CONTROL_MIN_HEIGHT,
+    TABLE_FLUSH_SURFACE_H_MARGIN,
+    TABLE_FLUSH_SURFACE_V_MARGIN,
     compute_table_row_min_height,
 )
 
@@ -14,3 +18,21 @@ def test_compute_table_row_min_height_protects_control_chrome() -> None:
 
 def test_compute_table_row_min_height_scales_with_font_height() -> None:
     assert compute_table_row_min_height(32) > compute_table_row_min_height(16)
+
+
+def test_flush_surface_insets_stay_smaller_than_standard_cell_padding() -> None:
+    assert TABLE_FLUSH_SURFACE_H_MARGIN < TABLE_CELL_H_MARGIN
+    assert TABLE_FLUSH_SURFACE_V_MARGIN < TABLE_CELL_V_MARGIN
+    assert TABLE_FLUSH_SURFACE_V_MARGIN >= 1
+
+
+def test_resolve_info_panel_knob_id_prefers_selected_row() -> None:
+    assert resolve_info_panel_knob_id("pipewire_rt_setup", ["pipewire_rt_setup"], None) == "pipewire_rt_setup"
+
+
+def test_resolve_info_panel_knob_id_reuses_current_when_visible() -> None:
+    assert resolve_info_panel_knob_id(None, ["irq_pinning", "rtirq_enable"], "rtirq_enable") == "rtirq_enable"
+
+
+def test_resolve_info_panel_knob_id_falls_back_to_first_visible() -> None:
+    assert resolve_info_panel_knob_id(None, ["irq_pinning", "rtirq_enable"], "missing") == "irq_pinning"

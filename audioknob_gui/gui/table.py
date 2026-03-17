@@ -35,10 +35,12 @@ from audioknob_gui.knob_ids import (
     POWER_PROFILE_PERFORMANCE,
 )
 
-TABLE_CONTROL_MIN_HEIGHT = 28
+TABLE_CONTROL_MIN_HEIGHT = 26
 TABLE_CONTROL_BORDER_RADIUS = 10
 TABLE_CELL_H_MARGIN = 6
 TABLE_CELL_V_MARGIN = 4
+TABLE_FLUSH_SURFACE_H_MARGIN = 3
+TABLE_FLUSH_SURFACE_V_MARGIN = 2
 
 
 def compute_table_row_min_height(font_height: int) -> int:
@@ -317,7 +319,7 @@ class TableMixin:
             " color: #edf1f7;"
             f" border: 1px solid {border};"
             f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
-            " padding: 4px 10px;"
+            " padding: 3px 10px;"
             f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
             " font-weight: 500;"
             "}"
@@ -423,7 +425,12 @@ class TableMixin:
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QHBoxLayout(container)
         if cell_widget_uses_flush_surface(widget):
-            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setContentsMargins(
+                TABLE_FLUSH_SURFACE_H_MARGIN,
+                TABLE_FLUSH_SURFACE_V_MARGIN,
+                TABLE_FLUSH_SURFACE_H_MARGIN,
+                TABLE_FLUSH_SURFACE_V_MARGIN,
+            )
         else:
             layout.setContentsMargins(
                 TABLE_CELL_H_MARGIN,
@@ -454,7 +461,7 @@ class TableMixin:
             f" background-color: {background};"
             f" border: 1px solid {border};"
             f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
-            " padding: 4px 10px;"
+            " padding: 3px 10px;"
             f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
             " font-weight: 600;"
             "}"
@@ -468,11 +475,6 @@ class TableMixin:
             " border-color: #313844;"
             "}"
         )
-
-
-    def _set_info_cell(self, row: int, widget: QWidget) -> None:
-        self._install_hover_tracking(widget, row)
-        self._wrap_cell_widget(row, 0, widget)
 
 
     def _set_action_cell(self, row: int, widget: QWidget) -> None:
@@ -848,7 +850,7 @@ class TableMixin:
                 " color: #7d8796;"
                 " border: 1px solid #313844;"
                 f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
-                " padding: 4px 10px;"
+                " padding: 3px 10px;"
                 f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
                 "}"
                 "QPushButton:hover {"
@@ -1037,18 +1039,7 @@ class TableMixin:
                 )
                 lock_reason = conflict_tip if not lock_reason else f"{lock_reason}\n{conflict_tip}"
             
-            # Column 0: Info button
-            info_btn = QPushButton("i")
-            info_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            info_btn.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
-            info_btn.setMinimumWidth(0)
-            info_btn.setToolTip("Show details")
-            info_btn.setFocusPolicy(Qt.NoFocus)
-            self._style_table_button(info_btn, row_dim=row_dim)
-            info_btn.clicked.connect(lambda _, kid=k.id: self._show_knob_info(kid))
-            if row_dim:
-                info_btn.setStyleSheet(locked_style)
-            self._set_info_cell(r, info_btn)
+            self._ensure_widget_cell_bg(r, 0)
 
             # Column 1: Knob title (gray if locked)
             title_item = QTableWidgetItem(k.title)
@@ -1280,7 +1271,7 @@ class TableMixin:
                     " background-color: #2b2124;"
                     " border: 1px solid #92434d;"
                     f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
-                    " padding: 4px 10px;"
+                    " padding: 3px 10px;"
                     f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
                     " font-weight: 600;"
                     "}"
@@ -1363,6 +1354,8 @@ class TableMixin:
         self._enforce_table_row_heights()
         if hasattr(self, "_update_conflict_indicator"):
             self._update_conflict_indicator()
+        if hasattr(self, "_refresh_info_panel_selection"):
+            self._refresh_info_panel_selection()
 
         if v_scroll is not None or h_scroll is not None:
             # Restore on the next tick so Qt's internal scroll adjustments (caused by
@@ -1440,13 +1433,12 @@ class TableMixin:
         status_width = max(status_width, _w("Status", pad=72))
 
         self._min_column_widths = {
-            0: 40,
             2: action_width,
             3: config_width,
             5: status_width,
         }
 
-        self.table.setColumnWidth(0, 40)  # Info button
+        self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, max(knob_width, 220))
         self.table.setColumnWidth(2, action_width)
         self.table.setColumnWidth(3, config_width)

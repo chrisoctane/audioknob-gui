@@ -111,6 +111,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSplitter,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -122,6 +123,24 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
+
+class _InfoPanelActionTarget:
+    def accept(self) -> None:
+        return None
+
+
+def resolve_info_panel_knob_id(
+    selected_knob_id: str | None,
+    visible_knob_ids: list[str],
+    current_knob_id: str | None,
+) -> str | None:
+    if selected_knob_id and selected_knob_id in visible_knob_ids:
+        return selected_knob_id
+    if current_knob_id and current_knob_id in visible_knob_ids:
+        return current_knob_id
+    return visible_knob_ids[0] if visible_knob_ids else None
+
+
 class MainWindow(TableMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -131,8 +150,10 @@ class MainWindow(TableMixin, QMainWindow):
         self._task_threads: list[QThread] = []
         self.state = load_state()
         self.registry = load_registry(_registry_path())
+        self._info_panel_action_target = _InfoPanelActionTarget()
         self._knob_preset_matches: dict[str, str] = {}
         self._knob_preset_flags: dict[str, dict[str, bool]] = {}
+        self._info_panel_knob_id: str | None = None
         build_dep = getattr(self, "_build_dependency_index", None)
         if callable(build_dep):
             self._dependency_index = build_dep()
@@ -358,7 +379,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.view_tabs_shell = QWidget()
         self.view_tabs_shell.setObjectName("ViewTabsChrome")
         view_tabs_layout = QHBoxLayout(self.view_tabs_shell)
-        view_tabs_layout.setContentsMargins(8, 8, 8, 8)
+        view_tabs_layout.setContentsMargins(6, 6, 6, 6)
         view_tabs_layout.setSpacing(0)
         self.view_tabs = QTabBar()
         self.view_tabs.setObjectName("ViewTabsNav")
@@ -402,9 +423,6 @@ class MainWindow(TableMixin, QMainWindow):
             enforce_rows()
         header = self.table.horizontalHeader()
         header.setMinimumSectionSize(60)
-        info_header = self.table.horizontalHeaderItem(0)
-        if info_header is not None:
-            info_header.setToolTip("Show details")
         req_header = self.table.horizontalHeaderItem(4)
         if req_header is not None:
             req_header.setToolTip(self._requirements_key_tooltip())
@@ -421,7 +439,19 @@ class MainWindow(TableMixin, QMainWindow):
         self._min_column_widths: dict[int, int] = {}
         self._apply_default_column_widths()
         self._apply_technical_column_visibility()
-        root.addWidget(self.table)
+        style_panel_surface(self.table)
+        self.info_panel_shell = self._build_knob_info_panel()
+
+        self.full_view_splitter = QSplitter(Qt.Horizontal)
+        self.full_view_splitter.setObjectName("FullViewSplitter")
+        self.full_view_splitter.setChildrenCollapsible(False)
+        self.full_view_splitter.setHandleWidth(10)
+        self.full_view_splitter.addWidget(self.table)
+        self.full_view_splitter.addWidget(self.info_panel_shell)
+        self.full_view_splitter.setStretchFactor(0, 5)
+        self.full_view_splitter.setStretchFactor(1, 2)
+        self.full_view_splitter.setSizes([940, 420])
+        root.addWidget(self.full_view_splitter, 1)
 
         self._knob_statuses: dict[str, str] = {}
         self._busy_knobs: set[str] = set()
@@ -437,6 +467,7 @@ class MainWindow(TableMixin, QMainWindow):
         QTimer.singleShot(0, self._apply_window_constraints)
 
         self.table.cellEntered.connect(self._on_row_hover)
+        self.table.itemSelectionChanged.connect(self._refresh_info_panel_selection)
         self.table.viewport().installEventFilter(self)
         self.table.horizontalHeader().installEventFilter(self)
         self.table.installEventFilter(self)
@@ -628,6 +659,191 @@ class MainWindow(TableMixin, QMainWindow):
         root.addWidget(self.core_plan_body)
 
         return panel
+
+    def _build_knob_info_panel(self) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName("KnobInfoPanelShell")
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+
+        self.info_panel_title = QLabel("Knob details")
+        self.info_panel_title.setObjectName("KnobInfoPanelTitle")
+        header_row.addWidget(self.info_panel_title, 1)
+
+        self.info_panel_open_btn = QPushButton("Open full details...")
+        self.info_panel_open_btn.setFocusPolicy(Qt.NoFocus)
+        set_button_role(self.info_panel_open_btn, "subtle")
+        self.info_panel_open_btn.clicked.connect(self._open_info_panel_dialog)
+        header_row.addWidget(self.info_panel_open_btn)
+        root.addLayout(header_row)
+
+        self.info_panel_meta = QLabel("")
+        self.info_panel_meta.setObjectName("KnobInfoPanelMeta")
+        set_label_tone(self.info_panel_meta, "muted")
+        root.addWidget(self.info_panel_meta)
+
+        self.info_panel_actions_shell = QWidget()
+        self.info_panel_actions_shell.setObjectName("KnobInfoPanelActions")
+        self.info_panel_actions_layout = QHBoxLayout(self.info_panel_actions_shell)
+        self.info_panel_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.info_panel_actions_layout.setSpacing(8)
+        root.addWidget(self.info_panel_actions_shell)
+
+        self.info_panel_text = QTextEdit()
+        self.info_panel_text.setObjectName("KnobInfoPanelText")
+        self.info_panel_text.setReadOnly(True)
+        self.info_panel_text.setFocusPolicy(Qt.NoFocus)
+        self.info_panel_text.setMinimumWidth(320)
+        style_panel_surface(self.info_panel_text)
+        root.addWidget(self.info_panel_text, 1)
+
+        self._set_info_panel_placeholder()
+        return panel
+
+    def _clear_info_panel_actions(self) -> None:
+        layout = getattr(self, "info_panel_actions_layout", None)
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if hasattr(self, "info_panel_actions_shell"):
+            self.info_panel_actions_shell.setVisible(False)
+
+    def _set_info_panel_placeholder(
+        self,
+        message: str = "Hover or select a knob to inspect its details.",
+    ) -> None:
+        self._info_panel_knob_id = None
+        if hasattr(self, "info_panel_title"):
+            self.info_panel_title.setText("Knob details")
+        if hasattr(self, "info_panel_meta"):
+            self.info_panel_meta.setText(message)
+        if hasattr(self, "info_panel_text"):
+            self.info_panel_text.setHtml(
+                f"<p style='color:#aeb8c4'>{html_lib.escape(message)}</p>"
+            )
+        if hasattr(self, "info_panel_open_btn"):
+            self.info_panel_open_btn.setEnabled(False)
+            self.info_panel_open_btn.setToolTip(message)
+        self._clear_info_panel_actions()
+
+    def _knob_id_for_row(self, row: int) -> str | None:
+        if row < 0 or not hasattr(self, "table"):
+            return None
+        item = self.table.item(row, 1)
+        if item is None:
+            return None
+        knob_id = item.data(Qt.UserRole)
+        if isinstance(knob_id, str) and knob_id:
+            return knob_id
+        return None
+
+    def _row_for_knob_id(self, knob_id: str | None) -> int:
+        if not knob_id or not hasattr(self, "table"):
+            return -1
+        for row in range(self.table.rowCount()):
+            if self._knob_id_for_row(row) == knob_id:
+                return row
+        return -1
+
+    def _selected_knob_id(self) -> str | None:
+        return self._knob_id_for_row(self.table.currentRow())
+
+    def _set_info_panel_actions(self, knob) -> None:
+        self._clear_info_panel_actions()
+        if not hasattr(self, "info_panel_actions_layout"):
+            return
+        add_info_buttons(
+            self,
+            knob,
+            self._info_panel_action_target,
+            self.info_panel_actions_layout,
+        )
+        button_count = 0
+        for index in range(self.info_panel_actions_layout.count()):
+            item = self.info_panel_actions_layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if not isinstance(widget, QPushButton):
+                continue
+            widget.setFocusPolicy(Qt.NoFocus)
+            set_button_role(widget, "subtle")
+            button_count += 1
+        if button_count == 0:
+            self._clear_info_panel_actions()
+            return
+        self.info_panel_actions_layout.addStretch(1)
+        self.info_panel_actions_shell.setVisible(True)
+
+    def _set_info_panel_knob(self, knob_id: str | None) -> None:
+        if not knob_id:
+            self._set_info_panel_placeholder()
+            return
+        payload = self._build_knob_info_payload(knob_id)
+        if payload is None:
+            self._set_info_panel_placeholder()
+            return
+        knob = payload["knob"]
+        self._info_panel_knob_id = knob.id
+        if hasattr(self, "info_panel_title"):
+            self.info_panel_title.setText(str(payload["title"]))
+        if hasattr(self, "info_panel_meta"):
+            self.info_panel_meta.setText(str(payload["meta"]))
+        if hasattr(self, "info_panel_text"):
+            self.info_panel_text.setHtml(str(payload["html"]))
+            try:
+                self.info_panel_text.verticalScrollBar().setValue(0)
+            except Exception:
+                pass
+        if hasattr(self, "info_panel_open_btn"):
+            self.info_panel_open_btn.setEnabled(True)
+            self.info_panel_open_btn.setToolTip(
+                f"Open the full detail dialog for {payload['title']}"
+            )
+        self._set_info_panel_actions(payload["knob"])
+
+    def _refresh_info_panel_selection(self) -> None:
+        if not hasattr(self, "info_panel_text"):
+            return
+        visible_knob_ids = [
+            knob_id
+            for row in range(self.table.rowCount())
+            if (knob_id := self._knob_id_for_row(row))
+        ]
+        knob_id = resolve_info_panel_knob_id(
+            self._selected_knob_id(),
+            visible_knob_ids,
+            self._info_panel_knob_id,
+        )
+        self._set_info_panel_knob(knob_id)
+
+    def _focus_knob_in_full_view(self, knob_id: str) -> bool:
+        if self._ui_mode != "full":
+            return False
+        row = self._row_for_knob_id(knob_id)
+        if row < 0:
+            return False
+        self.table.selectRow(row)
+        item = self.table.item(row, 1)
+        if item is not None:
+            self.table.setCurrentItem(item)
+            try:
+                self.table.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+            except Exception:
+                pass
+        self._set_info_panel_knob(knob_id)
+        return True
+
+    def _open_info_panel_dialog(self) -> None:
+        if self._info_panel_knob_id:
+            self._show_knob_info(self._info_panel_knob_id)
 
     def _on_core_plan_toggle(self, expanded: bool) -> None:
         self.state["audio_core_plan_expanded"] = bool(expanded)
@@ -1847,7 +2063,9 @@ class MainWindow(TableMixin, QMainWindow):
             self.view_tabs_shell.setVisible(not simple)
         elif hasattr(self, "view_tabs"):
             self.view_tabs.setVisible(not simple)
-        if hasattr(self, "table"):
+        if hasattr(self, "full_view_splitter"):
+            self.full_view_splitter.setVisible(not simple)
+        elif hasattr(self, "table"):
             self.table.setVisible(not simple)
         if hasattr(self, "btn_view"):
             self.btn_view.setVisible(True)
@@ -3381,11 +3599,11 @@ class MainWindow(TableMixin, QMainWindow):
             QTabBar#ViewTabsNav::tab {
                 background-color: #1c2127;
                 color: #aeb8c4;
-                min-height: 36px;
-                padding: 8px 14px;
+                min-height: 30px;
+                padding: 4px 14px;
                 border: 1px solid #20252b;
-                border-radius: 10px;
-                margin: 0 4px;
+                border-radius: 9px;
+                margin: 0 3px;
             }
             QTabBar#ViewTabsNav::tab:selected {
                 background-color: #2b3746;
@@ -3396,6 +3614,31 @@ class MainWindow(TableMixin, QMainWindow):
             QTabBar#ViewTabsNav::tab:hover:!selected {
                 background-color: #242a31;
                 color: #d6dde6;
+            }
+            QSplitter#FullViewSplitter::handle {
+                background-color: #20252b;
+            }
+            QSplitter#FullViewSplitter::handle:horizontal {
+                width: 10px;
+                margin: 10px 0;
+            }
+            QWidget#KnobInfoPanelShell {
+                background-color: #20252b;
+                border: 1px solid #313842;
+                border-radius: 12px;
+            }
+            QLabel#KnobInfoPanelTitle {
+                color: #f2f6fb;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            QLabel#KnobInfoPanelMeta {
+                color: #9faaba;
+            }
+            QTextEdit#KnobInfoPanelText {
+                background-color: transparent;
+                border: none;
+                padding: 0;
             }
             QPushButton[role="subtle"], QToolButton[role="subtle"] {
                 background-color: #242a31;
@@ -3658,11 +3901,27 @@ class MainWindow(TableMixin, QMainWindow):
 
     def on_run_test(self, knob_id: str, *, refresh_dialog=None) -> None:
         """Run a test and update the status column with results."""
+        def _close_refresh_target(target) -> bool:
+            if target is None:
+                return False
+            try:
+                if isValid(target):
+                    target.accept()
+                    return True
+            except Exception:
+                pass
+            accept = getattr(target, "accept", None)
+            if callable(accept):
+                try:
+                    accept()
+                except Exception:
+                    return False
+            return False
+
         if knob_id == "scheduler_jitter_test":
             if knob_id in self._busy_knobs:
                 return
-            if refresh_dialog is not None and isValid(refresh_dialog):
-                refresh_dialog.accept()
+            reopen_dialog = _close_refresh_target(refresh_dialog)
             self._busy_knobs.add(knob_id)
             # Show a brief "running" indicator
             self._update_knob_status(knob_id, "running", "⏳ Running...")
@@ -3698,7 +3957,9 @@ class MainWindow(TableMixin, QMainWindow):
                     QMessageBox.warning(self, "Jitter Test Failed", detail or "No results")
 
                 self._populate()
-                if refresh_dialog is not None:
+                if hasattr(self, "_refresh_info_panel_selection"):
+                    self._refresh_info_panel_selection()
+                if reopen_dialog:
                     self._show_knob_info(knob_id)
 
             worker.finished.connect(_on_done)
@@ -3998,93 +4259,13 @@ class MainWindow(TableMixin, QMainWindow):
                 self.table.setItem(r, 5, status_item)
                 break
 
-    def on_view_stack(self) -> None:
-        """Show detected audio stack information."""
-        try:
-            from audioknob_gui.platform.detect import detect_stack, list_alsa_playback_devices
-            
-            stack = detect_stack()
-            devices = list_alsa_playback_devices()
-            
-            html_lines = [
-                "<h3>Audio Stack Detection</h3>",
-                "<table style='width:100%'>",
-                f"<tr><td><b>PipeWire:</b></td><td>{'✓ Active' if stack.pipewire_active else '○ Not active'}</td></tr>",
-                f"<tr><td><b>WirePlumber:</b></td><td>{'✓ Active' if stack.wireplumber_active else '○ Not active'}</td></tr>",
-                f"<tr><td><b>JACK:</b></td><td>{'✓ Active' if stack.jack_active else '○ Not active'}</td></tr>",
-                "</table>",
-                "<hr/>",
-                f"<h4>ALSA Playback Devices ({len(devices)})</h4>",
-                "<table style='width:100%'>",
-            ]
-            
-            # Show ALL devices - no truncation
-            for dev in devices:
-                name = dev.get("name", "")
-                desc = dev.get("desc", dev.get("raw", "Unknown"))
-                html_lines.append(f"<tr><td><b>{name}</b></td><td>{desc}</td></tr>")
-            
-            html_lines.append("</table>")
-            
-            if not devices:
-                html_lines.append("<p style='color:#666'>No ALSA devices found.</p>")
-            
-            html = "".join(html_lines)
-            
-            # Show in resizable dialog
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Audio Stack Detection")
-            dialog.resize(600, 450)
-            layout = build_dialog_root(dialog, parent=self)
+    def _knob_by_id(self, knob_id: str):
+        return next((knob for knob in self.registry if knob.id == knob_id), None)
 
-            intro = QLabel("Detected PipeWire, WirePlumber, JACK, and ALSA playback devices.")
-            set_label_tone(intro, "muted")
-            layout.addWidget(intro)
-            
-            text = QTextEdit()
-            text.setReadOnly(True)
-            text.setHtml(html)
-            style_panel_surface(text)
-            layout.addWidget(text)
-            
-            # Button row
-            btn_layout = QHBoxLayout()
-            
-            def copy_to_clipboard():
-                # Plain text version for clipboard
-                plain = []
-                plain.append("Audio Stack Detection")
-                plain.append(f"PipeWire: {'Active' if stack.pipewire_active else 'Not active'}")
-                plain.append(f"WirePlumber: {'Active' if stack.wireplumber_active else 'Not active'}")
-                plain.append(f"JACK: {'Active' if stack.jack_active else 'Not active'}")
-                plain.append("")
-                plain.append(f"ALSA Playback Devices ({len(devices)}):")
-                for dev in devices:
-                    plain.append(f"  {dev.get('name', '')} - {dev.get('desc', dev.get('raw', ''))}")
-                QApplication.clipboard().setText("\n".join(plain))
-            
-            copy_btn = QPushButton("Copy to Clipboard")
-            set_button_role(copy_btn, "subtle")
-            copy_btn.clicked.connect(copy_to_clipboard)
-            btn_layout.addWidget(copy_btn)
-            btn_layout.addStretch()
-            
-            close_btn = QPushButton("Close")
-            set_button_role(close_btn, "subtle")
-            close_btn.clicked.connect(dialog.reject)
-            btn_layout.addWidget(close_btn)
-            layout.addLayout(btn_layout)
-            
-            dialog.exec()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Detection Failed", f"Could not detect audio stack: {e}")
-
-    def _show_knob_info(self, knob_id: str) -> None:
-        """Show detailed information about a knob."""
-        k = next((k for k in self.registry if k.id == knob_id), None)
+    def _build_knob_info_payload(self, knob_id: str):
+        k = self._knob_by_id(knob_id)
         if not k:
-            return
+            return None
 
         def _shell_single_quote(value: str) -> str:
             return "'" + value.replace("'", "'\"'\"'") + "'"
@@ -4095,8 +4276,7 @@ class MainWindow(TableMixin, QMainWindow):
             if isinstance(value, int):
                 return str(value)
             return "—"
-        
-        # Build detailed info
+
         status = self._knob_statuses.get(k.id, "unknown")
         status_text, _ = self._status_display(status)
         preset_match = ""
@@ -4111,10 +4291,8 @@ class MainWindow(TableMixin, QMainWindow):
             if k.id == PIPEWIRE_RT_SETUP:
                 kind_label = "composite (queues PipeWire RT Limits + PipeWire RT Module)"
             impl_info = f"<b>Kind:</b> {kind_label}<br/>"
-            # For configurable knobs, show current configured values rather than registry defaults.
             params = dict(k.impl.params)
             apply_info_param_overrides(self, k, params)
-
             for key, val in params.items():
                 if isinstance(val, list):
                     impl_info += f"<b>{key}:</b><br/>"
@@ -4149,7 +4327,7 @@ class MainWindow(TableMixin, QMainWindow):
             f"{html_lib.escape(apply_cmd)}\n"
             f"{html_lib.escape(reset_cmd)}</pre>"
         )
-        
+
         helpers = InfoHelpers(
             kernel_cmdline_tokens=_kernel_cmdline_tokens,
             param_present=_param_present,
@@ -4213,16 +4391,14 @@ class MainWindow(TableMixin, QMainWindow):
             return "\n".join(parts_html)
 
         description_html = _format_description(k.description)
-
-        html = f"""
-        <h3>{k.title}</h3>
+        detail_html = f"""
         {description_html}
         <hr/>
         <table>
         <tr><td><b>ID:</b></td><td>{k.id}</td></tr>
         <tr><td><b>Status:</b></td><td>{status_text}</td></tr>
         <tr><td><b>Preset match:</b></td><td>{preset_match or '—'}</td></tr>
-        <tr><td><b>Category:</b></td><td>{k.category}</td></tr>
+        <tr><td><b>Category:</b></td><td>{self._category_label(str(k.category))}</td></tr>
         <tr><td><b>Risk:</b></td><td>{k.risk_level}</td></tr>
         <tr><td><b>Requires root:</b></td><td>{'Yes' if k.requires_root else 'No'}</td></tr>
         <tr><td><b>Requires reboot:</b></td><td>{'Yes' if k.requires_reboot else 'No'}</td></tr>
@@ -4233,9 +4409,116 @@ class MainWindow(TableMixin, QMainWindow):
         {extra_html}
         {cli_html}
         """
-        
+        meta = (
+            f"Status: {status_text} | "
+            f"Preset: {preset_match or '—'} | "
+            f"Category: {self._category_label(str(k.category))} | "
+            f"Risk: {k.risk_level}"
+        )
+        return {
+            "knob": k,
+            "title": k.title,
+            "meta": meta,
+            "html": detail_html,
+        }
+
+    def on_view_stack(self) -> None:
+        """Show detected audio stack information."""
+        try:
+            from audioknob_gui.platform.detect import detect_stack, list_alsa_playback_devices
+
+            stack = detect_stack()
+            devices = list_alsa_playback_devices()
+
+            html_lines = [
+                "<h3>Audio Stack Detection</h3>",
+                "<table style='width:100%'>",
+                f"<tr><td><b>PipeWire:</b></td><td>{'✓ Active' if stack.pipewire_active else '○ Not active'}</td></tr>",
+                f"<tr><td><b>WirePlumber:</b></td><td>{'✓ Active' if stack.wireplumber_active else '○ Not active'}</td></tr>",
+                f"<tr><td><b>JACK:</b></td><td>{'✓ Active' if stack.jack_active else '○ Not active'}</td></tr>",
+                "</table>",
+                "<hr/>",
+                f"<h4>ALSA Playback Devices ({len(devices)})</h4>",
+                "<table style='width:100%'>",
+            ]
+
+            # Show ALL devices - no truncation
+            for dev in devices:
+                name = dev.get("name", "")
+                desc = dev.get("desc", dev.get("raw", "Unknown"))
+                html_lines.append(f"<tr><td><b>{name}</b></td><td>{desc}</td></tr>")
+
+            html_lines.append("</table>")
+
+            if not devices:
+                html_lines.append("<p style='color:#666'>No ALSA devices found.</p>")
+
+            html = "".join(html_lines)
+
+            # Show in resizable dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Audio Stack Detection")
+            dialog.resize(600, 450)
+            layout = build_dialog_root(dialog, parent=self)
+
+            intro = QLabel("Detected PipeWire, WirePlumber, JACK, and ALSA playback devices.")
+            set_label_tone(intro, "muted")
+            layout.addWidget(intro)
+
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setHtml(html)
+            style_panel_surface(text)
+            layout.addWidget(text)
+
+            # Button row
+            btn_layout = QHBoxLayout()
+
+            def copy_to_clipboard():
+                # Plain text version for clipboard
+                plain = []
+                plain.append("Audio Stack Detection")
+                plain.append(f"PipeWire: {'Active' if stack.pipewire_active else 'Not active'}")
+                plain.append(f"WirePlumber: {'Active' if stack.wireplumber_active else 'Not active'}")
+                plain.append(f"JACK: {'Active' if stack.jack_active else 'Not active'}")
+                plain.append("")
+                plain.append(f"ALSA Playback Devices ({len(devices)}):")
+                for dev in devices:
+                    plain.append(f"  {dev.get('name', '')} - {dev.get('desc', dev.get('raw', ''))}")
+                QApplication.clipboard().setText("\n".join(plain))
+
+            copy_btn = QPushButton("Copy to Clipboard")
+            set_button_role(copy_btn, "subtle")
+            copy_btn.clicked.connect(copy_to_clipboard)
+            btn_layout.addWidget(copy_btn)
+            btn_layout.addStretch()
+
+            close_btn = QPushButton("Close")
+            set_button_role(close_btn, "subtle")
+            close_btn.clicked.connect(dialog.reject)
+            btn_layout.addWidget(close_btn)
+            layout.addLayout(btn_layout)
+
+            dialog.exec()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Detection Failed", f"Could not detect audio stack: {e}")
+
+    def _show_knob_info(self, knob_id: str) -> None:
+        """Focus the details panel for a knob, or fall back to a dialog."""
+        if self._focus_knob_in_full_view(knob_id):
+            return
+        self._open_knob_info_dialog(knob_id)
+
+    def _open_knob_info_dialog(self, knob_id: str) -> None:
+        payload = self._build_knob_info_payload(knob_id)
+        if payload is None:
+            return
+        k = payload["knob"]
+        title = str(payload["title"])
+        html = f"<h3>{html_lib.escape(title)}</h3>{payload['html']}"
         dialog = QDialog(self)
-        dialog.setWindowTitle(k.title)
+        dialog.setWindowTitle(title)
         dialog.resize(500, 400)
         layout = build_dialog_root(dialog, parent=self)
 
@@ -4455,6 +4738,7 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _apply_technical_column_visibility(self) -> None:
         show = bool(self.state.get("show_technical_columns", False))
+        self.table.setColumnHidden(0, True)
         for col in (4, 7, 8):
             self.table.setColumnHidden(col, not show)
 

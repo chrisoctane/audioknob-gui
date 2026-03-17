@@ -34,11 +34,11 @@
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
-- **Info popup** - Info column with "i" button shows details + config options
+- **Persistent knob details panel** - Full view shows knob details in a right-side panel tied to the highlighted row; the panel reuses the same description/status/CLI content as the dialog fallback
 - **Info formatting** - uses tagged lines: [i] summary, [r] requirements, [+] benefits, [-] tradeoffs; requirements are auto-generated
 - **Advanced mode toggle** - gates performance-impacting knobs on the main table
-- **Info popup CLI checks** - Copy/paste status + apply/reset commands per knob
-- **Info popup status check** - Run a live per-knob diagnostic snapshot
+- **Knob details CLI checks** - Copy/paste status + apply/reset commands per knob
+- **Knob details status check** - Run a live per-knob diagnostic snapshot
 - **Partial status notes** - Status/Check view includes a brief reason line when partial
 - **Partial reason specificity** - partial states now report concrete causes (for example: masked service counts, group activation gaps, sysfs match/mismatch counts, and WirePlumber/PipeWire config drift) instead of generic fallback text.
 - **Status tooltips** - Status column remains operational-only (applied/not_applied/partial/etc.).
@@ -109,8 +109,8 @@
 
 ### GUI Layout
 ```
-Columns: Info | Knob | Action | Config | Req. | Status | Category | Risk | CLI
-         (0)  (1)    (2)      (3)      (4)           (5)     (6)       (7)    (8)
+Columns: Knob | Action | Config | Req. | Status | Category | Risk | CLI
+         (1)    (2)      (3)      (4)     (5)       (6)       (7)    (8)
 
 Notes:
 - App has two UI modes:
@@ -120,7 +120,7 @@ Notes:
 - Req./Risk/CLI are technical columns hidden by default; enable them with `Tools -> Locks -> Technical columns`.
 - Header tabs switch between **Main**, **Cores & IRQ**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates and includes TSC timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock, the Cores & IRQ view filters to core-related knobs plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and PipeWire/WirePlumber affinity controls while showing the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber tuning, kernel RT extras excluding TSC timing knobs, RTKit placeholder). Preset actions live in Tools → Presets.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Cores & IRQ view.
-- Column 0 header is "Info"; each row has a small "i" button that opens the knob details popup.
+- Full view uses a persistent right-side knob details panel instead of a per-row Info button column; the panel tracks the highlighted row, fills the spare width beside the table, and updates as rows are hovered or selected.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - In Cores & IRQ, linked core plan is enabled by default and keeps audio-role core selectors synchronized; housekeeping-role selectors track the inverse CPU set.
 - "Req." shows A/R/D markers for Advanced/Reboot/Depends-on (tooltip shows the key and any group/dependency details).
@@ -129,7 +129,7 @@ Notes:
 - Core partition knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`) show a locked Apply action until configured; Configure stays available.
 - New Cores & IRQ service-RT knobs (`systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`) show a locked Apply action until configured; Configure stays available.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
-- Button-like table cells use one full-cell control surface instead of a padded inner button, so action/info/status controls align cleanly with the cell chrome.
+- Button-like table cells use one full-cell control surface instead of a padded inner button, so action/status controls align cleanly with the cell chrome.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Status keeps grouped headers by default; Req./Risk grouping is available when technical columns are shown.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).
@@ -187,7 +187,7 @@ Next phases (planned, incremental):
 
 ### Bugs Fixed (Prevent Regression)
 - Prevented accidental editing of table cells (table is now non-editable).
-- Clarified the Info column header/tooltip to match the per-row "i" button.
+- Replaced the per-row Info button column with a persistent full-view details panel tied to the highlighted knob.
 - Audio Groups join now resolves `usermod` via known paths to avoid missing command errors in GUI sessions.
 - Kernel cmdline updates now use absolute bootloader tool paths when available (sdbootutil/grub/update-grub).
 - Kernel cmdline knobs now show “Reboot required” when removed from boot config but still active.
@@ -269,7 +269,7 @@ Next phases (planned, incremental):
 
 ### Next Steps
 1. Re-validate kernel cmdline + indexer knobs on openSUSE Tumbleweed (GNOME + Plasma)
-2. Add more PipeWire configuration options (via info popup config dialog)
+2. Add more PipeWire configuration options (via row config controls and related dialogs)
 3. Package for distribution
 4. Validate Dev tab PipeWire/WirePlumber knobs on Tumbleweed + Ubuntu (wpctl, pw-top, drop-ins)
 5. Confirm RTKit tuning paths/args from official distro docs before enabling apply
@@ -1064,7 +1064,7 @@ else:
 |-------|------|---------|
 | `id` | string | Unique identifier, used in code and transactions |
 | `title` | string | Human-readable name shown in GUI |
-| `description` | string | Shown in details popup ("i" button) |
+| `description` | string | Shown in the knob details panel and full details dialog |
 | `category` | enum | Grouping: permissions, cpu, irq, vm, kernel, stack, services, power, testing, device |
 | `risk_level` | enum | low/medium/high - shown in Risk column |
 | `requires_root` | bool | If true, apply uses pkexec |
@@ -1440,7 +1440,7 @@ If crash occurs:
 **Approach:**
 1. Add single knob: `audio_config`
 2. Kind: `audio_config` (new)
-3. Details popup ("i" button) shows "Configure..." button
+3. Knob details panel/full dialog can expose "Configure..." affordances
 4. Config button opens `AudioConfigDialog`
 5. Dialog shows:
    - Interface dropdown (populated from `aplay -l`)
@@ -1452,7 +1452,7 @@ If crash occurs:
    - PipeWire: `~/.config/pipewire/pipewire.conf.d/99-audioknob.conf`
    - JACK/QjackCtl: Modify Server line parameters
 
-**Note:** Current UI has 9 columns (Info, Knob, Action, Config, Req., Status, Category, Risk, CLI). Req./Risk/CLI are hidden by default behind `Tools -> Locks -> Technical columns`. Config options may be exposed either as in-row controls (Config column) or via the details popup ("i").
+**Note:** The runtime table model still uses 9 internal columns for layout/sorting, but the visible Full view now presents Knob, Action, Config, Status, Category, plus optional Req./Risk/CLI behind `Tools -> Locks -> Technical columns`. Per-knob details live in the persistent side panel, with a pop-out dialog kept for extra detail actions.
 
 **Detection needed:**
 ```python

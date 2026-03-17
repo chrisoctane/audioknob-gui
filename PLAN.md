@@ -439,18 +439,18 @@ Both files must be committed together. See "Registry Sync Policy" below.
 
 In `gui/app.py` → `_populate()`:
 
-| Knob type | Status | Column 2 (Action) | Column 0 (Details) |
+| Knob type | Status | Column 2 (Action) | Details surface |
 |-----------|--------|-------------------|-----------------|
-| Not applied | — | "Apply" button (queues) | "i" button |
-| Applied | ✓ Applied | "Reset" button | "i" button |
-| Not implemented | — | "—" disabled | "i" button |
-| Missing groups | Locked | "🔒" disabled | "i" button |
-| Missing packages | Locked | "Install" button | "i" button |
-| Read-only info | — | "View" button | "i" button |
-| Read-only test | — | "Test"/"Scan" button | "i" button |
-| Group join knob | — | "Join/Leave" button (immediate) | "i" button |
+| Not applied | — | "Apply" button (queues) | persistent side panel |
+| Applied | ✓ Applied | "Reset" button | persistent side panel |
+| Not implemented | — | "—" disabled | persistent side panel |
+| Missing groups | Locked | "🔒" disabled | persistent side panel |
+| Missing packages | Locked | "Install" button | persistent side panel |
+| Read-only info | — | "View" button | persistent side panel |
+| Read-only test | — | "Test"/"Scan" button | persistent side panel |
+| Group join knob | — | "Join/Leave" button (immediate) | persistent side panel |
 
-**Columns**: Info | Knob | Action | Config | Status | Category (+ optional Req./Risk/CLI via Technical columns)
+**Columns**: Knob | Action | Config | Status | Category (+ optional Req./Risk/CLI via Technical columns)
 
 **Advanced mode**: Single table; advanced knobs are gated by **Tools → Locks → Advanced knobs**.
 
@@ -500,8 +500,8 @@ btn.clicked.connect(lambda _, kid=k.id: self.on_run_test(kid))
 self.table.setCellWidget(r, 2, btn)  # Column 2 = Action
 ```
 
-The jitter test stores the most recent per-thread summary (min/median/avg/p95/max) in the knob info dialog, with a "Show Sample List" button for raw values.
-The info dialog also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
+The jitter test stores the most recent per-thread summary (min/median/avg/p95/max) in the knob details panel, with "Refresh Snapshot" and "Show Sample List" actions available from that panel.
+The knob details surface also includes CLI sanity-check commands (status/apply/reset) for copy/paste verification.
 Click the Status value in the Status column to run live CLI status checks and command outputs (e.g., systemctl, /proc/cmdline) for cross-comparisons. It also shows reference/factory preset statuses for that knob when available. Read-only test rows show N/A in this column.
 The Logs dialog prefixes each line with its source tag (GUI / WORKER-USER / WORKER-ROOT) to make mixed logs easy to read.
 The GUI log also records high-level action start/finish entries (apply queue, reset all) so successes are visible in-app.
@@ -509,16 +509,16 @@ Force-reset prompts and outcomes are also logged in the GUI log.
 If a reset would disable a dependency, the GUI prompts and adds dependent knobs to the reset queue when accepted.
 Status remains operational; preset matches are shown as secondary hints in tooltips/details.
 
-### With config dialog (via info popup)
+### With config dialog
 ```python
-# In _show_knob_info(), add config button for knobs that need it:
+# In the dialog fallback, add a config button for knobs that need it:
 if k.id == "qjackctl_server_prefix_rt":
     config_btn = QPushButton("Configure CPU Cores...")
     config_btn.clicked.connect(lambda: self.on_configure_knob(k.id))
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors or the Info details popup (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Kernel isolation knobs also use the Config column core selector. Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying IRQ pinning writes a system config in `/var/lib/audioknob-gui/state.json` and enables `audioknob-irq-pinning.service` so pinning persists across reboots. Applying PipeWire knobs restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Kernel isolation knobs also use the Config column core selector. The persistent knob details panel shows the same description, status, and CLI guidance that used to live behind the per-row info button while leaving configuration in the row itself. Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying IRQ pinning writes a system config in `/var/lib/audioknob-gui/state.json` and enables `audioknob-irq-pinning.service` so pinning persists across reboots. Applying PipeWire knobs restarts PipeWire services automatically.
 
 ---
 
@@ -703,7 +703,7 @@ bin/audioknob-gui
 
 Verify:
 - table loads and status updates
-- PipeWire quantum/sample-rate selectors work and reflect in the Info details popup
+- PipeWire quantum/sample-rate selectors work and reflect in the knob details surface
 
 ### Root knobs (manual, last)
 
