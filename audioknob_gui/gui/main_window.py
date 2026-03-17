@@ -165,38 +165,50 @@ class MainWindow(TableMixin, QMainWindow):
         root.setSpacing(8)
 
         # Header
-        top = QHBoxLayout()
+        header_shell = QWidget()
+        header_shell.setObjectName("HeaderChrome")
+        top = QHBoxLayout(header_shell)
         self.header_layout = top
-        top.setSpacing(6)
+        top.setContentsMargins(14, 12, 14, 12)
+        top.setSpacing(10)
+
+        left_cluster = QWidget()
+        left_cluster.setObjectName("HeaderCluster")
+        left_layout = QHBoxLayout(left_cluster)
+        left_layout.setContentsMargins(10, 8, 10, 8)
+        left_layout.setSpacing(8)
         self.btn_view = QPushButton("View")
+        self.btn_view.setProperty("role", "subtle")
         self.btn_view.setToolTip("Switch between Basic and Full views")
         self.btn_view.clicked.connect(self._on_toggle_view)
-        top.addWidget(self.btn_view)
-        top.addSpacing(6)
+        left_layout.addWidget(self.btn_view)
         self.font_label = QLabel("Font:")
-        top.addWidget(self.font_label)
+        self.font_label.setObjectName("HeaderMetaLabel")
+        left_layout.addWidget(self.font_label)
         self.font_spinner = QSpinBox()
         self.font_spinner.setRange(8, 24)
         self.font_spinner.setValue(self.state.get("font_size", 11))
         self.font_spinner.setToolTip("Adjust font size")
         self.font_spinner.valueChanged.connect(self._on_font_change)
-        top.addWidget(self.font_spinner)
-        top.addSpacing(12)
+        left_layout.addWidget(self.font_spinner)
+        top.addWidget(left_cluster)
 
         # Global reboot-required banner (shown when any knob is pending reboot).
         self.reboot_banner = QLabel("")
-        self.reboot_banner.setStyleSheet("color: #f57c00; font-weight: bold;")
+        self.reboot_banner.setObjectName("RebootBanner")
         self.reboot_banner.setWordWrap(True)
         self.reboot_banner.setVisible(False)
 
         top.addStretch(1)
 
         self.queue_label = QLabel("")
+        self.queue_label.setObjectName("QueueStatus")
         self.queue_label.setToolTip("Queued changes waiting to apply")
         self.queue_label.setVisible(False)
         top.addWidget(self.queue_label)
 
         self.btn_apply_queue = QPushButton("Apply")
+        self.btn_apply_queue.setProperty("role", "primary")
         self.btn_apply_queue.setToolTip("Apply queued changes")
         self.btn_apply_queue.clicked.connect(
             lambda _checked=False: self._on_apply_queue(reboot_after=False)
@@ -205,6 +217,7 @@ class MainWindow(TableMixin, QMainWindow):
         top.addWidget(self.btn_apply_queue)
 
         self.btn_apply_queue_reboot = QPushButton("Apply & Reboot")
+        self.btn_apply_queue_reboot.setProperty("role", "primary")
         self.btn_apply_queue_reboot.setToolTip("Apply queued changes and reboot after")
         self.btn_apply_queue_reboot.clicked.connect(
             lambda _checked=False: self._on_apply_queue(reboot_after=True)
@@ -213,20 +226,28 @@ class MainWindow(TableMixin, QMainWindow):
         top.addWidget(self.btn_apply_queue_reboot)
 
         self.reboot_button = QPushButton("Reboot")
+        self.reboot_button.setProperty("role", "warning")
         self.reboot_button.setToolTip("Restart the system to apply pending changes")
         self.reboot_button.clicked.connect(self._on_reboot_now)
         self.reboot_button.setVisible(False)
         top.addWidget(self.reboot_button)
 
         self.btn_conflicts = QPushButton("Conflicts")
+        self.btn_conflicts.setProperty("role", "subtle")
+        self.btn_conflicts.setProperty("alert", False)
         self.btn_conflicts.setToolTip("Show detected conflicts")
         self.btn_conflicts.clicked.connect(self._on_show_conflicts)
         self.btn_conflicts.setVisible(True)
         top.addWidget(self.btn_conflicts)
 
-        top.addSpacing(8)
+        tools_cluster = QWidget()
+        tools_cluster.setObjectName("HeaderCluster")
+        tools_layout = QHBoxLayout(tools_cluster)
+        tools_layout.setContentsMargins(10, 8, 10, 8)
+        tools_layout.setSpacing(8)
 
         self.btn_tools_menu = QPushButton("Tools")
+        self.btn_tools_menu.setProperty("role", "subtle")
         self.btn_tools_menu.setToolTip("Diagnostics, presets, and history")
         tools_menu = QMenu(self.btn_tools_menu)
         self.locks_menu = tools_menu.addMenu("Locks")
@@ -295,18 +316,21 @@ class MainWindow(TableMixin, QMainWindow):
         self._ensure_menu_width(factory_menu)
         self.btn_tools_menu.setMenu(tools_menu)
         self._set_baseline_buttons_enabled(not self._baseline_busy)
-        top.addWidget(self.btn_tools_menu)
+        tools_layout.addWidget(self.btn_tools_menu)
 
         self.btn_recheck = QPushButton("Re-check State")
+        self.btn_recheck.setProperty("role", "subtle")
         self.btn_recheck.setToolTip("Re-scan current system state")
         self.btn_recheck.clicked.connect(self._on_recheck_state)
-        top.addWidget(self.btn_recheck)
+        tools_layout.addWidget(self.btn_recheck)
 
         self.btn_logs = QPushButton("Logs")
+        self.btn_logs.setProperty("role", "subtle")
         self.btn_logs.setToolTip("Open logs for copy/paste")
         self.btn_logs.clicked.connect(self._on_show_logs)
-        top.addWidget(self.btn_logs)
-        root.addLayout(top)
+        tools_layout.addWidget(self.btn_logs)
+        top.addWidget(tools_cluster)
+        root.addWidget(header_shell)
         root.addWidget(self.reboot_banner)
 
         self.simple_panel = self._build_simple_panel()
@@ -317,11 +341,20 @@ class MainWindow(TableMixin, QMainWindow):
             "Use Tools -> Locks -> Advanced knobs to make changes; reboot may be required."
         )
         self.advanced_note = advanced_note
+        advanced_note.setObjectName("AdvancedNote")
         advanced_note.setWordWrap(True)
         root.addWidget(advanced_note)
 
         self._view_mode = str(self.state.get("view_tab", "all"))
+        self.view_tabs_shell = QWidget()
+        self.view_tabs_shell.setObjectName("ViewTabsChrome")
+        view_tabs_layout = QHBoxLayout(self.view_tabs_shell)
+        view_tabs_layout.setContentsMargins(8, 8, 8, 8)
+        view_tabs_layout.setSpacing(0)
         self.view_tabs = QTabBar()
+        self.view_tabs.setObjectName("ViewTabsNav")
+        self.view_tabs.setDrawBase(False)
+        self.view_tabs.setExpanding(True)
         self.view_tabs.addTab("Main")
         self.view_tabs.addTab("Cores & IRQ")
         self.view_tabs.addTab("Dev")
@@ -332,7 +365,8 @@ class MainWindow(TableMixin, QMainWindow):
         else:
             self.view_tabs.setCurrentIndex(0)
         self.view_tabs.currentChanged.connect(self._on_view_tab_changed)
-        root.addWidget(self.view_tabs)
+        view_tabs_layout.addWidget(self.view_tabs)
+        root.addWidget(self.view_tabs_shell)
 
         self.cores_panel = self._build_cores_panel()
         root.addWidget(self.cores_panel)
@@ -1706,7 +1740,9 @@ class MainWindow(TableMixin, QMainWindow):
             self.simple_panel.setVisible(simple)
         if hasattr(self, "advanced_note"):
             self.advanced_note.setVisible(not simple)
-        if hasattr(self, "view_tabs"):
+        if hasattr(self, "view_tabs_shell"):
+            self.view_tabs_shell.setVisible(not simple)
+        elif hasattr(self, "view_tabs"):
             self.view_tabs.setVisible(not simple)
         if hasattr(self, "table"):
             self.table.setVisible(not simple)
@@ -2930,11 +2966,11 @@ class MainWindow(TableMixin, QMainWindow):
         """Apply clean dark theme."""
         self.setStyleSheet("""
             QMainWindow, QDialog {
-                background-color: #1f1f1f;
-                color: #e0e0e0;
+                background-color: #1b1e23;
+                color: #e8edf2;
             }
             QWidget {
-                color: #e0e0e0;
+                color: #e8edf2;
             }
             QTableWidget {
                 background-color: #1f1f1f;
@@ -3114,6 +3150,104 @@ class MainWindow(TableMixin, QMainWindow):
                 background-color: #2f2f2f;
                 border: 1px solid #6a6a6a;
                 image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path d='M3 7l2 2 6-6' stroke='%23e0e0e0' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+            }
+            QWidget#HeaderChrome {
+                background-color: #20252b;
+                border: 1px solid #313842;
+                border-radius: 14px;
+            }
+            QWidget#HeaderCluster {
+                background-color: #1a1f25;
+                border: 1px solid #2b313a;
+                border-radius: 10px;
+            }
+            QLabel#HeaderMetaLabel {
+                color: #aeb8c4;
+            }
+            QLabel#QueueStatus {
+                color: #c9d3df;
+                background-color: #1d2330;
+                border: 1px solid #32455e;
+                border-radius: 9px;
+                padding: 4px 10px;
+                font-weight: 600;
+            }
+            QLabel#RebootBanner {
+                color: #f3c88a;
+                background-color: #2b2218;
+                border: 1px solid #6e5430;
+                border-radius: 12px;
+                padding: 8px 12px;
+                font-weight: 600;
+            }
+            QLabel#AdvancedNote {
+                color: #aeb8c4;
+                background-color: #20252b;
+                border: 1px solid #313842;
+                border-radius: 12px;
+                padding: 10px 12px;
+            }
+            QWidget#ViewTabsChrome {
+                background-color: #20252b;
+                border: 1px solid #313842;
+                border-radius: 12px;
+            }
+            QTabBar#ViewTabsNav::tab {
+                background-color: #1c2127;
+                color: #aeb8c4;
+                min-height: 36px;
+                padding: 8px 14px;
+                border: 1px solid #20252b;
+                border-radius: 10px;
+                margin: 0 4px;
+            }
+            QTabBar#ViewTabsNav::tab:selected {
+                background-color: #2b3746;
+                color: #f2f6fb;
+                border: 1px solid #6b93bf;
+                font-weight: 600;
+            }
+            QTabBar#ViewTabsNav::tab:hover:!selected {
+                background-color: #242a31;
+                color: #d6dde6;
+            }
+            QPushButton[role="subtle"], QToolButton[role="subtle"] {
+                background-color: #242a31;
+                border: 1px solid #313842;
+                color: #d6dde6;
+                padding: 4px 10px;
+            }
+            QPushButton[role="subtle"]:hover, QToolButton[role="subtle"]:hover {
+                background-color: #2b323b;
+            }
+            QPushButton[role="primary"] {
+                background-color: #304763;
+                border: 1px solid #6b93bf;
+                color: #f2f6fb;
+                padding: 4px 12px;
+                font-weight: 600;
+            }
+            QPushButton[role="primary"]:hover {
+                background-color: #395473;
+            }
+            QPushButton[role="warning"] {
+                background-color: #47311d;
+                border: 1px solid #c68a44;
+                color: #f5dfbf;
+                padding: 4px 12px;
+                font-weight: 600;
+            }
+            QPushButton[role="warning"]:hover {
+                background-color: #553a22;
+            }
+            QPushButton[alert="true"] {
+                background-color: #3a2326;
+                border: 1px solid #d16a76;
+                color: #ffdbe1;
+                font-weight: 600;
+            }
+            QPushButton[alert="true"]:hover {
+                background-color: #4b2b30;
             }
             QScrollBar:vertical {
                 background-color: #333333;
@@ -3640,13 +3774,18 @@ class MainWindow(TableMixin, QMainWindow):
         if not pairs:
             self.btn_conflicts.setText("Conflicts: 0")
             self.btn_conflicts.setToolTip("No conflicts detected")
-            self.btn_conflicts.setStyleSheet("")
-            return
-        self.btn_conflicts.setText(f"Conflicts: {len(pairs)}")
-        self.btn_conflicts.setToolTip("Open conflict resolutions")
-        self.btn_conflicts.setStyleSheet(
-            "QPushButton { color: #d32f2f; }"
-        )
+            has_alert = False
+        else:
+            self.btn_conflicts.setText(f"Conflicts: {len(pairs)}")
+            self.btn_conflicts.setToolTip("Open conflict resolutions")
+            has_alert = True
+        self.btn_conflicts.setProperty("alert", has_alert)
+        try:
+            self.btn_conflicts.style().unpolish(self.btn_conflicts)
+            self.btn_conflicts.style().polish(self.btn_conflicts)
+            self.btn_conflicts.update()
+        except Exception:
+            pass
 
     def _update_knob_status(self, knob_id: str, status: str, display: str) -> None:
         """Update the status cell for a specific knob."""
