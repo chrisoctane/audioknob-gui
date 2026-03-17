@@ -4,6 +4,18 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.14] - 2026-03-17
+
+### Changed
+- Full view now uses a persistent right-side knob details panel instead of a per-row info column, and the last visible table column stretches cleanly into that panel while action/status controls use flush full-cell surfaces.
+- PipeWire RT now opens as a guided preset-first dialog (`Safe RT`, `Full RT`, `Custom`) with plain-language summaries, an explicit advanced-fields reveal, and a cue that CPU-affinity tuning lives in `Cores & IRQ`.
+- `Cores & IRQ` now includes the PipeWire/WirePlumber affinity-oriented controls (`pipewire_data_loop_affinity`, `systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`), while the `Dev` tab focuses on non-core-placement tuning.
+
+### Fixed
+- Simple-mode preview now keeps tuned-managed rows inline as dimmed `handled by tuned` entries and preserves external/manual reset annotations above level `0`, so dial previews stay intent-complete before Apply.
+- Simple-mode tuned ownership transitions now avoid resetting tuned-managed lower-tier knobs when tuned remains active, while still reapplying lower-tier settings correctly when tuned will be reset.
+- PipeWire RT preset inference now distinguishes `Safe RT`, `Full RT`, and `Custom` states consistently when reopening the dialog.
+
 ## [0.7.13] - 2026-03-17
 
 ### Changed
