@@ -129,6 +129,7 @@ Notes:
 - Core partition knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`) show a locked Apply action until configured; Configure stays available.
 - New Cores & IRQ service-RT knobs (`systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`) show a locked Apply action until configured; Configure stays available.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
+- Button-like table cells use one full-cell control surface instead of a padded inner button, so action/info/status controls align cleanly with the cell chrome.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
 - Sorting by Category/Status keeps grouped headers by default; Req./Risk grouping is available when technical columns are shown.
 - QjackCtl defaults to taskset cores 0,1 and configures Realtime/Priority via settings plus a post-start script; presets are preserved (active preset is updated and unscoped settings mirrored).

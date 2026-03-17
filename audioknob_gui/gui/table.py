@@ -36,7 +36,7 @@ from audioknob_gui.knob_ids import (
 )
 
 TABLE_CONTROL_MIN_HEIGHT = 28
-TABLE_CONTROL_BORDER_RADIUS = 8
+TABLE_CONTROL_BORDER_RADIUS = 10
 TABLE_CELL_H_MARGIN = 6
 TABLE_CELL_V_MARGIN = 4
 
@@ -44,6 +44,12 @@ TABLE_CELL_V_MARGIN = 4
 def compute_table_row_min_height(font_height: int) -> int:
     base_height = TABLE_CONTROL_MIN_HEIGHT + (TABLE_CELL_V_MARGIN * 2) + 2
     return max(base_height, int(font_height) + 18)
+
+
+def cell_widget_uses_flush_surface(widget: QWidget) -> bool:
+    if isinstance(widget, QPushButton):
+        return True
+    return bool(widget.property("table_surface_fill"))
 
 
 class TableMixin:
@@ -416,12 +422,15 @@ class TableMixin:
         container = CellContainer(self._row_bg_color(row))
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(
-            TABLE_CELL_H_MARGIN,
-            TABLE_CELL_V_MARGIN,
-            TABLE_CELL_H_MARGIN,
-            TABLE_CELL_V_MARGIN,
-        )
+        if cell_widget_uses_flush_surface(widget):
+            layout.setContentsMargins(0, 0, 0, 0)
+        else:
+            layout.setContentsMargins(
+                TABLE_CELL_H_MARGIN,
+                TABLE_CELL_V_MARGIN,
+                TABLE_CELL_H_MARGIN,
+                TABLE_CELL_V_MARGIN,
+            )
         layout.setSpacing(0)
         if widget.sizePolicy().horizontalPolicy() in (QSizePolicy.Expanding, QSizePolicy.MinimumExpanding):
             layout.setAlignment(Qt.AlignVCenter)
@@ -444,7 +453,7 @@ class TableMixin:
             f" color: {text_color};"
             f" background-color: {background};"
             f" border: 1px solid {border};"
-            " border-radius: 9px;"
+            f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
             " padding: 4px 10px;"
             f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
             " font-weight: 600;"
@@ -1030,8 +1039,9 @@ class TableMixin:
             
             # Column 0: Info button
             info_btn = QPushButton("i")
-            info_btn.setFixedWidth(32)
+            info_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             info_btn.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
+            info_btn.setMinimumWidth(0)
             info_btn.setToolTip("Show details")
             info_btn.setFocusPolicy(Qt.NoFocus)
             self._style_table_button(info_btn, row_dim=row_dim)
@@ -1132,6 +1142,7 @@ class TableMixin:
                 status_wrap = QWidget()
                 status_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 status_wrap.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
+                status_wrap.setProperty("table_surface_fill", True)
                 wrap_layout = QHBoxLayout(status_wrap)
                 wrap_layout.setContentsMargins(0, 0, 0, 0)
                 wrap_layout.setSpacing(4)
