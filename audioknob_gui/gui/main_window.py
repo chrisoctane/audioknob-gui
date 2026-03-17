@@ -546,37 +546,46 @@ class MainWindow(TableMixin, QMainWindow):
 
         cpu_count = get_cpu_count()
         panel = QWidget()
+        panel.setObjectName("CoresPlanShell")
         root = QVBoxLayout(panel)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
 
         expanded = bool(self.state.get("audio_core_plan_expanded", True))
         header_row = QHBoxLayout()
+        header_row.setSpacing(8)
         self.core_plan_toggle = QToolButton()
+        self.core_plan_toggle.setProperty("role", "subtle")
         self.core_plan_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.core_plan_toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
         self.core_plan_toggle.setText("Audio Core Plan")
         self.core_plan_toggle.setCheckable(True)
         self.core_plan_toggle.setChecked(expanded)
-        self.core_plan_toggle.setAutoRaise(True)
+        self.core_plan_toggle.setAutoRaise(False)
         self.core_plan_toggle.toggled.connect(self._on_core_plan_toggle)
         header_row.addWidget(self.core_plan_toggle)
         self.btn_irq_overview = QPushButton("IRQ Overview")
+        self.btn_irq_overview.setProperty("role", "subtle")
         self.btn_irq_overview.clicked.connect(self._show_irq_overview)
         header_row.addWidget(self.btn_irq_overview)
         header_row.addStretch(1)
         root.addLayout(header_row)
 
         self.core_plan_body = QWidget()
+        self.core_plan_body.setObjectName("CorePlanBody")
         body = QVBoxLayout(self.core_plan_body)
+        body.setContentsMargins(14, 14, 14, 14)
+        body.setSpacing(10)
 
         hint = QLabel(
             "Auto-set chooses audio cores and updates per-knob core selections. "
             "With Linked core plan enabled, audio-role and housekeeping-role core knobs stay in sync."
         )
-        hint.setWordWrap(True)
+        set_label_tone(hint, "muted")
         body.addWidget(hint)
 
         row = QHBoxLayout()
+        row.setSpacing(8)
         row.addWidget(QLabel("Audio cores"))
         self.core_plan_count = QSpinBox()
         self.core_plan_count.setRange(1, max(1, int(cpu_count)))
@@ -584,6 +593,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.core_plan_count.valueChanged.connect(self._on_core_plan_count_changed)
         row.addWidget(self.core_plan_count)
         self.btn_core_plan_auto = QPushButton("Auto-set")
+        self.btn_core_plan_auto.setProperty("role", "primary")
         self.btn_core_plan_auto.clicked.connect(self._on_core_plan_auto)
         row.addWidget(self.btn_core_plan_auto)
         row.addStretch(1)
@@ -607,7 +617,7 @@ class MainWindow(TableMixin, QMainWindow):
         body.addWidget(self.core_plan_linked)
 
         self.core_plan_summary = QLabel("")
-        self.core_plan_summary.setWordWrap(True)
+        set_label_tone(self.core_plan_summary, "muted")
         body.addWidget(self.core_plan_summary)
 
         self.core_plan_body.setVisible(expanded)
@@ -1364,36 +1374,47 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _build_simple_panel(self) -> QWidget:
         panel = QWidget()
+        panel.setObjectName("SimpleModeShell")
         root = QVBoxLayout(panel)
-        root.setContentsMargins(0, 4, 0, 4)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 8, 0, 8)
+        root.setSpacing(14)
 
         self.simple_title_label = QLabel("AudioKnob")
+        self.simple_title_label.setObjectName("SimpleModeTitle")
         self.simple_title_label.setAlignment(Qt.AlignCenter)
-        self.simple_title_label.setStyleSheet("font-weight: 700;")
         root.addWidget(self.simple_title_label)
 
         hint = QLabel(
             "Turn the dial to build the queue. Apply runs the existing pipeline with checks and prompts."
         )
         hint.setAlignment(Qt.AlignCenter)
-        hint.setWordWrap(True)
+        set_label_tone(hint, "muted")
         root.addWidget(hint)
 
         content_row = QHBoxLayout()
         content_row.setSpacing(24)
         content_row.setContentsMargins(0, 2, 0, 0)
 
+        list_card = QWidget()
+        list_card.setObjectName("SimpleModeCard")
+        list_layout = QVBoxLayout(list_card)
+        list_layout.setContentsMargins(18, 16, 18, 16)
+        list_layout.setSpacing(8)
         self.simple_list_label = QLabel("")
+        self.simple_list_label.setObjectName("SimpleModeQueue")
         self.simple_list_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.simple_list_label.setWordWrap(True)
         self.simple_list_label.setTextFormat(Qt.RichText)
         self.simple_list_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.simple_list_label.setMinimumWidth(280)
-        content_row.addWidget(self.simple_list_label, 3)
+        list_layout.addWidget(self.simple_list_label)
+        content_row.addWidget(list_card, 3)
 
-        dial_col = QVBoxLayout()
-        dial_col.setSpacing(6)
+        dial_card = QWidget()
+        dial_card.setObjectName("SimpleModeCard")
+        dial_col = QVBoxLayout(dial_card)
+        dial_col.setContentsMargins(18, 16, 18, 16)
+        dial_col.setSpacing(10)
         self.simple_dial = NumberedDial()
         self.simple_dial.setRange(simple_mode.MIN_LEVEL, simple_mode.MAX_LEVEL)
         self.simple_dial.setValue(simple_mode.clamp_level(self.state.get("simple_level", 1)))
@@ -1409,16 +1430,18 @@ class MainWindow(TableMixin, QMainWindow):
         self._simple_level_commit_timer.timeout.connect(self._commit_pending_simple_level)
 
         self.simple_level_label = QLabel("")
+        self.simple_level_label.setObjectName("SimpleModeLevel")
         self.simple_level_label.setAlignment(Qt.AlignCenter)
         dial_col.addWidget(self.simple_level_label)
 
         self.simple_summary_label = QLabel("")
+        self.simple_summary_label.setProperty("tone", "muted")
         self.simple_summary_label.setAlignment(Qt.AlignCenter)
         self.simple_summary_label.setWordWrap(True)
         dial_col.addWidget(self.simple_summary_label)
         dial_col.addStretch(1)
 
-        content_row.addLayout(dial_col, 2)
+        content_row.addWidget(dial_card, 2)
         root.addLayout(content_row)
 
         return panel
@@ -3222,6 +3245,35 @@ class MainWindow(TableMixin, QMainWindow):
             }
             QLabel[tone="warning"] {
                 color: #f3c88a;
+                font-weight: 600;
+            }
+            QWidget#CoresPlanShell {
+                background-color: #20252b;
+                border: 1px solid #313842;
+                border-radius: 14px;
+            }
+            QWidget#CorePlanBody {
+                background-color: #1a1f25;
+                border: 1px solid #2b313a;
+                border-radius: 12px;
+            }
+            QWidget#SimpleModeCard {
+                background-color: #20252b;
+                border: 1px solid #313842;
+                border-radius: 16px;
+            }
+            QLabel#SimpleModeTitle {
+                color: #f2f6fb;
+                font-size: 18px;
+                font-weight: 700;
+                letter-spacing: 0.3px;
+            }
+            QLabel#SimpleModeQueue {
+                color: #e8edf2;
+            }
+            QLabel#SimpleModeLevel {
+                color: #f2f6fb;
+                font-size: 15px;
                 font-weight: 600;
             }
             QGroupBox[card="true"] {
