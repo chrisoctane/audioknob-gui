@@ -36,6 +36,37 @@ def test_validate_pkexec_command_rejects_truncate_non_worker_log_path() -> None:
         api._validate_pkexec_command(["truncate", "--size", "0", "/etc/shadow"])
 
 
+def test_pick_root_worker_path_refuses_dev_repo_mismatch(monkeypatch, tmp_path) -> None:
+    worker = tmp_path / "audioknob-gui-worker"
+    worker.write_text("#!/bin/sh\n", encoding="utf-8")
+    worker.chmod(0o755)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setenv("AUDIOKNOB_DEV_REPO", str(repo))
+    monkeypatch.setattr(api, "_root_worker_path_candidates", lambda: [str(worker)])
+    monkeypatch.setattr(api, "_configured_root_worker_repo", lambda: "")
+
+    with pytest.raises(RuntimeError, match="Repo GUI is running in dev mode"):
+        api._pick_root_worker_path()
+
+
+def test_pick_root_worker_path_allows_matching_dev_repo(monkeypatch, tmp_path) -> None:
+    worker = tmp_path / "audioknob-gui-worker"
+    worker.write_text("#!/bin/sh\n", encoding="utf-8")
+    worker.chmod(0o755)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setenv("AUDIOKNOB_DEV_REPO", str(repo))
+    monkeypatch.setattr(api, "_root_worker_path_candidates", lambda: [str(worker)])
+    monkeypatch.setattr(api, "_configured_root_worker_repo", lambda: str(repo))
+
+    assert api._pick_root_worker_path() == str(worker)
+
+
 def test_run_worker_reset_defaults_user_parses_json_even_on_nonzero_exit(monkeypatch) -> None:
     payload = '{"schema":1,"reset_count":0,"results":[],"errors":["x"],"scope":"user","needs_root_reset":false}'
 

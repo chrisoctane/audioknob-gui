@@ -32,12 +32,18 @@ Allowed paths:
 - `tests/`
 - `docs/`
 - `scripts/`
+- `packaging/opensuse/build-rpm.sh`
+- `packaging/opensuse/README.md`
 
 Excluded (require explicit user approval to modify):
 - `packaging/` (build scripts, spec files, debian control, desktop entries)
 - `.github/workflows/` (CI/CD pipelines)
 - `polkit/` (privilege escalation policy)
 - `bin/` (entry point scripts)
+
+Approved exception for this batch:
+- 2026-03-17: user approved changes to `packaging/opensuse/build-rpm.sh` and `packaging/opensuse/README.md`
+  to ensure local RPM builds include the current tracked working tree for launcher testing.
 
 Batch protocol:
 1. Use read-only audit -> approved-fix batch -> read-only verification (no mixed passes).

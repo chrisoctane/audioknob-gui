@@ -60,6 +60,8 @@ cd audioknob-gui
 ./packaging/opensuse/build-rpm.sh
 ```
 
+Local RPM builds package the tracked working tree, so modified tracked files are included even if they are not committed yet. Untracked files are excluded; `git add` any new runtime file before building.
+
 Expected output includes:
 
 - `Built RPM(s):`

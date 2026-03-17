@@ -22,8 +22,9 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
   and cannot be independently applied or reset until Power Profile is reset.
 - Applying tuned automatically removes stale audioknob sysctl config files
   for Swappiness and Dirty Bytes (backed up in the transaction for restore).
-- Backend switch is bidirectional: applying tuned disables ppd; resetting
-  (or force-resetting) stops tuned and re-enables ppd with balanced profile.
+- Backend switch is bidirectional: applying tuned masks `power-profiles-daemon.service`
+  so D-Bus activation cannot restart ppd and stop tuned; resetting
+  (or force-resetting) stops tuned, unmasks ppd, and re-enables ppd with balanced profile.
 - powerprofilesctl can be changed by desktop UI (KDE taskbar / GNOME power).
 - If tuned is active, it should be treated as the authoritative power manager.
 - In Simple AudioKnob mode, queue composition skips CPU Performance,

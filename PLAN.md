@@ -10,8 +10,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 python3 -m pip install -U pip
 python3 -m pip install -e .
+sudo ./packaging/install-polkit.sh
 bin/audioknob-gui
 ```
+
+For repo runs that apply root/system knobs, `sudo ./packaging/install-polkit.sh` is required so the pkexec worker points at the same checkout. The app now refuses privileged actions in dev mode if the GUI repo and root worker repo do not match.
 
 ### Desktop launcher (optional, for local testing)
 
@@ -26,6 +29,8 @@ The script auto-detects:
 - **Python**: Prefers `.venv/bin/python3` if present, falls back to system `python3`
 - **Environment**: Sets `AUDIOKNOB_DEV_REPO` so imports work correctly
 
+Root/system knobs still need `sudo ./packaging/install-polkit.sh` so the fixed-path pkexec worker uses the same repo checkout.
+
 The generated `.desktop` file is written to `~/.local/share/applications/audioknob-gui.desktop`.
 
 ### Install on openSUSE Tumbleweed (RPM)
@@ -39,6 +44,8 @@ Build a local RPM from this repo:
 cd /home/chris/audioknob-gui
 ./packaging/opensuse/build-rpm.sh
 ```
+
+Local RPM builds package the tracked working tree, so modified tracked files are included even if they are not committed yet. Untracked files are excluded; `git add` any new runtime file before building.
 
 Install it:
 
@@ -227,6 +234,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - Reset restores the previous profile.
   - If power-profiles-daemon does not expose a performance profile, the knob warns and makes no change.
 - The backend is configurable (Auto / powerprofilesctl / tuned). Auto uses the active backend.
+- When tuned is applied, the app masks `power-profiles-daemon.service` so D-Bus activation cannot restart ppd and stop tuned behind the scenes; reset unmasks ppd before restoring it.
 - tuned can override CPU governor and C-state knobs; the app warns and offers to queue resets for conflicts.
 
 ### Main + Cores & IRQ views

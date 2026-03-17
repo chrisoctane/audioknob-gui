@@ -27,6 +27,8 @@ From the repo root:
 ./packaging/opensuse/build-rpm.sh
 ```
 
+This local RPM build packages the tracked working tree, so modified tracked files are included even before commit. Untracked files are excluded; `git add` any new runtime file before building.
+
 The script writes the SRPM/RPM into `~/rpmbuild/` and prints the resulting RPM path.
 
 ### Install / uninstall

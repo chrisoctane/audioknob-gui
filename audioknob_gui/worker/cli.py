@@ -844,11 +844,37 @@ def _backup_once(
 def _restore_power_profile_effects(effects: list[dict[str, Any]], errors: list[str]) -> int:
     from audioknob_gui.platform.packages import which_command
 
+    def _pre_service_state(unit: str) -> tuple[str, str]:
+        for item in effects:
+            if item.get("kind") != "systemd_unit_toggle" or item.get("unit") != unit:
+                continue
+            pre = item.get("pre", {})
+            return str(pre.get("enabled", "")).strip(), str(pre.get("active", "")).strip()
+        return "", ""
+
+    def _restore_backend(effect: dict[str, Any]) -> str:
+        explicit = str(effect.get("before_backend", "")).strip()
+        if explicit in ("powerprofilesctl", "tuned"):
+            return explicit
+
+        ppd_enabled, ppd_active = _pre_service_state("power-profiles-daemon.service")
+        tuned_enabled, tuned_active = _pre_service_state("tuned.service")
+        if ppd_active == "active" and tuned_active != "active":
+            return "powerprofilesctl"
+        if tuned_active == "active" and ppd_active != "active":
+            return "tuned"
+        if ppd_enabled == "enabled" and tuned_enabled != "enabled":
+            return "powerprofilesctl"
+        if tuned_enabled == "enabled" and ppd_enabled != "enabled":
+            return "tuned"
+
+        return str(effect.get("backend", "")).strip()
+
     restored = 0
     for effect in effects:
         if effect.get("kind") != "power_profile":
             continue
-        backend = str(effect.get("backend", "")).strip()
+        backend = _restore_backend(effect)
         before = str(effect.get("before", "")).strip()
         if not backend or not before:
             continue
@@ -1992,11 +2018,25 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     )
 
         elif kind == "power_profile":
-            from audioknob_gui.worker.ops import select_power_profile_backend, read_power_profile, systemd_enable_now, systemd_disable_now
+            from audioknob_gui.worker.ops import (
+                detect_power_profile_backend,
+                read_power_profile,
+                select_power_profile_backend,
+                systemd_disable_now,
+                systemd_enable_now,
+                systemd_mask_now,
+            )
 
             backend = select_power_profile_backend(params)
             if not backend:
                 raise SystemExit("No power profile backend found (powerprofilesctl or tuned-adm).")
+
+            current_backend = detect_power_profile_backend()
+            restore_backend = backend["backend"]
+            current = None
+            if current_backend:
+                restore_backend = current_backend["backend"]
+                current = read_power_profile(current_backend["backend"], current_backend["cmd"])
 
             # When switching to tuned, stop ppd first (and record its state
             # so restore can re-enable it).  Likewise for the reverse.
@@ -2007,7 +2047,10 @@ def cmd_apply(args: argparse.Namespace) -> int:
             service = backend.get("service")
             peer = _peer_services.get(service or "", "")
             if peer:
-                peer_effect = systemd_disable_now(peer)
+                if peer == "power-profiles-daemon.service" and backend["backend"] == "tuned":
+                    peer_effect = systemd_mask_now(peer)
+                else:
+                    peer_effect = systemd_disable_now(peer)
                 peer_effect["knob_id"] = kid
                 effects.append(peer_effect)
 
@@ -2020,7 +2063,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     if detail:
                         warnings.append(f"Failed to enable {service}: {detail.strip()}")
 
-            current = read_power_profile(backend["backend"], backend["cmd"])
+            if current is None:
+                restore_backend = backend["backend"]
+                current = read_power_profile(backend["backend"], backend["cmd"])
             if current is None:
                 raise SystemExit("Failed to read current power profile")
 
@@ -2074,6 +2119,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     "kind": "power_profile",
                     "knob_id": kid,
                     "backend": backend["backend"],
+                    "before_backend": restore_backend,
                     "before": current,
                     "after": target,
                     "cmd": cmd,
@@ -4078,6 +4124,12 @@ def _force_reset_power_profile(params: dict[str, Any]) -> tuple[bool, str]:
         return False, "Power profile backend metadata is incomplete."
 
     if backend_name == "powerprofilesctl":
+        subprocess.run(["systemctl", "disable", "--now", "tuned.service"],
+                       capture_output=True, text=True)
+        subprocess.run(["systemctl", "unmask", "power-profiles-daemon.service"],
+                       capture_output=True, text=True)
+        subprocess.run(["systemctl", "enable", "--now", "power-profiles-daemon.service"],
+                       capture_output=True, text=True)
         available = _list_powerprofilesctl_profiles(cmd)
         if available and target not in available:
             return False, (
@@ -4097,6 +4149,8 @@ def _force_reset_power_profile(params: dict[str, Any]) -> tuple[bool, str]:
     if backend_name == "tuned":
         # Stop tuned and re-enable ppd for a clean factory state
         subprocess.run(["systemctl", "disable", "--now", "tuned.service"],
+                       capture_output=True, text=True)
+        subprocess.run(["systemctl", "unmask", "power-profiles-daemon.service"],
                        capture_output=True, text=True)
         subprocess.run(["systemctl", "enable", "--now", "power-profiles-daemon.service"],
                        capture_output=True, text=True)

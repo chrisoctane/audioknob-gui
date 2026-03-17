@@ -56,9 +56,54 @@ def _root_worker_path_candidates() -> list[str]:
     return ["/usr/libexec/audioknob-gui-worker"]
 
 
+def _normalize_repo_path(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return str(Path(raw).expanduser().resolve())
+    except Exception:
+        return str(Path(raw).expanduser())
+
+
+def _configured_root_worker_repo() -> str:
+    dev_conf = Path("/etc/audioknob-gui/dev.conf")
+    if not dev_conf.exists():
+        return ""
+    try:
+        lines = dev_conf.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    if not lines:
+        return ""
+    return _normalize_repo_path(lines[0])
+
+
+def _ensure_dev_root_worker_alignment() -> None:
+    gui_repo = _normalize_repo_path(os.environ.get("AUDIOKNOB_DEV_REPO", ""))
+    if not gui_repo:
+        return
+
+    worker_repo = _configured_root_worker_repo()
+    if worker_repo == gui_repo:
+        return
+
+    worker_label = worker_repo or "not configured"
+    raise RuntimeError(
+        "Repo GUI is running in dev mode, but the privileged worker is not pointed at the same checkout.\n\n"
+        f"GUI repo: {gui_repo}\n"
+        f"Root worker repo: {worker_label}\n\n"
+        "Run this once (system change):\n"
+        f"  cd {gui_repo}\n"
+        "  sudo ./packaging/install-polkit.sh\n\n"
+        "Or install the updated package system-wide before applying root/system knobs."
+    )
+
+
 def _pick_root_worker_path() -> str:
     for p in _root_worker_path_candidates():
         if os.path.isabs(p) and os.path.exists(p) and os.access(p, os.X_OK):
+            _ensure_dev_root_worker_alignment()
             return p
     raise RuntimeError(
         "Privileged worker is not installed.\n\n"

@@ -939,12 +939,18 @@ def _power_profile_preview(params: dict[str, Any]) -> tuple[list[list[str]], lis
 
     if backend["backend"] == "powerprofilesctl":
         profile = str(params.get("ppd_profile", "performance")).strip() or "performance"
+        cmds.append(["systemctl", "disable", "--now", "tuned.service"])
+        cmds.append(["systemctl", "unmask", "power-profiles-daemon.service"])
+        cmds.append(["systemctl", "enable", "--now", "power-profiles-daemon.service"])
         cmds.append([backend["cmd"], "set", profile])
         notes.append(f"Backend: power-profiles-daemon ({profile})")
     else:
         profile = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
+        cmds.append(["systemctl", "mask", "--now", "power-profiles-daemon.service"])
+        cmds.append(["systemctl", "enable", "--now", "tuned.service"])
         cmds.append([backend["cmd"], "profile", profile])
         notes.append(f"Backend: tuned ({profile})")
+        notes.append("Masks power-profiles-daemon while tuned is active to prevent D-Bus reactivation.")
     notes.append("Reset restores the previous profile.")
     return cmds, notes
 
@@ -1876,10 +1882,26 @@ def systemd_disable_now(unit: str) -> dict[str, Any]:
     }
 
 
+def systemd_mask_now(unit: str) -> dict[str, Any]:
+    pre_enabled = run(["systemctl", "is-enabled", unit]).stdout.strip()
+    pre_active = run(["systemctl", "is-active", unit]).stdout.strip()
+
+    r = run(["systemctl", "mask", "--now", unit])
+    return {
+        "kind": "systemd_unit_toggle",
+        "unit": unit,
+        "pre": {"enabled": pre_enabled, "active": pre_active},
+        "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
+    }
+
+
 def systemd_enable_now(unit: str, start: bool = True) -> dict[str, Any]:
     """Enable a systemd unit, optionally starting it immediately."""
     pre_enabled = run(["systemctl", "is-enabled", unit]).stdout.strip()
     pre_active = run(["systemctl", "is-active", unit]).stdout.strip()
+
+    if pre_enabled == "masked":
+        run(["systemctl", "unmask", unit])
 
     if start:
         r = run(["systemctl", "enable", "--now", unit])
@@ -1898,6 +1920,9 @@ def systemd_restore(effect: dict[str, Any]) -> None:
     pre = effect.get("pre", {})
     pre_enabled = str(pre.get("enabled", ""))
     pre_active = str(pre.get("active", ""))
+
+    if pre_enabled != "masked":
+        run(["systemctl", "unmask", unit])
 
     if pre_enabled == "enabled":
         run(["systemctl", "enable", unit])
