@@ -1511,7 +1511,7 @@ class MainWindow(TableMixin, QMainWindow):
         return simple_mode.compose_queue_actions(
             level,
             backend_is_tuned=backend_is_tuned,
-            tuned_active=self._power_profile_tuned_active(),
+            tuned_owned_after_apply=self._simple_tuned_owned_after_apply(level),
             managed_knob_ids=self._simple_owned_knob_ids(),
         )
 
@@ -1637,12 +1637,19 @@ class MainWindow(TableMixin, QMainWindow):
         return ordered, excluded
 
     def _simple_tuned_managed_knob_ids(self, level: int) -> list[str]:
-        selected_ids = {setting.id for setting in simple_mode.settings_for_level(level)}
-        if not self._power_profile_backend_is_tuned():
-            return []
-        if POWER_PROFILE_PERFORMANCE not in selected_ids and not self._power_profile_tuned_active():
+        if not self._simple_tuned_owned_after_apply(level):
             return []
         return list(self._tuned_conflict_ids())
+
+    def _simple_tuned_owned_after_apply(self, level: int) -> bool:
+        if not self._power_profile_backend_is_tuned():
+            return False
+        selected_ids = {setting.id for setting in simple_mode.settings_for_level(level)}
+        if POWER_PROFILE_PERFORMANCE in selected_ids:
+            return True
+        if not self._power_profile_tuned_active():
+            return False
+        return POWER_PROFILE_PERFORMANCE not in self._simple_owned_knob_ids()
 
     def _simple_tuned_overlap_knob_ids(self, level: int) -> list[str]:
         return [

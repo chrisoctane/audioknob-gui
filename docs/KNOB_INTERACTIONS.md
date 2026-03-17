@@ -29,7 +29,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - If tuned is active, it should be treated as the authoritative power manager.
 - In Simple AudioKnob mode, queue composition skips CPU Performance,
   Swappiness, and Dirty Bytes when backend resolution is tuned, and also
-  skips them when tuned-backed Power Profile is already active.
+  skips them when tuned-backed Power Profile will remain active after the
+  current simple-mode apply.
 
 ### CPU Performance (persistent governor)
 - Conflicts with tuned profiles that manage CPU governor.

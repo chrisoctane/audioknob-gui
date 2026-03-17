@@ -56,10 +56,48 @@ def test_tuned_managed_queue_ids_only_appear_with_power_profile_and_tuned() -> N
     ]
 
 
-def test_compose_queue_skips_tuned_managed_knobs_when_tuned_is_already_active() -> None:
-    queue_ids = simple_mode.compose_queue_ids(4, backend_is_tuned=True, tuned_active=True)
+def test_compose_queue_skips_tuned_managed_knobs_when_tuned_stays_active() -> None:
+    queue_ids = simple_mode.compose_queue_ids(
+        4,
+        backend_is_tuned=True,
+        tuned_owned_after_apply=True,
+    )
     assert "swappiness" not in queue_ids
     assert "dirty_bytes" not in queue_ids
+
+
+def test_compose_queue_actions_do_not_reset_tuned_managed_knobs_when_tuned_stays_active() -> None:
+    actions = simple_mode.compose_queue_actions(
+        4,
+        backend_is_tuned=True,
+        tuned_owned_after_apply=True,
+        managed_knob_ids={
+            "swappiness",
+            "dirty_bytes",
+            "cpu_governor_performance_persistent",
+        },
+    )
+    assert "swappiness" not in actions
+    assert "dirty_bytes" not in actions
+    assert "cpu_governor_performance_persistent" not in actions
+
+
+def test_compose_queue_actions_reapply_lower_tier_knobs_when_tuned_will_reset() -> None:
+    actions = simple_mode.compose_queue_actions(
+        4,
+        backend_is_tuned=True,
+        tuned_owned_after_apply=False,
+        managed_knob_ids={
+            "power_profile_performance",
+            "swappiness",
+            "dirty_bytes",
+            "cpu_governor_performance_persistent",
+        },
+    )
+    assert actions["power_profile_performance"] == "reset"
+    assert actions["swappiness"] == "apply"
+    assert actions["dirty_bytes"] == "apply"
+    assert actions["cpu_governor_performance_persistent"] == "reset"
 
 
 def test_apply_fixed_presets_sets_safe_rt_and_mlock() -> None:

@@ -119,12 +119,12 @@ def tuned_managed_queue_ids(
     level: int,
     *,
     backend_is_tuned: bool,
-    tuned_active: bool = False,
+    tuned_owned_after_apply: bool = False,
 ) -> list[str]:
     selected_ids = {s.id for s in settings_for_level(level)}
     if not backend_is_tuned:
         return []
-    if POWER_PROFILE_PERFORMANCE not in selected_ids and not tuned_active:
+    if POWER_PROFILE_PERFORMANCE not in selected_ids and not tuned_owned_after_apply:
         return []
     return [kid for kid in ORDERED_QUEUE_KNOBS if kid in TUNED_MANAGED_QUEUE_KNOB_IDS]
 
@@ -133,7 +133,7 @@ def compose_queue_ids(
     level: int,
     *,
     backend_is_tuned: bool,
-    tuned_active: bool = False,
+    tuned_owned_after_apply: bool = False,
 ) -> list[str]:
     selected = settings_for_level(level)
     selected_ids = {s.id for s in selected}
@@ -153,7 +153,7 @@ def compose_queue_ids(
     for kid in tuned_managed_queue_ids(
         level,
         backend_is_tuned=backend_is_tuned,
-        tuned_active=tuned_active,
+        tuned_owned_after_apply=tuned_owned_after_apply,
     ):
         queue_ids.discard(kid)
 
@@ -165,19 +165,28 @@ def compose_queue_actions(
     level: int,
     *,
     backend_is_tuned: bool,
-    tuned_active: bool = False,
+    tuned_owned_after_apply: bool = False,
     managed_knob_ids: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, str]:
+    tuned_managed = set(
+        tuned_managed_queue_ids(
+            level,
+            backend_is_tuned=backend_is_tuned,
+            tuned_owned_after_apply=tuned_owned_after_apply,
+        )
+    )
     apply_ids = compose_queue_ids(
         level,
         backend_is_tuned=backend_is_tuned,
-        tuned_active=tuned_active,
+        tuned_owned_after_apply=tuned_owned_after_apply,
     )
     actions: dict[str, str] = {kid: "apply" for kid in apply_ids}
 
     managed = {str(kid) for kid in (managed_knob_ids or ())}
     for kid in ORDERED_QUEUE_KNOBS:
         if kid in managed and kid not in actions:
+            if kid in tuned_managed:
+                continue
             actions[kid] = "reset"
     return actions
 
