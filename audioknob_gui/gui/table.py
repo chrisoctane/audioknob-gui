@@ -39,12 +39,12 @@ TABLE_CONTROL_MIN_HEIGHT = 26
 TABLE_CONTROL_BORDER_RADIUS = 10
 TABLE_CELL_H_MARGIN = 6
 TABLE_CELL_V_MARGIN = 4
-TABLE_FLUSH_SURFACE_H_MARGIN = 3
-TABLE_FLUSH_SURFACE_V_MARGIN = 2
+TABLE_FLUSH_SURFACE_H_MARGIN = 4
+TABLE_FLUSH_SURFACE_V_MARGIN = 3
 
 
 def compute_table_row_min_height(font_height: int) -> int:
-    base_height = TABLE_CONTROL_MIN_HEIGHT + (TABLE_CELL_V_MARGIN * 2) + 2
+    base_height = TABLE_CONTROL_MIN_HEIGHT + (TABLE_CELL_V_MARGIN * 2) + 4
     return max(base_height, int(font_height) + 18)
 
 
@@ -310,7 +310,7 @@ class TableMixin:
 
     def _style_table_button(self, btn: QPushButton, *, row_dim: bool = False) -> None:
         bg = "#20242b" if row_dim else "#262c34"
-        border = "#2f3641" if row_dim else "#3a4451"
+        border = "#2c343e" if row_dim else "#34404c"
         hover_bg = "#2c333d" if row_dim else "#313b47"
         pressed_bg = "#1d2228" if row_dim else "#232930"
         btn.setStyleSheet(
@@ -319,13 +319,13 @@ class TableMixin:
             " color: #edf1f7;"
             f" border: 1px solid {border};"
             f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
-            " padding: 3px 10px;"
+            " padding: 2px 10px;"
             f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
             " font-weight: 500;"
             "}"
             "QPushButton:hover {"
             f" background-color: {hover_bg};"
-            " border-color: #6f8fb7;"
+            " border-color: #617997;"
             "}"
             "QPushButton:pressed {"
             f" background-color: {pressed_bg};"
@@ -344,20 +344,39 @@ class TableMixin:
             QComboBox, QSpinBox {{
                 background-color: #262c34;
                 color: #edf1f7;
-                border: 1px solid #3a4451;
-                padding: 4px 8px;
+                border: 1px solid #34404c;
+                padding: 2px 8px;
                 border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;
                 min-height: {TABLE_CONTROL_MIN_HEIGHT}px;
+            }}
+            QComboBox:hover, QSpinBox:hover {{
+                background-color: #2b3139;
+                border-color: #617997;
+            }}
+            QComboBox:focus, QSpinBox:focus {{
+                border-color: #6b93bf;
             }}
             QComboBox:disabled, QSpinBox:disabled {{
                 background-color: #1c2026;
                 color: #7d8796;
                 border: 1px solid #2a3038;
             }}
-            QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {{
-                border: 1px solid #3a4451;
-                background-color: #2c333d;
-                border-radius: 6px;
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 22px;
+                border: none;
+                border-left: 1px solid #313844;
+                background-color: transparent;
+                margin: 1px 1px 1px 0;
+                border-top-right-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                border: none;
+                border-left: 1px solid #313844;
+                background-color: transparent;
+                width: 18px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: #262c34;
@@ -452,7 +471,7 @@ class TableMixin:
     def _status_button_stylesheet(self, text_color: str, *, row_dim: bool = False, accent: str | None = None) -> str:
         background = "#20242b" if row_dim else "#222934"
         hover_background = "#2b333f" if row_dim else "#2d3846"
-        border = accent or "#425066"
+        border = accent or "#3d4b5f"
         disabled_background = "#1c2026"
         return (
             "QPushButton {"
@@ -461,13 +480,13 @@ class TableMixin:
             f" background-color: {background};"
             f" border: 1px solid {border};"
             f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
-            " padding: 3px 10px;"
+            " padding: 2px 10px;"
             f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
             " font-weight: 600;"
             "}"
             "QPushButton:hover {"
             f" background-color: {hover_background};"
-            " border-color: #86a7d2;"
+            " border-color: #6f8fb7;"
             "}"
             "QPushButton:disabled {"
             " color: #8e96a3;"
@@ -489,6 +508,7 @@ class TableMixin:
         if isinstance(widget, (QComboBox, QSpinBox)):
             widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             widget.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
+            widget.setProperty("table_surface_fill", True)
             self._style_table_combo(widget)
         self._wrap_cell_widget(row, 3, widget)
 
@@ -850,7 +870,7 @@ class TableMixin:
                 " color: #7d8796;"
                 " border: 1px solid #313844;"
                 f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
-                " padding: 3px 10px;"
+                " padding: 2px 10px;"
                 f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
                 "}"
                 "QPushButton:hover {"

@@ -155,7 +155,10 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - Simple apply normalizes queue payloads before worker execution:
   - `group_membership`/`read_only` kinds are excluded from worker apply/reset payloads.
   - already-active knobs are skipped to avoid duplicate apply attempts.
-- Level `0` reset preview stays intent-complete: all simple knobs are listed, and non-queued reset rows are annotated (`manual action`, `set outside AudioKnob`, `already off`).
+- Basic preview updates on every dial move from the same queue-composition rules used for the eventual queued actions.
+- Tuned-owned simple overlaps stay inline in the preview as dimmed `handled by tuned` rows; they are not rendered in a separate section.
+- Nonzero turn-down preview shows managed removals plus any active out-of-scope rows that remain `handled externally` or still require `manual action`.
+- Level `0` reset preview stays intent-complete: all simple knobs are listed, and non-queued reset rows are annotated (`manual action`, `handled externally`, `already off`).
 - If queued knobs require audio groups and groups are missing, simple apply routes through the same Join Audio Groups prerequisite workflow as Full mode.
 - Top safety latch tiers are:
   - level 10: Safe RT stack (RT limits + fixed Safe PipeWire RT bundle)

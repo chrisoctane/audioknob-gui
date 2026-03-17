@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from audioknob_gui.gui import simple_mode
+from audioknob_gui.gui.main_window import MainWindow
 
 
 def test_clamp_level_bounds() -> None:
@@ -44,6 +47,14 @@ def test_compose_queue_skips_governor_when_tuned() -> None:
     assert "cpu_governor_performance_persistent" not in queue_ids
     assert "swappiness" not in queue_ids
     assert "dirty_bytes" not in queue_ids
+
+
+def test_compose_requested_queue_ids_keeps_tuned_managed_rows_for_preview() -> None:
+    queue_ids = simple_mode.compose_requested_queue_ids(9)
+    assert "power_profile_performance" in queue_ids
+    assert "swappiness" in queue_ids
+    assert "dirty_bytes" in queue_ids
+    assert "cpu_governor_performance_persistent" in queue_ids
 
 
 def test_tuned_managed_queue_ids_only_appear_with_power_profile_and_tuned() -> None:
@@ -144,4 +155,89 @@ def test_normalize_queue_actions_drops_non_queue_and_already_applied() -> None:
     assert normalized == {
         "inotify_max_watches": "apply",
         "swappiness": "reset",
+    }
+
+
+def test_simple_apply_preview_marks_tuned_owned_rows_inline() -> None:
+    registry = [
+        SimpleNamespace(id="swappiness", impl=SimpleNamespace(kind="sysctl_conf")),
+        SimpleNamespace(id="dirty_bytes", impl=SimpleNamespace(kind="sysctl_conf")),
+        SimpleNamespace(id="audio_group_membership", impl=SimpleNamespace(kind="group_membership")),
+    ]
+
+    dummy = SimpleNamespace(
+        registry=registry,
+        _knob_statuses={
+            "swappiness": "applied",
+            "dirty_bytes": "not_applied",
+            "audio_group_membership": "not_applied",
+        },
+        _simple_non_queue_knob_ids=lambda: {"audio_group_membership"},
+        _simple_skip_apply_knob_ids=lambda: set(),
+        _simple_tuned_managed_knob_ids=lambda _level: ["swappiness", "dirty_bytes"],
+        _knob_commands_ok=lambda _knob: True,
+        _knob_missing_commands=lambda _knob: [],
+    )
+
+    reasons = MainWindow._simple_excluded_apply_reasons(
+        dummy,
+        9,
+        ["swappiness", "dirty_bytes", "audio_group_membership"],
+        {"power_profile_performance": "apply"},
+    )
+    assert reasons == {
+        "swappiness": "handled by tuned; currently active",
+        "dirty_bytes": "handled by tuned",
+        "audio_group_membership": "manual action",
+    }
+
+
+def test_simple_reset_preview_shows_external_rows_above_zero() -> None:
+    registry = [
+        SimpleNamespace(id="audio_group_membership"),
+        SimpleNamespace(id="swappiness"),
+        SimpleNamespace(id="dirty_bytes"),
+        SimpleNamespace(id="inotify_max_watches"),
+    ]
+
+    dummy = SimpleNamespace(
+        registry=registry,
+        _knob_statuses={
+            "audio_group_membership": "pending_reboot",
+            "swappiness": "applied",
+            "dirty_bytes": "not_applied",
+            "inotify_max_watches": "not_applied",
+        },
+    )
+
+    reasons = MainWindow._simple_excluded_reset_reasons(
+        dummy,
+        4,
+        {},
+        requested_apply_ids={"inotify_max_watches"},
+    )
+    assert reasons == {
+        "audio_group_membership": "manual action",
+        "swappiness": "handled externally",
+    }
+
+
+def test_simple_reset_preview_keeps_full_off_annotations() -> None:
+    registry = [
+        SimpleNamespace(id="audio_group_membership"),
+        SimpleNamespace(id="dirty_bytes"),
+    ]
+
+    dummy = SimpleNamespace(
+        registry=registry,
+        _knob_statuses={
+            "audio_group_membership": "not_applied",
+            "dirty_bytes": "not_applied",
+        },
+    )
+
+    reasons = MainWindow._simple_excluded_reset_reasons(dummy, 0, {}, requested_apply_ids=set())
+    assert reasons == {
+        "audio_group_membership": "manual action",
+        "dirty_bytes": "already off",
     }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QPushButton
+from PySide6.QtWidgets import QComboBox, QPushButton, QSizePolicy
 
 from audioknob_gui.gui.dialogs.alsa_xrun import list_alsa_cards
 
@@ -21,7 +21,10 @@ def build_alsa_xrun_action(ui, knob, ctx):
 def build_alsa_xrun_config(ui, knob, ctx):
     """Build a card-selector combo for the config column."""
     combo = QComboBox()
-    combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+    combo.setMinimumWidth(0)
+    combo.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+    combo.setMinimumContentsLength(12)
+    combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
     for card in list_alsa_cards():
         label = f"card{card['index']}: {card['id']}"
         combo.addItem(label, card["index"])

@@ -403,6 +403,7 @@ class MainWindow(TableMixin, QMainWindow):
         self._update_cores_panel_visibility()
 
         self.table = QTableWidget(0, 9)
+        self.table.setObjectName("FullViewTable")
         self.table.setHorizontalHeaderLabels(
             ["Info", "Knob", "Action", "Config", "Req.", "Status", "Category", "Risk", "CLI"]
         )
@@ -445,7 +446,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.full_view_splitter = QSplitter(Qt.Horizontal)
         self.full_view_splitter.setObjectName("FullViewSplitter")
         self.full_view_splitter.setChildrenCollapsible(False)
-        self.full_view_splitter.setHandleWidth(10)
+        self.full_view_splitter.setHandleWidth(1)
         self.full_view_splitter.addWidget(self.table)
         self.full_view_splitter.addWidget(self.info_panel_shell)
         self.full_view_splitter.setStretchFactor(0, 5)
@@ -1680,11 +1681,7 @@ class MainWindow(TableMixin, QMainWindow):
     def _on_simple_level_changed(self, value: int) -> None:
         level = simple_mode.clamp_level(value)
         self._simple_level_pending = level
-        if level == 0:
-            self.simple_level_label.setText(f"Risk level: 0/{simple_mode.MAX_LEVEL} (Off)")
-        else:
-            self.simple_level_label.setText(f"Risk level: {level}/{simple_mode.MAX_LEVEL}")
-        self.simple_summary_label.setText("Updating queue...")
+        self._render_simple_preview(level)
         if hasattr(self, "_simple_level_commit_timer"):
             self._simple_level_commit_timer.start()
         else:
@@ -1731,6 +1728,9 @@ class MainWindow(TableMixin, QMainWindow):
             managed_knob_ids=self._simple_owned_knob_ids(),
         )
 
+    def _simple_requested_apply_ids(self, level: int) -> list[str]:
+        return simple_mode.compose_requested_queue_ids(level)
+
     def _simple_non_queue_knob_ids(self) -> set[str]:
         out: set[str] = set(simple_mode.NON_QUEUE_KNOB_IDS)
         for knob in self.registry:
@@ -1754,14 +1754,18 @@ class MainWindow(TableMixin, QMainWindow):
                 skip.add(knob.id)
         return skip
 
-    def _simple_excluded_apply_reasons(self, actions: dict[str, str]) -> dict[str, str]:
+    def _simple_excluded_apply_reasons(
+        self,
+        level: int,
+        requested_apply_ids: list[str],
+        actions: dict[str, str],
+    ) -> dict[str, str]:
         non_queue_knob_ids = self._simple_non_queue_knob_ids()
         skip_apply_knob_ids = self._simple_skip_apply_knob_ids()
+        tuned_managed_ids = set(self._simple_tuned_managed_knob_ids(level))
         reasons: dict[str, str] = {}
         by_id = {k.id: k for k in self.registry}
-        for kid, action in actions.items():
-            if action != "apply":
-                continue
+        for kid in requested_apply_ids:
             status = self._knob_statuses.get(kid, "unknown")
             knob = by_id.get(kid)
             if kid in non_queue_knob_ids:
@@ -1771,6 +1775,12 @@ class MainWindow(TableMixin, QMainWindow):
                     reasons[kid] = "manual action"
                 else:
                     reasons[kid] = "not queued"
+                continue
+            if kid in tuned_managed_ids:
+                if status in ACTIVE_CONFLICT_STATES:
+                    reasons[kid] = "handled by tuned; currently active"
+                else:
+                    reasons[kid] = "handled by tuned"
                 continue
             if knob is not None and not self._knob_commands_ok(knob):
                 missing = self._knob_missing_commands(knob)
@@ -1782,28 +1792,40 @@ class MainWindow(TableMixin, QMainWindow):
             if status == "not_applicable":
                 reasons[kid] = "not available"
                 continue
+            if actions.get(kid) != "apply" and kid not in tuned_managed_ids:
+                continue
             if kid in skip_apply_knob_ids:
                 reasons[kid] = "already active"
         return reasons
 
-    def _simple_excluded_reset_reasons(self, level: int, actions: dict[str, str]) -> dict[str, str]:
-        if level != 0:
-            return {}
+    def _simple_excluded_reset_reasons(
+        self,
+        level: int,
+        actions: dict[str, str],
+        *,
+        requested_apply_ids: set[str] | None = None,
+    ) -> dict[str, str]:
         reasons: dict[str, str] = {}
         planned_reset = {kid for kid, action in actions.items() if action == "reset"}
+        requested_apply = set(requested_apply_ids or ())
+        show_full_off_preview = level == 0
         for knob in self.registry:
             kid = knob.id
             if kid not in simple_mode.ORDERED_QUEUE_KNOBS:
                 continue
             if kid in planned_reset:
                 continue
+            if kid in requested_apply:
+                continue
             status = self._knob_statuses.get(kid, "unknown")
             if kid in simple_mode.NON_QUEUE_KNOB_IDS:
-                reasons[kid] = "manual action"
+                if show_full_off_preview or status in ACTIVE_CONFLICT_STATES:
+                    reasons[kid] = "manual action"
                 continue
-            if status in ("applied", "pending_reboot", "partial"):
-                reasons[kid] = "set outside AudioKnob"
-            else:
+            if status in ACTIVE_CONFLICT_STATES:
+                reasons[kid] = "handled externally"
+                continue
+            if show_full_off_preview:
                 reasons[kid] = "already off"
         return reasons
 
@@ -1825,37 +1847,59 @@ class MainWindow(TableMixin, QMainWindow):
         )
         return normalized, dropped_non_queue, dropped_applied
 
-    def _simple_display_apply_ids(self, level: int) -> tuple[list[str], dict[str, str]]:
+    def _simple_preview_state(
+        self,
+        level: int,
+    ) -> tuple[list[str], dict[str, str], list[str], dict[str, str]]:
         planned = self._simple_planned_actions(level)
-        excluded = self._simple_excluded_apply_reasons(planned)
-        ordered = [kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if planned.get(kid) == "apply"]
+        requested_apply_ids = self._simple_requested_apply_ids(level)
+        excluded_apply = self._simple_excluded_apply_reasons(
+            level,
+            requested_apply_ids,
+            planned,
+        )
+        ordered_apply = [kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if kid in requested_apply_ids]
         extras = [
             kid
-            for kid, action in planned.items()
-            if action == "apply" and kid not in ordered
+            for kid in requested_apply_ids
+            if kid not in ordered_apply
         ]
-        ordered.extend(sorted(extras))
-        return ordered, excluded
-
-    def _simple_display_reset_ids(self, level: int) -> tuple[list[str], dict[str, str]]:
-        planned = self._simple_planned_actions(level)
-        excluded = self._simple_excluded_reset_reasons(level, planned)
-        ordered = [kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if planned.get(kid) == "reset"]
+        ordered_apply.extend(sorted(extras))
+        excluded_reset = self._simple_excluded_reset_reasons(
+            level,
+            planned,
+            requested_apply_ids=set(requested_apply_ids),
+        )
+        ordered_reset = [kid for kid in simple_mode.ORDERED_QUEUE_KNOBS if planned.get(kid) == "reset"]
         for kid in simple_mode.ORDERED_QUEUE_KNOBS:
-            if kid in excluded and kid not in ordered:
-                ordered.append(kid)
+            if kid in excluded_reset and kid not in ordered_reset:
+                ordered_reset.append(kid)
         extras = [
             kid
             for kid, action in planned.items()
-            if action == "reset" and kid not in ordered
+            if action == "reset" and kid not in ordered_reset
         ]
-        ordered.extend(sorted(extras))
-        return ordered, excluded
+        ordered_reset.extend(sorted(extras))
+        return ordered_apply, excluded_apply, ordered_reset, excluded_reset
+
+    def _render_simple_preview(self, level: int) -> None:
+        ordered_apply, excluded_apply, ordered_reset, excluded_reset = self._simple_preview_state(level)
+        self._refresh_simple_summary(
+            level,
+            ordered_apply,
+            ordered_reset,
+            excluded_apply_reasons=excluded_apply,
+            excluded_reset_reasons=excluded_reset,
+        )
 
     def _simple_tuned_managed_knob_ids(self, level: int) -> list[str]:
         if not self._simple_tuned_owned_after_apply(level):
             return []
-        return list(self._tuned_conflict_ids())
+        return simple_mode.tuned_managed_queue_ids(
+            level,
+            backend_is_tuned=self._power_profile_backend_is_tuned(),
+            tuned_owned_after_apply=True,
+        )
 
     def _simple_tuned_owned_after_apply(self, level: int) -> bool:
         if not self._power_profile_backend_is_tuned():
@@ -1866,13 +1910,6 @@ class MainWindow(TableMixin, QMainWindow):
         if not self._power_profile_tuned_active():
             return False
         return POWER_PROFILE_PERFORMANCE not in self._simple_owned_knob_ids()
-
-    def _simple_tuned_overlap_knob_ids(self, level: int) -> list[str]:
-        return [
-            kid
-            for kid in self._simple_tuned_managed_knob_ids(level)
-            if self._knob_statuses.get(kid, "unknown") in ACTIVE_CONFLICT_STATES
-        ]
 
     def _simple_group_prereq_ready(self, queued: list[tuple[str, str]]) -> bool:
         by_id = {k.id: k for k in self.registry}
@@ -1926,8 +1963,6 @@ class MainWindow(TableMixin, QMainWindow):
         reset_queue_ids = list(reset_queue_ids or [])
         excluded_apply_reasons = dict(excluded_apply_reasons or {})
         excluded_reset_reasons = dict(excluded_reset_reasons or {})
-        tuned_managed_ids = self._simple_tuned_managed_knob_ids(level)
-        tuned_overlap_ids = set(self._simple_tuned_overlap_knob_ids(level))
         if level == 0:
             self.simple_level_label.setText(f"Risk level: 0/{simple_mode.MAX_LEVEL} (Off)")
         else:
@@ -1937,24 +1972,19 @@ class MainWindow(TableMixin, QMainWindow):
         apply_count = len(apply_queue_ids) - skipped_apply_count
         reset_count = len(reset_queue_ids) - skipped_reset_count
         total = apply_count + reset_count
+        preview_only = level != self._current_simple_level()
+        actions_label = "Preview actions" if preview_only else "Queued actions"
+        apply_label = "Preview apply knobs" if preview_only else "Queued apply knobs"
         if reset_count:
-            summary = (
-                f"Queued actions: {total} ({apply_count} apply, {reset_count} reset)"
-            )
+            summary = f"{actions_label}: {total} ({apply_count} apply, {reset_count} reset)"
             skipped_total = skipped_apply_count + skipped_reset_count
             if skipped_total:
                 summary += f" • {skipped_total} skipped"
         else:
-            summary = f"Queued apply knobs: {apply_count}"
+            summary = f"{apply_label}: {apply_count}"
             skipped_total = skipped_apply_count + skipped_reset_count
             if skipped_total:
                 summary += f" ({skipped_total} skipped)"
-        if tuned_managed_ids:
-            summary += f" • {len(tuned_managed_ids)} settings handled by tuned"
-            if tuned_overlap_ids:
-                overlap_count = len(tuned_overlap_ids)
-                label = "overlap" if overlap_count == 1 else "overlaps"
-                summary += f" • {overlap_count} active {label} may prompt resets"
         self.simple_summary_label.setText(summary)
         if apply_queue_ids or reset_queue_ids:
             lines: list[str] = []
@@ -1986,42 +2016,6 @@ class MainWindow(TableMixin, QMainWindow):
                         )
                     else:
                         lines.append(f"• {html_lib.escape(title)}")
-            if tuned_managed_ids:
-                if lines:
-                    lines.append("")
-                lines.append("<b>Handled by tuned</b>")
-                tuned_selected = POWER_PROFILE_PERFORMANCE in {
-                    setting.id for setting in simple_mode.settings_for_level(level)
-                }
-                if tuned_selected:
-                    tuned_text = (
-                        "Power Profile will use tuned, so these overlapping settings are owned there "
-                        "instead of by the dial."
-                    )
-                else:
-                    tuned_text = (
-                        "tuned is already active, so these overlapping settings stay owned there "
-                        "until Power Profile is reset."
-                    )
-                lines.append(
-                    "<span style='color: #aeb8c4;'>"
-                    f"{html_lib.escape(tuned_text)}"
-                    "</span>"
-                )
-                for kid in tuned_managed_ids:
-                    title = by_id.get(kid, kid)
-                    if kid in tuned_overlap_ids:
-                        lines.append(
-                            "<span style='color: #f3c88a;'>"
-                            f"• {html_lib.escape(title)} (currently active; Apply may offer reset)"
-                            "</span>"
-                        )
-                    else:
-                        lines.append(
-                            "<span style='color: #aeb8c4;'>"
-                            f"• {html_lib.escape(title)}"
-                            "</span>"
-                        )
             self.simple_list_label.setText("<br>".join(lines))
         else:
             self.simple_list_label.setText("No settings queued.")
@@ -3179,15 +3173,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.btn_apply_queue.setEnabled(enabled)
         self.btn_apply_queue_reboot.setEnabled(enabled and self._queue_requires_reboot())
         if self._ui_mode == "simple" and hasattr(self, "simple_list_label"):
-            ordered_apply, excluded_apply_reasons = self._simple_display_apply_ids(self._current_simple_level())
-            ordered_reset, excluded_reset_reasons = self._simple_display_reset_ids(self._current_simple_level())
-            self._refresh_simple_summary(
-                self._current_simple_level(),
-                ordered_apply,
-                ordered_reset,
-                excluded_apply_reasons=excluded_apply_reasons,
-                excluded_reset_reasons=excluded_reset_reasons,
-            )
+            self._render_simple_preview(self._current_simple_level())
 
     def _apply_queue_button_state(
         self, btn: QPushButton, knob_id: str, action: str, *, row_dim: bool = False
@@ -3588,6 +3574,11 @@ class MainWindow(TableMixin, QMainWindow):
                 border: 1px solid #313842;
                 border-radius: 12px;
             }
+            QTableWidget#FullViewTable {
+                border-right: none;
+                border-top-right-radius: 0;
+                border-bottom-right-radius: 0;
+            }
             QTextEdit[surface="panel"], QListWidget[surface="panel"] {
                 padding: 6px;
             }
@@ -3616,16 +3607,20 @@ class MainWindow(TableMixin, QMainWindow):
                 color: #d6dde6;
             }
             QSplitter#FullViewSplitter::handle {
-                background-color: #20252b;
+                background-color: transparent;
             }
             QSplitter#FullViewSplitter::handle:horizontal {
-                width: 10px;
-                margin: 10px 0;
+                width: 1px;
+                margin: 0;
             }
             QWidget#KnobInfoPanelShell {
                 background-color: #20252b;
                 border: 1px solid #313842;
-                border-radius: 12px;
+                border-left: none;
+                border-top-left-radius: 0;
+                border-bottom-left-radius: 0;
+                border-top-right-radius: 12px;
+                border-bottom-right-radius: 12px;
             }
             QLabel#KnobInfoPanelTitle {
                 color: #f2f6fb;
@@ -4736,11 +4731,22 @@ class MainWindow(TableMixin, QMainWindow):
                 continue
             action.setIcon(factory_icon)
 
+    def _sync_full_view_column_modes(self) -> None:
+        header = self.table.horizontalHeader()
+        visible_columns = [
+            col for col in range(self.table.columnCount()) if not self.table.isColumnHidden(col)
+        ]
+        fill_column = visible_columns[-1] if visible_columns else None
+        for col in range(self.table.columnCount()):
+            mode = QHeaderView.Stretch if col == fill_column else QHeaderView.Interactive
+            header.setSectionResizeMode(col, mode)
+
     def _apply_technical_column_visibility(self) -> None:
         show = bool(self.state.get("show_technical_columns", False))
         self.table.setColumnHidden(0, True)
         for col in (4, 7, 8):
             self.table.setColumnHidden(col, not show)
+        self._sync_full_view_column_modes()
 
     def _on_technical_columns_toggle(self, enabled: bool) -> None:
         self.state["show_technical_columns"] = bool(enabled)

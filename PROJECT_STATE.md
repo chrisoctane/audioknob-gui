@@ -19,9 +19,9 @@
 - **Group membership special-case contract** - `audio_group_membership` remains an immediate Join/Leave workflow (explicit confirmation), intentionally outside worker preview/apply/reset/force-reset transaction paths
 - **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible action queue (apply/reset)
 - **Simple queue normalization** - simple apply strips non-queue kinds (for example `group_membership`), skips duplicate apply actions for knobs already active, and skips apply actions for knobs that are not available or missing required commands (while still showing them in the simple list as skipped with a reason).
-- **Simple queue preview visibility** - simple view keeps the full planned apply/reset intent visible and dims filtered entries with explicit reason labels (`manual action`, `already active`, `set outside AudioKnob`)
-- **Simple tuned coverage visibility** - when Power Profile resolves to `tuned`, or tuned-backed Power Profile will remain active after the current simple apply, simple view adds a `Handled by tuned` section that lists the tuned-owned settings and calls out any currently active overlaps that may still prompt reset handling.
-- **Simple level-0 reset visibility** - off position preview includes all simple knobs and explains non-reset rows (`manual action`, `set outside AudioKnob`, `already off`)
+- **Simple queue preview visibility** - simple view keeps the full planned apply/reset intent visible on every dial move and dims filtered entries with explicit reason labels (`manual action`, `already active`, `handled externally`, `handled by tuned`)
+- **Simple tuned coverage visibility** - when Power Profile resolves to `tuned`, or tuned-backed Power Profile will remain active after the current simple apply, tuned-owned rows stay inline in the normal preview list as dimmed `handled by tuned` entries instead of a separate section.
+- **Simple reset preview visibility** - off position preview includes all simple knobs and explains non-reset rows (`manual action`, `handled externally`, `already off`); higher levels still show managed removals plus any active out-of-scope rows that remain externally owned or manual-only.
 - **Simple mode title** - home view heading is `AudioKnob`
 - **Mode switch in header** - dedicated far-left `View` button switches between Simple and Full UI
 - **Simple ownership locks** - knobs applied from simple mode are locked in full view as `Managed by AudioKnob` until explicitly released from Tools
@@ -35,6 +35,7 @@
 - **Package dependencies** - 📦 Install button for missing packages
 - **RT config scanner** - 18 checks with score 0-100%
 - **Persistent knob details panel** - Full view shows knob details in a right-side panel tied to the highlighted row; the panel reuses the same description/status/CLI content as the dialog fallback
+- **Full-view width fill** - the last visible table column stretches to the details panel so row shading and content fill the available width cleanly during resize
 - **Info formatting** - uses tagged lines: [i] summary, [r] requirements, [+] benefits, [-] tradeoffs; requirements are auto-generated
 - **Advanced mode toggle** - gates performance-impacting knobs on the main table
 - **Knob details CLI checks** - Copy/paste status + apply/reset commands per knob
@@ -121,6 +122,7 @@ Notes:
 - Header tabs switch between **Main**, **Cores & IRQ**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates and includes TSC timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock, the Cores & IRQ view filters to core-related knobs plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and PipeWire/WirePlumber affinity controls while showing the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber tuning, kernel RT extras excluding TSC timing knobs, RTKit placeholder). Preset actions live in Tools → Presets.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Cores & IRQ view.
 - Full view uses a persistent right-side knob details panel instead of a per-row Info button column; the panel tracks the highlighted row, fills the spare width beside the table, and updates as rows are hovered or selected.
+- The last visible full-view table column stretches to the details panel so the row striping reaches the panel edge as the window resizes.
 - "Config" is used for in-row selectors (PipeWire quantum/sample-rate) and the QjackCtl CPU core selector.
 - In Cores & IRQ, linked core plan is enabled by default and keeps audio-role core selectors synchronized; housekeeping-role selectors track the inverse CPU set.
 - "Req." shows A/R/D markers for Advanced/Reboot/Depends-on (tooltip shows the key and any group/dependency details).
@@ -303,7 +305,7 @@ Implemented pieces are reflected in "What Works"; remaining items below stay pla
   - if group-required knobs are queued and audio groups are missing, trigger the same Join Audio Groups workflow used in Full mode
 - Simple queue summary remains intent-first:
   - show planned apply entries even when they are filtered from worker payload
-  - show planned reset exclusions at level `0` when knobs are active but owned outside AudioKnob
+  - show planned reset exclusions inline when knobs are active but owned outside AudioKnob
   - show manual-only and already-off reset rows at level `0` so all simple knobs remain visible in turn-down preview
   - dim filtered entries and annotate why they are skipped
 
@@ -424,8 +426,8 @@ Tie-break implementation (draft policy):
   - if tuned-backed Power Profile will remain active after the simple apply, lower simple tiers also skip `cpu_governor_performance_persistent`, `swappiness`, `dirty_bytes`
   - if backend resolution is not `tuned`, queue all
 - Simple preview contract for tuned:
-  - show a `Handled by tuned` section for governor/C-state/swappiness/dirty-byte ownership when Power Profile resolves to tuned or tuned-backed Power Profile will remain active after the simple apply
-  - if any of those knobs are already active, label them as possible reset prompts so simple mode explains the later conflict dialog
+  - show inline dimmed `handled by tuned` preview rows for governor/swappiness/dirty-byte ownership when Power Profile resolves to tuned or tuned-backed Power Profile will remain active after the simple apply
+  - if any of those knobs are already active, annotate the same row so simple mode explains the later conflict dialog without a separate section
 - No other pairwise conflicts exist in the current simple inclusion set.
 
 #### Simple ownership locks (planned)

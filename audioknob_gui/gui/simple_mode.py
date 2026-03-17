@@ -129,12 +129,7 @@ def tuned_managed_queue_ids(
     return [kid for kid in ORDERED_QUEUE_KNOBS if kid in TUNED_MANAGED_QUEUE_KNOB_IDS]
 
 
-def compose_queue_ids(
-    level: int,
-    *,
-    backend_is_tuned: bool,
-    tuned_owned_after_apply: bool = False,
-) -> list[str]:
+def compose_requested_queue_ids(level: int) -> list[str]:
     selected = settings_for_level(level)
     selected_ids = {s.id for s in selected}
     queue_ids: set[str] = set()
@@ -149,6 +144,17 @@ def compose_queue_ids(
     if PIPEWIRE_RT_SETUP in selected_ids:
         queue_ids.add(AUDIO_GROUP_MEMBERSHIP)
 
+    return [kid for kid in ORDERED_QUEUE_KNOBS if kid in queue_ids]
+
+
+def compose_queue_ids(
+    level: int,
+    *,
+    backend_is_tuned: bool,
+    tuned_owned_after_apply: bool = False,
+) -> list[str]:
+    queue_ids = set(compose_requested_queue_ids(level))
+
     # Conflict gate: tuned should own governor/swappiness/dirty policy.
     for kid in tuned_managed_queue_ids(
         level,
@@ -157,8 +163,7 @@ def compose_queue_ids(
     ):
         queue_ids.discard(kid)
 
-    ordered = [kid for kid in ORDERED_QUEUE_KNOBS if kid in queue_ids]
-    return ordered
+    return [kid for kid in ORDERED_QUEUE_KNOBS if kid in queue_ids]
 
 
 def compose_queue_actions(

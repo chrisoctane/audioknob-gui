@@ -157,9 +157,9 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - `disable_tracker` and `disable_baloo` are excluded from simple mode due non-audio desktop usability impact.
 - Simple mode auto-queues dependency bundles (for example RT setup also queues its required RT limits/module pieces).
 - Simple mode normalizes queue actions before apply: non-queue kinds (for example `group_membership`) are removed and already-active knobs are skipped to avoid duplicate apply attempts.
-- Simple-mode queue preview still shows filtered apply/reset items in the list, dimmed with reason labels (for example `manual action`, `already active`, `set outside AudioKnob`, `install: ...`, `not available`) so intent remains visible.
-- When the Power Profile level resolves to `tuned`, or a tuned-backed Power Profile will remain active after the current Basic apply, the simple-mode queue preview adds a **Handled by tuned** section so users can see which related settings tuned owns and whether any active overlaps may still trigger reset prompts.
-- At dial level `0`, the reset preview lists all simple knobs and explains non-reset entries (for example `manual action` or `already off`) so turn-down intent is explicit.
+- Simple-mode queue preview updates on every dial move and still shows filtered apply/reset items in the list, dimmed with reason labels (for example `manual action`, `already active`, `handled externally`, `handled by tuned`, `install: ...`, `not available`) so intent remains visible before Apply.
+- When the Power Profile level resolves to `tuned`, or a tuned-backed Power Profile will remain active after the current Basic apply, the overlapping tuned-owned settings stay inline in the normal preview list as dimmed `handled by tuned` rows instead of being split into a separate section.
+- At dial level `0`, the reset preview lists all simple knobs and explains non-reset entries (for example `manual action` or `already off`) so turn-down intent is explicit. Above `0`, the reset preview still shows managed removals plus any out-of-scope active rows that remain handled externally or still require manual action.
 - If a knob was applied by AudioKnob, the same knob row in Full mode is locked as **Managed by AudioKnob** to prevent mixed-workflow edits.
 - If a simple queue contains knobs that require audio groups, Apply first enforces the same group prerequisite flow as Full mode (Join action first, then reboot/logout-login if pending).
 - Full mode can release these locks only via **Tools → Locks → Release AudioKnob Locks**.
@@ -336,7 +336,7 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - Conflict indicator counts only active/queued knobs (applied/pending/running/partial or queued apply), so idle defaults do not appear as conflicts.
 - The row-level **Conflict** button uses the same active/queued rules as the header counter, so row badges and header counts stay consistent.
 - Conflict warnings cover power profile vs governor/C-states, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
-- In simple mode, when power profile resolves to `tuned`, or tuned-backed Power Profile will remain active after the current Basic apply, the queue skips CPU governor/swappiness/dirty-bytes and shows a **Handled by tuned** note for the broader tuned-owned settings so the hidden coverage is still visible.
+- In simple mode, when power profile resolves to `tuned`, or tuned-backed Power Profile will remain active after the current Basic apply, the queue skips CPU governor/swappiness/dirty-bytes and keeps those rows visible inline as dimmed `handled by tuned` preview entries so the hidden coverage is still visible.
 - Combo-box settings ignore mouse-wheel changes unless the dropdown menu is open, preventing accidental value flips while scrolling.
 - Simple mode shows one plain-text list on the left with **Apply queue** and **Reset queue** sections (no pane, no separate selected-settings list).
 - The font size selector applies universally across existing widgets so simple/full text tracks the selected size.
@@ -518,7 +518,7 @@ if k.id == "qjackctl_server_prefix_rt":
     layout.addWidget(config_btn)
 ```
 
-PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Kernel isolation knobs also use the Config column core selector. The persistent knob details panel shows the same description, status, and CLI guidance that used to live behind the per-row info button while leaving configuration in the row itself. Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying IRQ pinning writes a system config in `/var/lib/audioknob-gui/state.json` and enables `audioknob-irq-pinning.service` so pinning persists across reboots. Applying PipeWire knobs restarts PipeWire services automatically.
+PipeWire buffer size (quantum) and sample rate are configurable via in-row selectors (saved to `state.json`). QjackCtl CPU pinning is configurable via the Config column "Cores" button (default cores: 0,1). Kernel isolation knobs also use the Config column core selector. The persistent knob details panel shows the same description, status, and CLI guidance that used to live behind the per-row info button while leaving configuration in the row itself, and the table stretches to meet that panel cleanly as the window resizes. Applying QjackCtl RT disables ServerConfig, preserves presets (updates the active preset if set), and configures a PostStartupScript so CPU pinning is re-applied when JACK starts. Applying IRQ pinning writes a system config in `/var/lib/audioknob-gui/state.json` and enables `audioknob-irq-pinning.service` so pinning persists across reboots. Applying PipeWire knobs restarts PipeWire services automatically.
 
 ---
 
