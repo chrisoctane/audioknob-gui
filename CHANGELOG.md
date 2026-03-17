@@ -4,6 +4,16 @@ All notable changes to audioknob-gui are documented here.
 
 Format: Keep a short summary per release with clear headings.
 
+## [0.7.13] - 2026-03-17
+
+### Changed
+- Local openSUSE RPM builds now package the tracked working tree instead of `git HEAD`, so local launcher builds include uncommitted tracked fixes. Untracked files remain excluded unless added to git.
+
+### Fixed
+- **Tuned persistence across reboot**: applying the Power Profile knob with backend `tuned` now masks `power-profiles-daemon.service`, preventing D-Bus activation from restarting ppd and stopping tuned after reboot.
+- **Power Profile reset safety**: reset, force-reset, and transaction restore now unmask and restore `power-profiles-daemon.service` before returning to the prior backend/profile, including older transactions that predate the new metadata.
+- **Dev-mode root worker mismatch**: repo GUI runs now refuse privileged actions when the fixed-path pkexec worker is still pointing at an older installed checkout, preventing silent split-brain behavior between GUI code and root operations.
+
 ## [0.7.12] - 2026-03-08
 
 ### Added
