@@ -15,7 +15,11 @@ class CellContainer(QWidget):
 
     def set_bg(self, bg: QColor) -> None:
         self._bg = QColor(bg)
-        self.setStyleSheet(f"background-color: {self._bg.name()};")
+        self.setStyleSheet(
+            f" background-color: {self._bg.name()};"
+            " border: none;"
+            " border-radius: 10px;"
+        )
 
     def content_widget(self) -> QWidget | None:
         layout = self.layout()

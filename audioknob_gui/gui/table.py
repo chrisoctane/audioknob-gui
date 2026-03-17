@@ -35,6 +35,16 @@ from audioknob_gui.knob_ids import (
     POWER_PROFILE_PERFORMANCE,
 )
 
+TABLE_CONTROL_MIN_HEIGHT = 28
+TABLE_CONTROL_BORDER_RADIUS = 8
+TABLE_CELL_H_MARGIN = 6
+TABLE_CELL_V_MARGIN = 4
+
+
+def compute_table_row_min_height(font_height: int) -> int:
+    base_height = TABLE_CONTROL_MIN_HEIGHT + (TABLE_CELL_V_MARGIN * 2) + 2
+    return max(base_height, int(font_height) + 18)
+
 
 class TableMixin:
     def _dependency_titles(self, k) -> list[str]:
@@ -261,6 +271,7 @@ class TableMixin:
         """Create an Apply button."""
         btn = QPushButton(text)
         btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
         btn.setMinimumWidth(0)
         btn.setFocusPolicy(Qt.NoFocus)
         self._style_table_button(btn)
@@ -271,6 +282,7 @@ class TableMixin:
         """Create a Reset button."""
         btn = QPushButton(text)
         btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
         btn.setMinimumWidth(0)
         btn.setFocusPolicy(Qt.NoFocus)
         self._style_table_button(btn)
@@ -281,6 +293,7 @@ class TableMixin:
         """Create an action button."""
         btn = QPushButton(text)
         btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        btn.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
         btn.setMinimumWidth(0)
         btn.setFocusPolicy(Qt.NoFocus)
         self._style_table_button(btn)
@@ -297,9 +310,9 @@ class TableMixin:
             f" background-color: {bg};"
             " color: #edf1f7;"
             f" border: 1px solid {border};"
-            " border-radius: 8px;"
+            f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
             " padding: 4px 10px;"
-            " min-height: 28px;"
+            f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
             " font-weight: 500;"
             "}"
             "QPushButton:hover {"
@@ -319,30 +332,30 @@ class TableMixin:
 
     def _style_table_combo(self, widget: QWidget) -> None:
         widget.setStyleSheet(
-            """
-            QComboBox, QSpinBox {
+            f"""
+            QComboBox, QSpinBox {{
                 background-color: #262c34;
                 color: #edf1f7;
                 border: 1px solid #3a4451;
                 padding: 4px 8px;
-                border-radius: 8px;
-                min-height: 28px;
-            }
-            QComboBox:disabled, QSpinBox:disabled {
+                border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;
+                min-height: {TABLE_CONTROL_MIN_HEIGHT}px;
+            }}
+            QComboBox:disabled, QSpinBox:disabled {{
                 background-color: #1c2026;
                 color: #7d8796;
                 border: 1px solid #2a3038;
-            }
-            QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {
+            }}
+            QComboBox::drop-down, QSpinBox::up-button, QSpinBox::down-button {{
                 border: 1px solid #3a4451;
                 background-color: #2c333d;
                 border-radius: 6px;
-            }
-            QComboBox QAbstractItemView {
+            }}
+            QComboBox QAbstractItemView {{
                 background-color: #262c34;
                 color: #edf1f7;
                 selection-background-color: #313b47;
-            }
+            }}
             """
         )
 
@@ -403,7 +416,13 @@ class TableMixin:
         container = CellContainer(self._row_bg_color(row))
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(8, 5, 8, 5)
+        layout.setContentsMargins(
+            TABLE_CELL_H_MARGIN,
+            TABLE_CELL_V_MARGIN,
+            TABLE_CELL_H_MARGIN,
+            TABLE_CELL_V_MARGIN,
+        )
+        layout.setSpacing(0)
         if widget.sizePolicy().horizontalPolicy() in (QSizePolicy.Expanding, QSizePolicy.MinimumExpanding):
             layout.setAlignment(Qt.AlignVCenter)
             layout.addWidget(widget, 1)
@@ -427,7 +446,7 @@ class TableMixin:
             f" border: 1px solid {border};"
             " border-radius: 9px;"
             " padding: 4px 10px;"
-            " min-height: 28px;"
+            f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
             " font-weight: 600;"
             "}"
             "QPushButton:hover {"
@@ -458,6 +477,7 @@ class TableMixin:
         self._install_hover_tracking(widget, row)
         if isinstance(widget, (QComboBox, QSpinBox)):
             widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            widget.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
             self._style_table_combo(widget)
         self._wrap_cell_widget(row, 3, widget)
 
@@ -465,6 +485,32 @@ class TableMixin:
     def _set_status_cell(self, row: int, widget: QWidget) -> None:
         self._install_hover_tracking(widget, row)
         self._wrap_cell_widget(row, 5, widget)
+
+
+    def _table_row_min_height(self) -> int:
+        try:
+            return compute_table_row_min_height(self.table.fontMetrics().height())
+        except Exception:
+            return compute_table_row_min_height(TABLE_CONTROL_MIN_HEIGHT)
+
+
+    def _enforce_table_row_heights(self) -> None:
+        min_height = self._table_row_min_height()
+        try:
+            header = self.table.verticalHeader()
+            header.setMinimumSectionSize(0)
+            header.setDefaultSectionSize(min_height)
+        except Exception:
+            pass
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None or item.flags() == Qt.NoItemFlags:
+                continue
+            try:
+                if self.table.rowHeight(row) < min_height:
+                    self.table.setRowHeight(row, min_height)
+            except Exception:
+                continue
 
 
     def _preset_match_flags(self, knob_id: str) -> tuple[bool, bool]:
@@ -789,22 +835,22 @@ class TableMixin:
             locked_fg = QColor("#7a7a7a")
             locked_style = (
                 "QPushButton {"
-                " background-color: #1c2026;"
+                " background-color: #20252c;"
                 " color: #7d8796;"
-                " border: 1px solid #2a3038;"
-                " border-radius: 8px;"
+                " border: 1px solid #313844;"
+                f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
                 " padding: 4px 10px;"
-                " min-height: 28px;"
+                f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
                 "}"
                 "QPushButton:hover {"
-                " background-color: #1c2026;"
+                " background-color: #20252c;"
                 " color: #7d8796;"
-                " border: 1px solid #2a3038;"
+                " border: 1px solid #313844;"
                 "}"
                 "QPushButton:pressed {"
-                " background-color: #1c2026;"
+                " background-color: #20252c;"
                 " color: #7d8796;"
-                " border: 1px solid #2a3038;"
+                " border: 1px solid #313844;"
                 "}"
             )
 
@@ -985,6 +1031,7 @@ class TableMixin:
             # Column 0: Info button
             info_btn = QPushButton("i")
             info_btn.setFixedWidth(32)
+            info_btn.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
             info_btn.setToolTip("Show details")
             info_btn.setFocusPolicy(Qt.NoFocus)
             self._style_table_button(info_btn, row_dim=row_dim)
@@ -1058,6 +1105,7 @@ class TableMixin:
             status_btn.setFlat(False)
             status_btn.setProperty("status_button", True)
             status_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            status_btn.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
             status_btn.setCursor(Qt.PointingHandCursor)
             accent_color = "#d32f2f" if conflict_ids else status_color
             status_btn.setStyleSheet(
@@ -1083,9 +1131,10 @@ class TableMixin:
             if reference_match or factory_match:
                 status_wrap = QWidget()
                 status_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                status_wrap.setMinimumHeight(TABLE_CONTROL_MIN_HEIGHT)
                 wrap_layout = QHBoxLayout(status_wrap)
                 wrap_layout.setContentsMargins(0, 0, 0, 0)
-                wrap_layout.setSpacing(5)
+                wrap_layout.setSpacing(4)
                 wrap_layout.addWidget(status_btn, 1)
                 if reference_match:
                     wrap_layout.addWidget(
@@ -1219,9 +1268,9 @@ class TableMixin:
                     " color: #ff8f8f;"
                     " background-color: #2b2124;"
                     " border: 1px solid #92434d;"
-                    " border-radius: 8px;"
+                    f" border-radius: {TABLE_CONTROL_BORDER_RADIUS}px;"
                     " padding: 4px 10px;"
-                    " min-height: 28px;"
+                    f" min-height: {TABLE_CONTROL_MIN_HEIGHT}px;"
                     " font-weight: 600;"
                     "}"
                     "QPushButton:hover {"
@@ -1300,6 +1349,7 @@ class TableMixin:
             self.table.resizeRowsToContents()
         except Exception:
             pass
+        self._enforce_table_row_heights()
         if hasattr(self, "_update_conflict_indicator"):
             self._update_conflict_indicator()
 

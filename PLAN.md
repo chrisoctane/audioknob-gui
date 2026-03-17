@@ -158,6 +158,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - Simple mode auto-queues dependency bundles (for example RT setup also queues its required RT limits/module pieces).
 - Simple mode normalizes queue actions before apply: non-queue kinds (for example `group_membership`) are removed and already-active knobs are skipped to avoid duplicate apply attempts.
 - Simple-mode queue preview still shows filtered apply/reset items in the list, dimmed with reason labels (for example `manual action`, `already active`, `set outside AudioKnob`, `install: ...`, `not available`) so intent remains visible.
+- When the Power Profile level resolves to `tuned`, or a tuned-backed Power Profile is already active, the simple-mode queue preview adds a **Handled by tuned** section so users can see which related settings tuned owns and whether any active overlaps may still trigger reset prompts.
 - At dial level `0`, the reset preview lists all simple knobs and explains non-reset entries (for example `manual action` or `already off`) so turn-down intent is explicit.
 - If a knob was applied by AudioKnob, the same knob row in Full mode is locked as **Managed by AudioKnob** to prevent mixed-workflow edits.
 - If a simple queue contains knobs that require audio groups, Apply first enforces the same group prerequisite flow as Full mode (Join action first, then reboot/logout-login if pending).
@@ -335,7 +336,7 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - Conflict indicator counts only active/queued knobs (applied/pending/running/partial or queued apply), so idle defaults do not appear as conflicts.
 - The row-level **Conflict** button uses the same active/queued rules as the header counter, so row badges and header counts stay consistent.
 - Conflict warnings cover power profile vs governor/C-states, active irqbalance service vs IRQ pinning (not the `irqbalance_disable` dependency knob), PipeWire clock constraints vs quantum/rate, data loop affinity vs CPU/IRQ isolation, and CPU isolation core mismatches.
-- In simple mode, when power profile resolves to `tuned`, the queue skips CPU governor to avoid the tuned/governor conflict path.
+- In simple mode, when power profile resolves to `tuned`, or tuned-backed Power Profile is already active, the queue skips CPU governor/swappiness/dirty-bytes and shows a **Handled by tuned** note for the broader tuned-owned settings so the hidden coverage is still visible.
 - Combo-box settings ignore mouse-wheel changes unless the dropdown menu is open, preventing accidental value flips while scrolling.
 - Simple mode shows one plain-text list on the left with **Apply queue** and **Reset queue** sections (no pane, no separate selected-settings list).
 - The font size selector applies universally across existing widgets so simple/full text tracks the selected size.

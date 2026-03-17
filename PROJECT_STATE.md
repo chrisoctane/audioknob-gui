@@ -20,6 +20,7 @@
 - **Simple AudioKnob mode (v0.7.0)** - default home mode with a numbered dial (`0` off + `1..11` risk tiers) that composes a visible action queue (apply/reset)
 - **Simple queue normalization** - simple apply strips non-queue kinds (for example `group_membership`), skips duplicate apply actions for knobs already active, and skips apply actions for knobs that are not available or missing required commands (while still showing them in the simple list as skipped with a reason).
 - **Simple queue preview visibility** - simple view keeps the full planned apply/reset intent visible and dims filtered entries with explicit reason labels (`manual action`, `already active`, `set outside AudioKnob`)
+- **Simple tuned coverage visibility** - when Power Profile resolves to `tuned`, or tuned-backed Power Profile is already active, simple view adds a `Handled by tuned` section that lists the tuned-owned settings and calls out any currently active overlaps that may still prompt reset handling.
 - **Simple level-0 reset visibility** - off position preview includes all simple knobs and explains non-reset rows (`manual action`, `set outside AudioKnob`, `already off`)
 - **Simple mode title** - home view heading is `AudioKnob`
 - **Mode switch in header** - dedicated far-left `View` button switches between Simple and Full UI
@@ -419,7 +420,11 @@ Tie-break implementation (draft policy):
   - `power_profile_performance` <-> `dirty_bytes`
 - Queue rule for these pairs:
   - if simple preset backend resolution is `tuned`, queue `power_profile_performance` and skip `cpu_governor_performance_persistent`, `swappiness`, `dirty_bytes`
+  - if tuned-backed Power Profile is already active, lower simple tiers also skip `cpu_governor_performance_persistent`, `swappiness`, `dirty_bytes`
   - if backend resolution is not `tuned`, queue all
+- Simple preview contract for tuned:
+  - show a `Handled by tuned` section for governor/C-state/swappiness/dirty-byte ownership when Power Profile resolves to tuned or tuned-backed Power Profile is already active
+  - if any of those knobs are already active, label them as possible reset prompts so simple mode explains the later conflict dialog
 - No other pairwise conflicts exist in the current simple inclusion set.
 
 #### Simple ownership locks (planned)

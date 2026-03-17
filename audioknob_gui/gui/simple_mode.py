@@ -16,6 +16,11 @@ from audioknob_gui.knob_ids import (
 MIN_LEVEL = 0
 MAX_LEVEL = 11
 NON_QUEUE_KNOB_IDS: frozenset[str] = frozenset({AUDIO_GROUP_MEMBERSHIP})
+TUNED_MANAGED_QUEUE_KNOB_IDS: tuple[str, ...] = (
+    "swappiness",
+    "dirty_bytes",
+    "cpu_governor_performance_persistent",
+)
 
 
 @dataclass(frozen=True)
@@ -110,7 +115,26 @@ def settings_for_level(level: int) -> list[SimpleSetting]:
     return [s for s in SIMPLE_SETTINGS if s.level <= level]
 
 
-def compose_queue_ids(level: int, *, backend_is_tuned: bool) -> list[str]:
+def tuned_managed_queue_ids(
+    level: int,
+    *,
+    backend_is_tuned: bool,
+    tuned_active: bool = False,
+) -> list[str]:
+    selected_ids = {s.id for s in settings_for_level(level)}
+    if not backend_is_tuned:
+        return []
+    if POWER_PROFILE_PERFORMANCE not in selected_ids and not tuned_active:
+        return []
+    return [kid for kid in ORDERED_QUEUE_KNOBS if kid in TUNED_MANAGED_QUEUE_KNOB_IDS]
+
+
+def compose_queue_ids(
+    level: int,
+    *,
+    backend_is_tuned: bool,
+    tuned_active: bool = False,
+) -> list[str]:
     selected = settings_for_level(level)
     selected_ids = {s.id for s in selected}
     queue_ids: set[str] = set()
@@ -126,10 +150,12 @@ def compose_queue_ids(level: int, *, backend_is_tuned: bool) -> list[str]:
         queue_ids.add(AUDIO_GROUP_MEMBERSHIP)
 
     # Conflict gate: tuned should own governor/swappiness/dirty policy.
-    if backend_is_tuned and POWER_PROFILE_PERFORMANCE in queue_ids:
-        queue_ids.discard("cpu_governor_performance_persistent")
-        queue_ids.discard("swappiness")
-        queue_ids.discard("dirty_bytes")
+    for kid in tuned_managed_queue_ids(
+        level,
+        backend_is_tuned=backend_is_tuned,
+        tuned_active=tuned_active,
+    ):
+        queue_ids.discard(kid)
 
     ordered = [kid for kid in ORDERED_QUEUE_KNOBS if kid in queue_ids]
     return ordered
@@ -139,9 +165,14 @@ def compose_queue_actions(
     level: int,
     *,
     backend_is_tuned: bool,
+    tuned_active: bool = False,
     managed_knob_ids: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, str]:
-    apply_ids = compose_queue_ids(level, backend_is_tuned=backend_is_tuned)
+    apply_ids = compose_queue_ids(
+        level,
+        backend_is_tuned=backend_is_tuned,
+        tuned_active=tuned_active,
+    )
     actions: dict[str, str] = {kid: "apply" for kid in apply_ids}
 
     managed = {str(kid) for kid in (managed_knob_ids or ())}

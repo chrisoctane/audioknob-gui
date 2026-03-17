@@ -55,6 +55,7 @@ from audioknob_gui.gui.chrome import (
     style_section_box,
 )
 from audioknob_gui.gui.conflicts import (
+    ACTIVE_CONFLICT_STATES,
     CONFLICT_MAP,
     build_conflict_details,
     filtered_active_conflicts,
@@ -396,6 +397,9 @@ class MainWindow(TableMixin, QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setMouseTracking(True)
         self.table.verticalHeader().setVisible(False)
+        enforce_rows = getattr(self, "_enforce_table_row_heights", None)
+        if callable(enforce_rows):
+            enforce_rows()
         header = self.table.horizontalHeader()
         header.setMinimumSectionSize(60)
         info_header = self.table.horizontalHeaderItem(0)
@@ -1507,6 +1511,7 @@ class MainWindow(TableMixin, QMainWindow):
         return simple_mode.compose_queue_actions(
             level,
             backend_is_tuned=backend_is_tuned,
+            tuned_active=self._power_profile_tuned_active(),
             managed_knob_ids=self._simple_owned_knob_ids(),
         )
 
@@ -1631,6 +1636,21 @@ class MainWindow(TableMixin, QMainWindow):
         ordered.extend(sorted(extras))
         return ordered, excluded
 
+    def _simple_tuned_managed_knob_ids(self, level: int) -> list[str]:
+        selected_ids = {setting.id for setting in simple_mode.settings_for_level(level)}
+        if not self._power_profile_backend_is_tuned():
+            return []
+        if POWER_PROFILE_PERFORMANCE not in selected_ids and not self._power_profile_tuned_active():
+            return []
+        return list(self._tuned_conflict_ids())
+
+    def _simple_tuned_overlap_knob_ids(self, level: int) -> list[str]:
+        return [
+            kid
+            for kid in self._simple_tuned_managed_knob_ids(level)
+            if self._knob_statuses.get(kid, "unknown") in ACTIVE_CONFLICT_STATES
+        ]
+
     def _simple_group_prereq_ready(self, queued: list[tuple[str, str]]) -> bool:
         by_id = {k.id: k for k in self.registry}
         apply_knobs = [
@@ -1683,6 +1703,8 @@ class MainWindow(TableMixin, QMainWindow):
         reset_queue_ids = list(reset_queue_ids or [])
         excluded_apply_reasons = dict(excluded_apply_reasons or {})
         excluded_reset_reasons = dict(excluded_reset_reasons or {})
+        tuned_managed_ids = self._simple_tuned_managed_knob_ids(level)
+        tuned_overlap_ids = set(self._simple_tuned_overlap_knob_ids(level))
         if level == 0:
             self.simple_level_label.setText(f"Risk level: 0/{simple_mode.MAX_LEVEL} (Off)")
         else:
@@ -1699,13 +1721,18 @@ class MainWindow(TableMixin, QMainWindow):
             skipped_total = skipped_apply_count + skipped_reset_count
             if skipped_total:
                 summary += f" • {skipped_total} skipped"
-            self.simple_summary_label.setText(summary)
         else:
             summary = f"Queued apply knobs: {apply_count}"
             skipped_total = skipped_apply_count + skipped_reset_count
             if skipped_total:
                 summary += f" ({skipped_total} skipped)"
-            self.simple_summary_label.setText(summary)
+        if tuned_managed_ids:
+            summary += f" • {len(tuned_managed_ids)} settings handled by tuned"
+            if tuned_overlap_ids:
+                overlap_count = len(tuned_overlap_ids)
+                label = "overlap" if overlap_count == 1 else "overlaps"
+                summary += f" • {overlap_count} active {label} may prompt resets"
+        self.simple_summary_label.setText(summary)
         if apply_queue_ids or reset_queue_ids:
             lines: list[str] = []
             if apply_queue_ids:
@@ -1736,6 +1763,42 @@ class MainWindow(TableMixin, QMainWindow):
                         )
                     else:
                         lines.append(f"• {html_lib.escape(title)}")
+            if tuned_managed_ids:
+                if lines:
+                    lines.append("")
+                lines.append("<b>Handled by tuned</b>")
+                tuned_selected = POWER_PROFILE_PERFORMANCE in {
+                    setting.id for setting in simple_mode.settings_for_level(level)
+                }
+                if tuned_selected:
+                    tuned_text = (
+                        "Power Profile will use tuned, so these overlapping settings are owned there "
+                        "instead of by the dial."
+                    )
+                else:
+                    tuned_text = (
+                        "tuned is already active, so these overlapping settings stay owned there "
+                        "until Power Profile is reset."
+                    )
+                lines.append(
+                    "<span style='color: #aeb8c4;'>"
+                    f"{html_lib.escape(tuned_text)}"
+                    "</span>"
+                )
+                for kid in tuned_managed_ids:
+                    title = by_id.get(kid, kid)
+                    if kid in tuned_overlap_ids:
+                        lines.append(
+                            "<span style='color: #f3c88a;'>"
+                            f"• {html_lib.escape(title)} (currently active; Apply may offer reset)"
+                            "</span>"
+                        )
+                    else:
+                        lines.append(
+                            "<span style='color: #aeb8c4;'>"
+                            f"• {html_lib.escape(title)}"
+                            "</span>"
+                        )
             self.simple_list_label.setText("<br>".join(lines))
         else:
             self.simple_list_label.setText("No settings queued.")
@@ -1831,12 +1894,15 @@ class MainWindow(TableMixin, QMainWindow):
     def _tuned_managed_lock_reason(self, knob_id: str) -> str:
         if knob_id not in self._tuned_conflict_ids():
             return ""
-        pp_status = self._knob_statuses.get(POWER_PROFILE_PERFORMANCE, "unknown")
-        if pp_status not in ("applied", "pending_reboot"):
-            return ""
-        if not self._power_profile_backend_is_tuned():
+        if not self._power_profile_tuned_active():
             return ""
         return "Managed by tuned. Reset Power Profile to unlock."
+
+    def _power_profile_tuned_active(self) -> bool:
+        pp_status = self._knob_statuses.get(POWER_PROFILE_PERFORMANCE, "unknown")
+        if pp_status not in ("applied", "pending_reboot"):
+            return False
+        return self._power_profile_backend_is_tuned()
 
     def _on_release_simple_locks(self) -> None:
         owned = self._simple_owned_knob_ids()
@@ -2993,6 +3059,9 @@ class MainWindow(TableMixin, QMainWindow):
             # Reflow rows so widgets/text don't clip at larger font sizes.
             self._apply_default_column_widths()
             self.table.resizeRowsToContents()
+            enforce_rows = getattr(self, "_enforce_table_row_heights", None)
+            if callable(enforce_rows):
+                enforce_rows()
             self.table.viewport().update()
             self._apply_window_constraints()
         except Exception:

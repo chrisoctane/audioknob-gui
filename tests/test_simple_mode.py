@@ -42,6 +42,24 @@ def test_compose_queue_skips_governor_when_tuned() -> None:
     queue_ids = simple_mode.compose_queue_ids(9, backend_is_tuned=True)
     assert "power_profile_performance" in queue_ids
     assert "cpu_governor_performance_persistent" not in queue_ids
+    assert "swappiness" not in queue_ids
+    assert "dirty_bytes" not in queue_ids
+
+
+def test_tuned_managed_queue_ids_only_appear_with_power_profile_and_tuned() -> None:
+    assert simple_mode.tuned_managed_queue_ids(6, backend_is_tuned=True) == []
+    assert simple_mode.tuned_managed_queue_ids(9, backend_is_tuned=False) == []
+    assert simple_mode.tuned_managed_queue_ids(9, backend_is_tuned=True) == [
+        "swappiness",
+        "dirty_bytes",
+        "cpu_governor_performance_persistent",
+    ]
+
+
+def test_compose_queue_skips_tuned_managed_knobs_when_tuned_is_already_active() -> None:
+    queue_ids = simple_mode.compose_queue_ids(4, backend_is_tuned=True, tuned_active=True)
+    assert "swappiness" not in queue_ids
+    assert "dirty_bytes" not in queue_ids
 
 
 def test_apply_fixed_presets_sets_safe_rt_and_mlock() -> None:
