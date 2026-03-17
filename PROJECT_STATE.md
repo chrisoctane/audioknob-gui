@@ -105,7 +105,7 @@
 - **Kernel isolation status fallback** - isolation cmdline knobs (`isolcpus`/`nohz_full`/`rcu_nocbs`) report applied/not_applied by key presence even before per-core config is set, avoiding false unknown on default installs.
 - **IRQ housekeeping override safety** - kernel `irqaffinity` auto housekeeping override is only generated when audio cores are explicitly configured (no implicit "all CPUs" override on unset state).
 - **TSC pre-flight warning** - TSC knobs warn before apply when safety checks look risky.
-- **RT/C-state warnings** - info popups call out suspend/heat risks for RT throttling and C-state limiters
+- **RT/C-state warnings** - knob details surfaces call out suspend/heat risks for RT throttling and C-state limiters
 
 ### GUI Layout
 ```

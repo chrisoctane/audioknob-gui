@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from audioknob_gui.gui.main_window import resolve_info_panel_knob_id
+from audioknob_gui.gui.main_window import MainWindow, resolve_info_panel_knob_id
 from audioknob_gui.gui.table import (
     TABLE_CELL_H_MARGIN,
     TABLE_CELL_V_MARGIN,
@@ -36,3 +36,46 @@ def test_resolve_info_panel_knob_id_reuses_current_when_visible() -> None:
 
 def test_resolve_info_panel_knob_id_falls_back_to_first_visible() -> None:
     assert resolve_info_panel_knob_id(None, ["irq_pinning", "rtirq_enable"], "missing") == "irq_pinning"
+
+
+def test_open_info_panel_dialog_uses_dialog_path() -> None:
+    calls: list[str] = []
+
+    class Dummy:
+        _info_panel_knob_id = "pipewire_rt_setup"
+
+        def _open_knob_info_dialog(self, knob_id: str) -> None:
+            calls.append(knob_id)
+
+    MainWindow._open_info_panel_dialog(Dummy())
+    assert calls == ["pipewire_rt_setup"]
+
+
+def test_show_knob_info_prefers_panel_focus_before_dialog() -> None:
+    calls: list[str] = []
+
+    class Dummy:
+        def _focus_knob_in_full_view(self, knob_id: str) -> bool:
+            calls.append(f"focus:{knob_id}")
+            return True
+
+        def _open_knob_info_dialog(self, knob_id: str) -> None:
+            calls.append(f"dialog:{knob_id}")
+
+    MainWindow._show_knob_info(Dummy(), "pipewire_rt_setup")
+    assert calls == ["focus:pipewire_rt_setup"]
+
+
+def test_show_knob_info_falls_back_to_dialog_when_focus_unavailable() -> None:
+    calls: list[str] = []
+
+    class Dummy:
+        def _focus_knob_in_full_view(self, knob_id: str) -> bool:
+            calls.append(f"focus:{knob_id}")
+            return False
+
+        def _open_knob_info_dialog(self, knob_id: str) -> None:
+            calls.append(f"dialog:{knob_id}")
+
+    MainWindow._show_knob_info(Dummy(), "pipewire_rt_setup")
+    assert calls == ["focus:pipewire_rt_setup", "dialog:pipewire_rt_setup"]

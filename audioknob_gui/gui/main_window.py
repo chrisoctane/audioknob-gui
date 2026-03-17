@@ -379,7 +379,7 @@ class MainWindow(TableMixin, QMainWindow):
         self.view_tabs_shell = QWidget()
         self.view_tabs_shell.setObjectName("ViewTabsChrome")
         view_tabs_layout = QHBoxLayout(self.view_tabs_shell)
-        view_tabs_layout.setContentsMargins(6, 6, 6, 6)
+        view_tabs_layout.setContentsMargins(4, 4, 4, 4)
         view_tabs_layout.setSpacing(0)
         self.view_tabs = QTabBar()
         self.view_tabs.setObjectName("ViewTabsNav")
@@ -843,7 +843,7 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _open_info_panel_dialog(self) -> None:
         if self._info_panel_knob_id:
-            self._show_knob_info(self._info_panel_knob_id)
+            self._open_knob_info_dialog(self._info_panel_knob_id)
 
     def _on_core_plan_toggle(self, expanded: bool) -> None:
         self.state["audio_core_plan_expanded"] = bool(expanded)
@@ -3599,8 +3599,8 @@ class MainWindow(TableMixin, QMainWindow):
             QTabBar#ViewTabsNav::tab {
                 background-color: #1c2127;
                 color: #aeb8c4;
-                min-height: 30px;
-                padding: 4px 14px;
+                min-height: 28px;
+                padding: 3px 14px;
                 border: 1px solid #20252b;
                 border-radius: 9px;
                 margin: 0 3px;

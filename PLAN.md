@@ -274,7 +274,7 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
   user worker logs) to keep test runs clean.
 - The PipeWire XRUN monitor streams live `pw-top` data into the app (with a pw-dump fallback for QUANT/RATE when batch output is blank).
 - The ALSA XRUN monitor reads per-card xrun counts from `/proc/asound/cardN/pcm*/sub0/status`. It supports compact and full table views, always-on-top, and a card selector. Enabling xrun_debug logging (apply) writes to `/proc/asound` via pkexec (non-persistent, resets on reboot).
-- The jitter monitor is modeless, supports Always‑on‑top, and shows a live per‑thread table with rolling Act samples (min/median/avg/p95/max). A snapshot refresh button in the info dialog runs the classic cyclictest run.
+- The jitter monitor is modeless, supports Always‑on‑top, and shows a live per‑thread table with rolling Act samples (min/median/avg/p95/max). A snapshot refresh action in the knob details panel runs the classic cyclictest run.
 
 ### Startup system profile scan (first run)
 
