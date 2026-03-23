@@ -65,6 +65,7 @@ class _DummyViewFilter:
             SimpleNamespace(id="kernel_clocksource_tsc"),
             SimpleNamespace(id="kernel_tsc_reliable"),
             SimpleNamespace(id="kernel_preempt_full"),
+            SimpleNamespace(id="scx_scheduler"),
             SimpleNamespace(id="systemd_pipewire_service_rt"),
             SimpleNamespace(id="systemd_wireplumber_service_rt"),
             SimpleNamespace(id="pipewire_data_loop_affinity"),
@@ -173,3 +174,4 @@ def test_tsc_knobs_are_not_in_dev_tab() -> None:
     assert "kernel_clocksource_tsc" not in visible
     assert "kernel_tsc_reliable" not in visible
     assert "kernel_preempt_full" in visible
+    assert "scx_scheduler" in visible

@@ -85,7 +85,7 @@ _AUDIO_ISOLATION_STATE_KEYS = {
     KERNEL_NOHZ_FULL: "kernel_nohz_full_cores",
     KERNEL_RCU_NOCBS: "kernel_rcu_nocbs_cores",
 }
-ACTIVE_CONFLICT_STATES = frozenset({"applied", "pending_reboot", "running", "partial"})
+ACTIVE_CONFLICT_STATES = frozenset({"applied", "active_external", "pending_reboot", "running", "partial"})
 
 
 def is_conflict_participant(status: str, action: str | None) -> bool:

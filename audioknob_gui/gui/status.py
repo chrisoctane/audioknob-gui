@@ -45,7 +45,7 @@ def _utc_now_iso_z() -> str:
 def _status_for_preset_compare(value: object) -> str | None:
     if not isinstance(value, str):
         return None
-    if value in ("sys_default", "deviated"):
+    if value in ("configured", "sys_default", "deviated"):
         return "not_applied"
     if value == "active_external":
         return "applied"
@@ -226,12 +226,14 @@ def _extract_baseline_config(ui) -> dict[str, object]:
     return config
 
 
-def _apply_baseline_config(ui, config: dict[str, object]) -> None:
+def _apply_baseline_config(ui, config: dict[str, object], *, clear_missing: bool = False) -> None:
     if not isinstance(config, dict):
         return
     for key in _baseline_config_keys():
         if key in config:
             ui.state[key] = deepcopy(config.get(key))
+        elif clear_missing:
+            ui.state.pop(key, None)
     save_state(ui.state)
 
 
@@ -586,7 +588,7 @@ def _baseline_profile_summary(profile: dict[str, object] | None) -> str:
 def _normalize_baseline_statuses(statuses: dict[str, str]) -> dict[str, str]:
     normalized: dict[str, str] = {}
     for key, value in statuses.items():
-        if value in ("unknown", "not_applicable", "partial", "pending_reboot"):
+        if value in ("unknown", "not_applicable", "partial", "pending_reboot", "configured"):
             normalized[key] = "not_applied"
         else:
             normalized[key] = value
@@ -839,8 +841,8 @@ def on_restore_baseline(ui) -> None:
         return
     current_config_snapshot = _extract_baseline_config(ui)
     restore_config = ui.state.get("baseline_config")
-    if isinstance(restore_config, dict) and restore_config:
-        _apply_baseline_config(ui, restore_config)
+    if isinstance(restore_config, dict):
+        _apply_baseline_config(ui, restore_config, clear_missing=True)
     by_id = {k.id: k for k in ui.registry}
     apply_ids: list[str] = []
     reset_ids: list[str] = []
@@ -855,7 +857,7 @@ def on_restore_baseline(ui) -> None:
         if knob.id == AUDIO_GROUP_MEMBERSHIP:
             skipped.append(f"{knob.title}: group changes require manual action")
             continue
-        if base in ("applied", "pending_reboot"):
+        if base in ("applied", "pending_reboot", "configured"):
             desired = "apply"
         elif base in ("not_applied", "sys_default"):
             desired = "reset"
@@ -866,7 +868,7 @@ def on_restore_baseline(ui) -> None:
             skipped.append(f"{knob.title}: {REFERENCE_PRESET_LABEL.lower()} status '{base}' not actionable")
             continue
         current = ui._knob_statuses.get(knob.id, "unknown")
-        if desired == "apply" and current in ("applied", "pending_reboot"):
+        if desired == "apply" and current in ("applied", "pending_reboot", "configured"):
             continue
         if desired == "reset" and current in ("not_applied", "sys_default", "not_applicable"):
             continue
@@ -1119,8 +1121,8 @@ def on_restore_factory(ui) -> None:
         return
     current_config_snapshot = _extract_baseline_config(ui)
     restore_config = ui.state.get("factory_config")
-    if isinstance(restore_config, dict) and restore_config:
-        _apply_baseline_config(ui, restore_config)
+    if isinstance(restore_config, dict):
+        _apply_baseline_config(ui, restore_config, clear_missing=True)
     by_id = {k.id: k for k in ui.registry}
     apply_ids: list[str] = []
     reset_ids: list[str] = []
@@ -1135,7 +1137,7 @@ def on_restore_factory(ui) -> None:
         if knob.id == AUDIO_GROUP_MEMBERSHIP:
             skipped.append(f"{knob.title}: group changes require manual action")
             continue
-        if base in ("applied", "pending_reboot"):
+        if base in ("applied", "pending_reboot", "configured"):
             desired = "apply"
         elif base in ("not_applied", "sys_default"):
             desired = "reset"
@@ -1146,7 +1148,7 @@ def on_restore_factory(ui) -> None:
             skipped.append(f"{knob.title}: {FACTORY_PRESET_LABEL.lower()} status '{base}' not actionable")
             continue
         current = ui._knob_statuses.get(knob.id, "unknown")
-        if desired == "apply" and current in ("applied", "pending_reboot"):
+        if desired == "apply" and current in ("applied", "pending_reboot", "configured"):
             continue
         if desired == "reset" and current in ("not_applied", "sys_default", "not_applicable"):
             continue
@@ -1259,7 +1261,7 @@ def prune_queue_from_statuses(ui) -> None:
     keep: dict[str, str] = {}
     for kid, action in ui._queued_actions.items():
         status = ui._knob_statuses.get(kid)
-        if action == "apply" and status in ("applied", "pending_reboot"):
+        if action == "apply" and status in ("applied", "pending_reboot", "configured"):
             continue
         if action == "reset" and status in ("not_applied", "not_applicable", "sys_default"):
             continue
@@ -1692,6 +1694,47 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
             pass
         lines.append("")
 
+    # sched_ext ownership context
+    scx_fn = getattr(ui, "_scx_managed_lock_reason", None)
+    scx_reason = ""
+    if callable(scx_fn):
+        try:
+            scx_reason = str(scx_fn(knob.id) or "")
+        except Exception:
+            pass
+    if scx_reason:
+        lines.append("── sched_ext ownership ──")
+        lines.append(f"lock: {scx_reason}")
+        try:
+            from audioknob_gui.core.scx import (
+                read_sched_ext_status,
+                read_scx_flags_config,
+                read_scx_scheduler_config,
+                scx_ops_name,
+            )
+            from audioknob_gui.worker.ops import read_os_release, resolve_scx_config_path
+
+            distro_id = read_os_release().get("ID", "")
+            cfg_path = resolve_scx_config_path(distro_id)
+            state_text, live_ops = read_sched_ext_status()
+            configured_scheduler = read_scx_scheduler_config(cfg_path) if cfg_path else None
+            configured_flags = read_scx_flags_config(cfg_path) if cfg_path else None
+            lines.append(f"  sched_ext_state: {state_text or 'unavailable'}")
+            if live_ops:
+                lines.append(f"  live_ops: {scx_ops_name(live_ops) or live_ops}")
+            if configured_scheduler:
+                lines.append(f"  configured_scheduler: {configured_scheduler}")
+            if configured_flags is not None:
+                lines.append(f"  configured_flags: {configured_flags or 'none'}")
+            managed_ids_fn = getattr(ui, "_scx_managed_ids", None)
+            if callable(managed_ids_fn):
+                managed_ids = [str(item) for item in managed_ids_fn() or []]
+                if managed_ids:
+                    lines.append(f"  managed_knobs: {', '.join(managed_ids)}")
+        except Exception:
+            pass
+        lines.append("")
+
     kind = knob.impl.kind if knob.impl else ""
     params = dict(knob.impl.params) if knob.impl else {}
     try:
@@ -2079,6 +2122,83 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                     "partial_reason: mixed rtirq state "
                     f"(config={cfg_ok}, service_enabled={enabled or 'unknown'}, service_active={active or 'unknown'})."
                 )
+    elif kind == "scx_scheduler":
+        from audioknob_gui.core.scx import (
+            normalize_scx_flags,
+            read_sched_ext_status,
+            read_scx_flags_config,
+            read_scx_scheduler_config,
+            scx_service_dropin_matches,
+            scx_service_dropin_path,
+            scx_ops_name,
+        )
+        from audioknob_gui.worker.ops import read_os_release, resolve_scx_config_path
+
+        distro_id = read_os_release().get("ID", "")
+        cfg_path = resolve_scx_config_path(distro_id)
+        selected = str(params.get("scheduler", "")).strip() or "none"
+        selected_flags = normalize_scx_flags(params.get("flags"))
+        selected_enable_raw = params.get("enable_at_boot")
+        selected_enable = selected_enable_raw if isinstance(selected_enable_raw, bool) else None
+        configured = read_scx_scheduler_config(cfg_path) or "none"
+        configured_flags = normalize_scx_flags(read_scx_flags_config(cfg_path))
+        state_text, live_ops = read_sched_ext_status()
+        lines.append(f"scx_config: {cfg_path}")
+        lines.append(f"selected_scheduler: {selected}")
+        lines.append(f"selected_flags: {selected_flags or 'none'}")
+        lines.append(
+            "selected_enable_at_boot: "
+            + ("enabled" if selected_enable is True else "disabled" if selected_enable is False else "unchanged")
+        )
+        lines.append(f"configured_scheduler: {configured}")
+        lines.append(f"configured_flags: {configured_flags or 'none'}")
+        lines.append(f"sched_ext_state: {state_text or 'unavailable'}")
+        lines.append(f"live_ops: {live_ops or 'none'}")
+        unit = str(params.get("unit", "scx.service")).strip() or "scx.service"
+        dropin_path = scx_service_dropin_path(unit)
+        dropin_matches = scx_service_dropin_matches(unit)
+        lines.append(f"service_dropin: {dropin_path}")
+        lines.append(f"service_dropin_matches: {'yes' if dropin_matches else 'no'}")
+        service_states: dict[str, str] = {}
+        for label, cmd in (
+            ("service_enabled", ["systemctl", "is-enabled", unit]),
+            ("service_active", ["systemctl", "is-active", unit]),
+        ):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                value = r.stdout.strip() or r.stderr.strip()
+                service_states[label] = value
+                lines.append(f"{label}: {value}")
+            except Exception:
+                pass
+        enabled_matches = True
+        enabled_state = service_states.get("service_enabled")
+        if selected_enable is not None:
+            enabled_matches = (enabled_state in ("enabled", "static", "indirect")) == selected_enable
+        if status == "configured":
+            lines.append("note: configuration matches the selected scheduler, but scx.service is currently stopped.")
+        elif status == "partial":
+            target_ops = scx_ops_name(selected) if selected != "none" else None
+            configured_ops = scx_ops_name(configured) if configured != "none" else None
+            live_ops_name = scx_ops_name(live_ops)
+            if selected == "none":
+                lines.append("partial_reason: sched_ext is configured or active, but no scheduler is selected in AudioKnob.")
+            elif configured_ops != target_ops:
+                lines.append("partial_reason: /etc/default/scx does not match the selected scheduler.")
+            elif selected_flags is not None and configured_flags != selected_flags:
+                lines.append("partial_reason: /etc/default/scx does not match the selected SCX_FLAGS value.")
+            elif not dropin_matches:
+                lines.append("partial_reason: scx.service memlock drop-in is missing or does not match AudioKnob.")
+            elif not enabled_matches:
+                lines.append("partial_reason: scx.service Enable at boot does not match the selected setting.")
+            elif service_states.get("service_active") == "failed":
+                lines.append("partial_reason: scx.service failed to start, so sched_ext is currently disabled.")
+            elif state_text != "enabled":
+                lines.append("partial_reason: scx.service is enabled or running, but sched_ext is currently disabled.")
+            elif live_ops_name != target_ops:
+                lines.append("partial_reason: live sched_ext ops do not match the selected scheduler.")
+            else:
+                lines.append("partial_reason: scx.service persistence/runtime state is incomplete.")
     elif kind == "power_profile":
         try:
             from audioknob_gui.worker.ops import read_power_profile, select_power_profile_backend
@@ -2102,6 +2222,11 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
             unit = backend.get("service")
             if unit:
                 try:
+                    r = subprocess.run(["systemctl", "is-enabled", unit], capture_output=True, text=True)
+                    lines.append(f"service_enabled: {r.stdout.strip() or r.stderr.strip()}")
+                except Exception:
+                    pass
+                try:
                     r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
                     lines.append(f"service_active: {r.stdout.strip() or r.stderr.strip()}")
                 except Exception:
@@ -2114,6 +2239,10 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
                     target = str(params.get("tuned_profile", "latency-performance")).strip() or "latency-performance"
                 lines.append(f"current: {current or 'unknown'}")
                 lines.append(f"target: {target}")
+                if status == "active_external":
+                    lines.append(
+                        "note: live profile matches the target, but no matching AudioKnob ownership was proven."
+                    )
             # Show what tuned manages when active
             if backend["backend"] == "tuned" and current == target:
                 lines.append("")
@@ -2146,6 +2275,10 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
             ):
                 r = subprocess.run(cmd, capture_output=True, text=True)
                 lines.append(f"{label}: {r.stdout.strip() or r.stderr.strip()}")
+            if status == "active_external":
+                lines.append(
+                    "note: live unit state matches the target, but no matching AudioKnob ownership was proven."
+                )
     elif kind == "user_service_mask":
         services: list[str] = []
         raw_services = params.get("services")
@@ -2493,6 +2626,9 @@ def collect_live_checks(ui, knob, *, status_override: str | None = None) -> list
     elif kind == "group_membership":
         r = subprocess.run(["id"], capture_output=True, text=True)
         lines.append(f"id: {r.stdout.strip()}")
+        lines.append(
+            "note: Audio Groups uses the manual Join/Leave flow; Factory Reset does not revoke group membership automatically."
+        )
         required_groups = params.get("groups", ["audio", "realtime"])
         if isinstance(required_groups, str):
             required_groups = [required_groups]

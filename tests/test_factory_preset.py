@@ -36,3 +36,79 @@ def test_factory_lock_message_includes_capture_details() -> None:
     assert "Factory Preset is immutable once set." in msg
     assert "2026-02-08T20:00:00Z" in msg
     assert "initial" in msg
+
+
+def test_restore_factory_reset_config_restores_saved_selector_state(monkeypatch) -> None:
+    from audioknob_gui.gui import actions as actions_mod
+    from audioknob_gui.gui import status as status_mod
+
+    monkeypatch.setattr(status_mod, "save_state", lambda _state: None)
+
+    ui = SimpleNamespace()
+    ui.state = {
+        "factory_config": {
+            "kernel_workqueue_cpumask_cores": None,
+            "irqbalance_banned_cpulist_cores": None,
+            "kernel_isolcpus_cores": None,
+            "power_profile_backend": "auto",
+        },
+        "kernel_workqueue_cpumask_cores": list(range(32)),
+        "irqbalance_banned_cpulist_cores": [],
+        "kernel_isolcpus_cores": [2, 3],
+        "power_profile_backend": "tuned",
+    }
+
+    assert actions_mod._restore_factory_reset_config(ui) is True
+    assert ui.state["kernel_workqueue_cpumask_cores"] is None
+    assert ui.state["irqbalance_banned_cpulist_cores"] is None
+    assert ui.state["kernel_isolcpus_cores"] is None
+    assert ui.state["power_profile_backend"] == "auto"
+
+
+def test_restore_factory_reset_config_replays_saved_config(monkeypatch) -> None:
+    from audioknob_gui.gui import actions, status as status_mod
+
+    applied: dict[str, object] = {}
+
+    def _fake_apply(ui, config, *, clear_missing=False):
+        applied["ui"] = ui
+        applied["config"] = dict(config)
+        applied["clear_missing"] = clear_missing
+
+    monkeypatch.setattr(status_mod, "_apply_baseline_config", _fake_apply)
+
+    ui = SimpleNamespace(
+        state={
+            "factory_config": {
+                "kernel_workqueue_cpumask_cores": None,
+                "irqbalance_banned_cpulist_cores": None,
+            }
+        }
+    )
+
+    assert actions._restore_factory_reset_config(ui) is True
+
+    assert applied["ui"] is ui
+    assert applied["config"] == {
+        "kernel_workqueue_cpumask_cores": None,
+        "irqbalance_banned_cpulist_cores": None,
+    }
+    assert applied["clear_missing"] is True
+
+
+def test_restore_factory_reset_config_clears_stale_state_when_factory_config_empty(monkeypatch) -> None:
+    from audioknob_gui.gui import actions as actions_mod
+    from audioknob_gui.gui import status as status_mod
+
+    monkeypatch.setattr(status_mod, "save_state", lambda _state: None)
+
+    ui = SimpleNamespace()
+    ui.state = {
+        "factory_config": {},
+        "kernel_workqueue_cpumask_cores": list(range(32)),
+        "irqbalance_banned_cpulist_cores": [],
+    }
+
+    assert actions_mod._restore_factory_reset_config(ui) is True
+    assert "kernel_workqueue_cpumask_cores" not in ui.state
+    assert "irqbalance_banned_cpulist_cores" not in ui.state

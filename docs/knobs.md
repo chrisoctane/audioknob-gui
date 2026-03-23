@@ -67,6 +67,103 @@ Sources
   - https://documentation.ubuntu.com/real-time/en/latest/tutorial/intel-tcc/kernel-parameters/
 
 -------------------------------------------------------------------------------
+## sched_ext / scx Scheduler (Dev)
+
+Goal
+- Provide a Dev-tab controller for `sched_ext` using upstream `scx.service` and
+  the selected `scx_*` scheduler.
+
+UI
+- Dev tab only.
+- The row uses a `Configure...` dialog with one scheduler dropdown listing
+  detected `scx_*` binaries plus a second `SCX_FLAGS` preset selector that
+  changes with the selected scheduler, plus an `Enable at boot` checkbox for
+  `scx.service`.
+- Start with `scx_bpfland` as the recommended mixed music + gaming choice.
+- Keep Apply locked until a scheduler is selected.
+- After config is synced, the row action switches between `Start`, `Restart`,
+  and `Stop` for the live runtime session instead of using the generic queued
+  Apply/Reset button labels.
+
+Apply/Reset
+- Discover the service environment file from `scx.service`; fall back to
+  `/etc/default/scx`.
+- Update `SCX_SCHEDULER=` and `SCX_FLAGS=` while preserving comments.
+- Write an `scx.service` drop-in with `LimitMEMLOCK=infinity` so the service path has enough memlock headroom for BPF scheduler loading.
+- Populate preset `SCX_FLAGS` choices from the selected scheduler's `--help`
+  output, keeping any existing custom flag string visible as a `Custom:` entry.
+- If the scheduler changes and no explicit new flag preset is selected, clear a
+  non-empty `SCX_FLAGS=` line to avoid passing scheduler-specific flags to a
+  different scheduler binary.
+- Apply Config writes `/etc/default/scx`, installs the `LimitMEMLOCK=infinity`
+  service drop-in, reloads systemd, and syncs the `Enable at boot`
+  preference for `scx.service`; it does not auto-start the scheduler.
+- Start/Restart controls runtime separately. Start/Restart verifies that
+  `scx.service` actually reaches an active `sched_ext` state. If the service
+  later lands in `failed` or `sched_ext` never enables, the runtime action
+  returns an error instead of a false success.
+- Reset/restore uses the transaction backup for the config file and normal
+  systemd unit restore for `scx.service`.
+- Force reset is available without a transaction and disables `scx.service`
+  only; it does not wipe the configured scheduler line.
+
+Status
+- `not_applicable` when `/sys/kernel/sched_ext` is absent.
+- `not_applied` when only dormant config remains in `/etc/default/scx` but
+  `sched_ext` is off and `scx.service` is not running.
+- `configured` when:
+  - configured scheduler matches the selected scheduler
+  - configured flags match the selected `SCX_FLAGS` value
+  - the `LimitMEMLOCK=infinity` `scx.service` drop-in is present
+  - the `Enable at boot` choice matches the current `scx.service` enabled state
+  - `sched_ext` is currently stopped
+- `applied` only when:
+  - configured scheduler matches the selected scheduler
+  - configured flags match the selected `SCX_FLAGS` value
+  - the `LimitMEMLOCK=infinity` `scx.service` drop-in is present
+  - the `Enable at boot` choice matches the current `scx.service` enabled state
+  - `scx.service` is active
+  - `/sys/kernel/sched_ext/root/ops` matches the selected scheduler
+- `active_external` when `sched_ext` is active and internally consistent, but
+  AudioKnob has no selected scheduler for the knob.
+- `partial` for mixed live states (wrong live scheduler, service drift, or live
+  ops mismatch).
+- When `service_active=failed`, the status panel calls that out explicitly so it
+  is clear that `scx.service` failed to start rather than merely drifting.
+- The row action prefers `Apply Config` while `/etc/default/scx` or the boot
+  persistence setting still differs from the saved selection, then switches to
+  `Start` / `Restart` / `Stop` once config is synced.
+- While `sched_ext` is actively owning overlapping power-policy targets,
+  AudioKnob locks those rows `via scx` instead of offering Apply/Reset:
+  - `scx_lavd` locks `cpu_governor_performance_persistent` unless
+    `--no-freq-scaling` is selected
+  - `scx_lavd` locks `power_profile_performance` unless `--autopower` is
+    selected
+  - `scx_bpfland` / `scx_flash` lock
+    `cpu_governor_performance_persistent` only when `--cpufreq` is selected
+
+Risks/notes
+- This changes the scheduler for ordinary workloads, not the RT policy PipeWire
+  uses for its realtime threads.
+- Use it as a complement to AudioKnob’s RT/IRQ path, not a replacement.
+- Suggested workload fit:
+  - `scx_bpfland`: mixed music + gaming
+  - `scx_lavd`: gaming-first
+  - `scx_flash`: multimedia/audio-first
+
+Sources
+- sched_ext kernel docs
+  - https://docs.kernel.org/6.15/scheduler/sched-ext.html
+- sched_ext scheduler index
+  - https://sched-ext.com/docs/scheds/rust
+- scheduler guides
+  - https://sched-ext.com/docs/scheds/rust/scx_bpfland
+  - https://sched-ext.com/docs/scheds/rust/scx_lavd
+  - https://sched-ext.com/docs/scheds/rust/scx_flash
+- scx service docs
+  - https://github.com/sched-ext/scx/blob/main/services/README.md
+
+-------------------------------------------------------------------------------
 ## PipeWire Clock Constraints (Advanced)
 
 Goal
@@ -463,6 +560,10 @@ Apply/Reset
 Status
 - cpumask comparisons use CPU-set semantic parsing (`2-3` equals `2,3`) to avoid
   false partial/not_applied states on format differences.
+- A full-core `kernel_workqueue_cpumask` selection is treated as system default
+  (`sys_default`), not as an active tuning state.
+- An empty `irqbalance_banned_cpulist` selection is treated as system default
+  (`sys_default`), not as an active tuning state.
 
 Sources
 - Linux workqueue docs:

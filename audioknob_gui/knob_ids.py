@@ -18,6 +18,7 @@ IRQ_PINNING = "irq_pinning"
 
 # Power
 POWER_PROFILE_PERFORMANCE = "power_profile_performance"
+SCX_SCHEDULER = "scx_scheduler"
 
 # Kernel cmdline — CPU isolation / tickless / IRQ affinity
 KERNEL_ISOLCPUS = "kernel_isolcpus"

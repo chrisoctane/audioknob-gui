@@ -401,6 +401,157 @@ def test_list_pending_effect_dedup_keeps_oldest():
             assert effect["txid"] == "tx1_older"
 
 
+def test_dedupe_oldest_restore_effects_keeps_oldest_power_and_irq_state():
+    from audioknob_gui.worker.cli import _dedupe_oldest_restore_effects
+
+    effects = [
+        {
+            "kind": "power_profile",
+            "knob_id": "power_profile_performance",
+            "before": "latency-performance",
+            "backend": "tuned",
+        },
+        {
+            "kind": "irq_affinity",
+            "irq": 112,
+            "before": "B",
+            "after": "C",
+        },
+        {
+            "kind": "power_profile",
+            "knob_id": "power_profile_performance",
+            "before": "performance",
+            "before_backend": "powerprofilesctl",
+            "backend": "tuned",
+        },
+        {
+            "kind": "irq_affinity",
+            "irq": 112,
+            "before": "A",
+            "after": "B",
+        },
+    ]
+
+    out = _dedupe_oldest_restore_effects(effects)
+    by_kind = {f"{item['kind']}:{item.get('knob_id', item.get('irq'))}": item for item in out}
+
+    assert by_kind["power_profile:power_profile_performance"]["before"] == "performance"
+    assert by_kind["irq_affinity:112"]["before"] == "A"
+
+
+def test_reset_defaults_uses_oldest_root_effect_baseline(monkeypatch):
+    import argparse
+    import io
+    import sys
+    from unittest.mock import MagicMock
+
+    from audioknob_gui.worker import cli
+
+    mock_root_txs = [
+        {
+            "txid": "tx2_newer",
+            "root": "/var/lib/audioknob-gui/transactions/tx2_newer",
+            "backups": [],
+            "effects": [
+                {
+                    "kind": "power_profile",
+                    "knob_id": "power_profile_performance",
+                    "before": "latency-performance",
+                    "backend": "tuned",
+                },
+                {
+                    "kind": "irq_affinity",
+                    "irq": 112,
+                    "before": "B",
+                    "after": "C",
+                },
+            ],
+        },
+        {
+            "txid": "tx1_older",
+            "root": "/var/lib/audioknob-gui/transactions/tx1_older",
+            "backups": [],
+            "effects": [
+                {
+                    "kind": "power_profile",
+                    "knob_id": "power_profile_performance",
+                    "before": "performance",
+                    "before_backend": "powerprofilesctl",
+                    "backend": "tuned",
+                },
+                {
+                    "kind": "irq_affinity",
+                    "irq": 112,
+                    "before": "A",
+                    "after": "B",
+                },
+            ],
+        },
+    ]
+
+    captured_effects: dict[str, list[dict]] = {}
+
+    monkeypatch.setattr(cli, "list_transactions", lambda _path: mock_root_txs)
+    monkeypatch.setattr(
+        cli,
+        "default_paths",
+        lambda: MagicMock(var_lib_dir="/var/lib/audioknob-gui", user_state_dir="/home/test/.local/state/audioknob-gui"),
+    )
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(cli, "_log_audit_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr(cli, "restore_sysfs", lambda effects: captured_effects.setdefault("sysfs", list(effects)) or [])
+    monkeypatch.setattr(cli.worker_ops, "systemd_restore", lambda _effect: None)
+
+    def _fake_restore_irq_affinity(effects, *, warnings=None):
+        captured_effects["irq"] = list(effects)
+        if warnings is not None:
+            warnings.extend([])
+        return []
+
+    def _fake_restore_power_profile_effects(effects, errors):
+        captured_effects["power"] = list(effects)
+        return 1
+
+    monkeypatch.setattr(cli, "restore_irq_affinity", _fake_restore_irq_affinity)
+    monkeypatch.setattr(cli, "_restore_power_profile_effects", _fake_restore_power_profile_effects)
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_reset_defaults(argparse.Namespace(scope="root"))
+
+    assert rc == 0
+    assert captured_effects["power"][0]["before"] == "performance"
+    assert captured_effects["irq"][0]["before"] == "A"
+
+
+def test_restore_irq_affinity_skips_kernel_managed_permission_errors(monkeypatch):
+    from audioknob_gui.worker.ops import restore_irq_affinity
+
+    class _FakePath:
+        def __init__(self, path: str) -> None:
+            self._path = path
+
+        def exists(self) -> bool:
+            return True
+
+        def write_text(self, _text: str, encoding: str = "utf-8") -> None:
+            raise PermissionError(1, "Operation not permitted")
+
+        def __str__(self) -> str:
+            return self._path
+
+    monkeypatch.setattr("audioknob_gui.worker.ops.Path", _FakePath)
+
+    warnings: list[str] = []
+    errors = restore_irq_affinity(
+        [{"kind": "irq_affinity", "irq": 112, "before": "0-31"}],
+        warnings=warnings,
+    )
+
+    assert errors == []
+    assert warnings == ["Skipped kernel-managed IRQ affinity restore: /proc/irq/112/smp_affinity_list"]
+
+
 def test_find_transaction_for_knob_returns_oldest():
     """_find_transaction_for_knob() must return the OLDEST tx so restore-knob restores original state."""
     from audioknob_gui.worker.cli import _find_transaction_for_knob
@@ -579,6 +730,228 @@ def test_cmd_status_uses_kernel_status_param_fallback(monkeypatch):
 
     assert rc == 0
     assert captured_param.get("value") == "isolcpus"
+
+
+def test_cmd_status_keeps_neutral_workqueue_selector_out_of_status_params(monkeypatch) -> None:
+    import argparse
+    import io
+    import json
+    import sys
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="kernel_workqueue_cpumask",
+        title="Workqueue cpumask",
+        description="",
+        category="kernel",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind="sysfs_glob_kv", params={"glob": "/sys/devices/virtual/workqueue/cpumask", "value": "0-1"}),
+    )
+
+    captured_value: dict[str, str] = {}
+
+    def _fake_status(k):
+        captured_value["value"] = str(k.impl.params.get("value", ""))
+        return "applied"
+
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {"kernel_workqueue_cpumask_cores": [0, 1, 2, 3]})
+    monkeypatch.setattr(cli, "check_knob_status", _fake_status)
+    monkeypatch.setattr("audioknob_gui.core.irq.read_cpu_present", lambda: {0, 1, 2, 3})
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_status(argparse.Namespace(registry="unused"))
+
+    payload = json.loads(captured.getvalue())
+    assert rc == 0
+    assert captured_value.get("value") == "0-1"
+    assert payload["statuses"][0]["status"] == "sys_default"
+
+
+def test_cmd_status_keeps_empty_irqbalance_selector_out_of_status_params(monkeypatch) -> None:
+    import argparse
+    import io
+    import json
+    import sys
+
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="irqbalance_banned_cpulist",
+        title="IRQ Balance Policy",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysctl_conf",
+            params={"path": "/etc/sysconfig/irqbalance", "lines": ["IRQBALANCE_BANNED_CPULIST=0-1"]},
+        ),
+    )
+
+    captured_params: dict[str, object] = {}
+
+    def _fake_status(k):
+        captured_params["path"] = k.impl.params.get("path")
+        captured_params["lines"] = list(k.impl.params.get("lines", []))
+        captured_params["clear_prefixes"] = list(k.impl.params.get("clear_prefixes", []))
+        return "applied"
+
+    monkeypatch.setattr(cli, "load_registry", lambda _path: [knob])
+    monkeypatch.setattr(cli, "_load_gui_state", lambda: {"irqbalance_banned_cpulist_cores": []})
+    monkeypatch.setattr(cli, "check_knob_status", _fake_status)
+    monkeypatch.setattr(cli.worker_ops, "read_os_release", lambda: {"ID": "ubuntu"})
+    monkeypatch.setattr(
+        cli.worker_ops,
+        "resolve_irqbalance_config_path",
+        lambda _distro_id: "/etc/default/irqbalance",
+    )
+
+    captured = io.StringIO()
+    with patch.object(sys, "stdout", captured):
+        rc = cli.cmd_status(argparse.Namespace(registry="unused"))
+
+    payload = json.loads(captured.getvalue())
+    assert rc == 0
+    assert captured_params["path"] == "/etc/default/irqbalance"
+    assert captured_params["lines"] == ["IRQBALANCE_BANNED_CPULIST=0-1"]
+    assert captured_params["clear_prefixes"] == []
+    assert payload["statuses"][0]["status"] == "sys_default"
+
+
+def test_normalize_status_result_marks_neutral_irqbalance_state_sys_default() -> None:
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="irqbalance_banned_cpulist",
+        title="IRQ Balance Policy",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="sysctl_conf",
+            params={"path": "/etc/sysconfig/irqbalance", "lines": ["IRQBALANCE_BANNED_CPULIST=0-1"]},
+        ),
+    )
+
+    status = cli._normalize_status_result(knob, "applied", {"irqbalance_banned_cpulist_cores": []})
+
+    assert status == "sys_default"
+
+
+def test_normalize_status_result_marks_neutral_workqueue_state_sys_default(monkeypatch) -> None:
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="kernel_workqueue_cpumask",
+        title="Workqueue cpumask",
+        description="",
+        category="kernel",
+        risk_level="high",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind="sysfs_glob_kv", params={"glob": "/sys/devices/virtual/workqueue/cpumask", "value": "0-1"}),
+    )
+
+    monkeypatch.setattr("audioknob_gui.core.irq.read_cpu_present", lambda: {0, 1, 2, 3})
+
+    status = cli._normalize_status_result(knob, "applied", {"kernel_workqueue_cpumask_cores": [0, 1, 2, 3]})
+
+    assert status == "sys_default"
+
+
+def test_normalize_status_result_marks_systemd_row_active_external_without_transaction(monkeypatch) -> None:
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="irqbalance_disable",
+        title="IRQ Balance",
+        description="",
+        category="irq",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(kind="systemd_unit_toggle", params={"unit": "irqbalance.service", "action": "disable_now"}),
+    )
+
+    monkeypatch.setattr(cli, "_latest_effect_for_knob", lambda *args, **kwargs: None)
+
+    status = cli._normalize_status_result(knob, "applied", {})
+
+    assert status == "active_external"
+
+
+def test_normalize_status_result_marks_power_profile_active_external_when_latest_effect_mismatches(
+    monkeypatch,
+) -> None:
+    from audioknob_gui.registry import Capabilities, Impl, Knob
+    from audioknob_gui.worker import cli
+
+    knob = Knob(
+        id="power_profile_performance",
+        title="Power Profile",
+        description="",
+        category="power",
+        risk_level="medium",
+        requires_root=True,
+        requires_reboot=False,
+        requires_groups=(),
+        requires_commands=(),
+        depends_on=(),
+        capabilities=Capabilities(read=True, apply=True, restore=True),
+        impl=Impl(
+            kind="power_profile",
+            params={"backend": "auto", "ppd_profile": "performance", "tuned_profile": "latency-performance"},
+        ),
+    )
+
+    monkeypatch.setattr(
+        cli.worker_ops,
+        "select_power_profile_backend",
+        lambda _params: {"backend": "powerprofilesctl", "cmd": "/usr/bin/powerprofilesctl"},
+    )
+    monkeypatch.setattr(cli.worker_ops, "read_power_profile", lambda _backend, _cmd: "performance")
+    monkeypatch.setattr(
+        cli,
+        "_latest_effect_for_knob",
+        lambda *args, **kwargs: {"after": "latency-performance", "backend": "tuned"},
+    )
+
+    status = cli._normalize_status_result(knob, "applied", {})
+
+    assert status == "active_external"
 
 
 def test_apply_root_state_overrides_irqbalance_uses_prefix_replace(monkeypatch):

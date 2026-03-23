@@ -10,7 +10,7 @@
 
 ### What Works
 - **Release version**: 0.7.14
-- **57 knobs defined** (ALL 57 IMPLEMENTED, including Dev tab)
+- **58 knobs defined** (ALL 58 IMPLEMENTED, including Dev tab)
 - **Per-knob Apply/Reset buttons** - one click to queue apply or reset
 - **Queued apply/reset workflow** - per-knob Apply/Reset queues changes; global Apply/Apply & Reboot executes the queue
 - **Dependency-aware queue gating** - knobs with `depends_on` unlock when their dependency is already applied or queued for apply in the current queue.
@@ -33,6 +33,7 @@
 - **Sortable table** - click column headers to sort
 - **Group gating** - 🔒 locks knobs until user joins audio groups
 - **Package dependencies** - 📦 Install button for missing packages
+- **sched_ext / scx dev knob** - Dev tab can select an installed `scx_*` scheduler, choose scheduler-specific preset `SCX_FLAGS`, store a boot-persistence preference for `scx.service`, write `/etc/default/scx`, install an `scx.service` memlock drop-in (`LimitMEMLOCK=infinity`), and control `scx.service` runtime separately with Start/Restart/Stop
 - **RT config scanner** - 18 checks with score 0-100%
 - **Persistent knob details panel** - Full view shows knob details in a right-side panel tied to the highlighted row; the panel reuses the same description/status/CLI content as the dialog fallback
 - **Full-view width fill** - the last visible table column stretches to the details panel so row shading and content fill the available width cleanly during resize
@@ -47,7 +48,10 @@
 - **Transaction system** - backups + smart restore
 - **Action logging** - worker/GUI logs capture apply failures and outputs
 - **Privileged execution hardening** - root knob/system operations use only `/usr/libexec/audioknob-gui-worker`; direct GUI pkexec maintenance commands are centralized in `worker_api` and allowlisted.
-- **Factory Preset (Reset All)** - reverts all changes to system defaults (leave no trace)
+- **Factory Preset (Reset All)** - resets tracked AudioKnob changes to the recorded Factory Preset snapshot and restores saved Factory Preset config
+- **Factory reset baseline restore** - `reset-defaults` now restores the oldest recorded effect baseline per target instead of replaying every historical root effect transaction; kernel-managed IRQ affinity restores are skipped instead of failing the whole reset
+- **Factory reset config restore** - after a successful reset-all, the GUI restores saved Factory Preset selector/config state with stale-key clearing before refreshing statuses, so old per-knob selections do not survive as false-positive applied states
+- **Factory reset ownership boundary** - manual or external settings can remain active after Factory Reset when they are outside AudioKnob ownership (for example retained group membership or service state changed outside the app)
 - **Reference preset capture** - first-run pkexec scan stores initial system state in `state.json` as the Reference Preset.
 - **Factory preset auto-capture** - first-run reference scan also captures Factory Preset if none exists.
 - **Presets management** - Tools → Presets contains Reference Preset and Factory Preset capture/import/export/restore workflows.
@@ -119,7 +123,7 @@ Notes:
   - **Full mode**: existing tabbed table UI
 - Single table with category headers (spelled out, e.g. "Memory"); advanced knobs are gated by `Tools -> Locks -> Advanced knobs`.
 - Req./Risk/CLI are technical columns hidden by default; enable them with `Tools -> Locks -> Technical columns`.
-- Header tabs switch between **Main**, **Cores & IRQ**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates and includes TSC timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock, the Cores & IRQ view filters to core-related knobs plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and PipeWire/WirePlumber affinity controls while showing the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber tuning, kernel RT extras excluding TSC timing knobs, RTKit placeholder). Preset actions live in Tools → Presets.
+- Header tabs switch between **Main**, **Cores & IRQ**, and **Dev**; Main hides advanced core/IRQ knobs to avoid duplicates and includes TSC timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock, the Cores & IRQ view filters to core-related knobs plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and PipeWire/WirePlumber affinity controls while showing the Audio Core Plan panel with IRQ Overview, and Dev exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber tuning, kernel RT extras excluding TSC timing knobs, `sched_ext` / `scx` scheduler control, RTKit placeholder). Preset actions live in Tools → Presets.
 - The Audio Core Plan panel is collapsible to reduce vertical space in the Cores & IRQ view.
 - Full view uses a persistent right-side knob details panel instead of a per-row Info button column; the panel tracks the highlighted row, fills the spare width beside the table, and updates as rows are hovered or selected.
 - The last visible full-view table column stretches to the details panel so the row striping reaches the panel edge as the window resizes.
@@ -130,6 +134,22 @@ Notes:
 - PipeWire config knobs (clock constraints, memory lock, RT module, pulse latency, pulse app rules, data loops) show a locked Apply action until configured; Configure stays available.
 - Core partition knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`) show a locked Apply action until configured; Configure stays available.
 - New Cores & IRQ service-RT knobs (`systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`) show a locked Apply action until configured; Configure stays available.
+- The Dev-tab `sched_ext` knob (`scx_scheduler`) shows a locked Apply action until a scheduler is selected; the row now uses a `Configure...` dialog with wide scheduler and scheduler-aware `SCX_FLAGS` selectors plus an `Enable at boot` checkbox instead of cramped inline dropdowns.
+- AudioKnob populates the `SCX_FLAGS` selector from the chosen scheduler's `--help` output, writes the selected flag preset to the resolved `scx` environment file, and still clears incompatible carried-over flags when switching schedulers without an explicit new flag choice.
+- `scx_scheduler` Apply now syncs `/etc/default/scx`, writes an `scx.service` drop-in with `LimitMEMLOCK=infinity`, reloads systemd, and syncs the `Enable at boot` preference for `scx.service`; it does not auto-start the scheduler.
+- `scx_scheduler` only reports `configured`/`applied` when the `scx.service` memlock drop-in also matches; if that drop-in is missing, the row falls back to `Apply Config` instead of letting runtime `Start` bypass the service fixup.
+- `scx_scheduler` uses a dedicated immediate runtime action instead of the generic queue-only Apply/Reset row flow:
+  `Apply Config` writes config, `Start` launches `scx.service`, `Restart` reloads it after config changes, and `Stop` halts the live scheduler without changing boot persistence.
+- Runtime Start/Restart still verifies that `scx.service` actually reaches an active `sched_ext` state; if the service falls back to `failed` or `sched_ext` stays disabled, the runtime action reports an error instead of silently succeeding into `partial`.
+- If `/etc/default/scx` already has a scheduler configured, the row treats that displayed scheduler as an effective selection for config/runtime gating even before the user explicitly re-saves it in GUI state.
+- `scx_scheduler` participates in the normal no-transaction force-reset prompt, so reset can still disable `scx.service` even when the current `sched_ext` state was configured outside AudioKnob.
+- A dormant `/etc/default/scx` entry by itself does not count as a partial applied state when `sched_ext` is disabled and `scx.service` is not active/enabled; that case now reports `not_applied` so the row offers `Apply Config`.
+- `scx_scheduler` reports `configured` when `/etc/default/scx` and the selected boot-persistence setting match the saved GUI selection, but `sched_ext` is currently stopped.
+- Live `scx` ownership now locks overlapping rows the same way `tuned` does, but the ownership is dynamic:
+  - `scx_lavd` locks `cpu_governor_performance_persistent` unless `--no-freq-scaling` is selected.
+  - `scx_lavd` locks `power_profile_performance` unless `--autopower` is selected.
+  - `scx_bpfland` / `scx_flash` lock `cpu_governor_performance_persistent` only when `--cpufreq` is selected.
+- When those live `scx` ownership rules apply, full-view rows show `via scx` and queue/apply is blocked for the overlapping knob.
 - Status column is clickable (status label opens the CLI status/preview dialog); read-only tests show N/A.
 - Button-like table cells use one full-cell control surface instead of a padded inner button, so action/status controls align cleanly with the cell chrome.
 - "CLI" shows the target command/file/parameter shorthand (e.g., kernel cmdline key, sysctl key, or config file).
@@ -207,6 +227,7 @@ Next phases (planned, incremental):
 - PipeWire RT Safe RT preset now resets all fields in the setup dialog back to the preset/default values.
 - systemd "disabled" services now report correctly even when `systemctl is-enabled` exits non-zero (e.g. irqbalance).
 - Power Profile tuned mode now masks `power-profiles-daemon.service` so D-Bus activation cannot stop tuned after apply/reboot, and reset/factory restore unmask ppd before restoring the prior backend/profile.
+- Factory reset/root reset now dedupes root effects to the oldest baseline per target before restoring, so stale historical power-profile or IRQ history does not get replayed on top of the real baseline.
 - openSUSE local RPM builds now package tracked working-tree content instead of `git HEAD`, so local uncommitted fixes are included in the built package; untracked files remain excluded on purpose.
 - RTIRQ knob now writes an audioknob config block (name/high lists + priorities) and enables the rtirq service.
 - RTIRQ restore now auto-disables `rtirq.service` when older transactions were recorded before the unit existed; it only falls back to a force-reset prompt if disable verification still fails.
@@ -561,6 +582,12 @@ preset extraction.
 **Phase 1 (implemented):** sysctl_conf knobs probe `/proc/sys/` when audioknob's
 config file is absent. If live values match the target, status is `"active_external"`
 (displayed as "~ Active" in blue). Covers swappiness, dirty_bytes, inotify, rt_throttling.
+
+**Phase 2 (implemented):** additional status normalization now covers:
+- `systemd_unit_toggle` rows with matching live service state but no matching AudioKnob transaction effect
+- `power_profile` rows when the current live backend/profile matches the target but does not line up with the latest app-owned power-profile effect
+- neutral saved config for `irqbalance_banned_cpulist` and `kernel_workqueue_cpumask`, which now reports `sys_default` instead of `applied`
+- status refresh after Factory Reset / preset restore replays saved selector state with stale-key clearing, so neutral or absent saved config does not linger as a fake configured/apply target
 
 **Remaining phases (TODO):**
 - Phase 3: udev rule probing (stat device permissions)

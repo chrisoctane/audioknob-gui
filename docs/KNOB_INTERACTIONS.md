@@ -67,6 +67,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - Clearing IRQ/core selections and applying now runs reset behavior: empty
   IRQ pinning cores reset affinities back to kernel default masks; empty
   `irqbalance_banned_cpulist` removes the banned CPU policy line.
+- Status treats an empty saved `irqbalance_banned_cpulist` selection as system
+  default (`sys_default`), not as an actively applied policy.
 
 ### IRQ Housekeeping + kernel irqaffinity
 - Housekeeping cores define where non-audio IRQs are pushed.
@@ -89,6 +91,8 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - Clearing core selections and applying is treated as an explicit reset path for
   these knobs (`kernel_workqueue_cpumask` resets to all present CPUs, and
   `cgroup_user_slice_allowed_cpus` removes the drop-in file).
+- Status treats a full-core `kernel_workqueue_cpumask` selection as system
+  default (`sys_default`), not as an actively applied tuning state.
 - Mismatched cpuset selections across these knobs can produce partial isolation
   and unpredictable scheduling pressure.
 - The GUI now defaults to a linked core-plan mode so audio-role knobs and
@@ -114,6 +118,30 @@ common blockers. It is used by agents, maintainers, and the GUI warning logic.
 - Disables SMT/Hyper-Threading and reduces logical core count.
 - Can invalidate audio core plans, IRQ pinning selections, and isolation core sets.
 - Re-run core selection and IRQ pinning after changes.
+
+### sched_ext / scx
+- The `scx_scheduler` knob is managed through `scx.service` and `/etc/default/scx`.
+- `sched_ext` is active only while the BPF scheduler is loaded and running; stopping the service falls back to CFS.
+- In the common whole-system mode, `sched_ext` affects `SCHED_NORMAL` / `SCHED_BATCH` / `SCHED_IDLE` workloads, so it complements rather than replaces the RT threads PipeWire uses for low-latency audio.
+- `SCX_FLAGS` can be scheduler-specific. AudioKnob now exposes a scheduler-aware preset selector populated from the chosen scheduler's `--help` output.
+- When AudioKnob switches from one `scx_*` scheduler to another without an explicit new flag preset, it clears a non-empty `SCX_FLAGS=` line rather than carrying incompatible flags across.
+- AudioKnob now separates config from runtime for `scx`:
+  `Apply Config` writes `/etc/default/scx` and the `Enable at boot` preference, while `Start` / `Restart` / `Stop` control the current `scx.service` session.
+- AudioKnob also writes an `scx.service` drop-in with `LimitMEMLOCK=infinity` so the service path has the BPF memlock headroom that interactive shell launches often rely on.
+- Runtime `Start` / `Restart` re-check the live `sched_ext` state after the service call and fail if `sched_ext` never actually enables or the service drops into `failed`.
+- A matching but stopped `scx` setup reports `configured` instead of `partial`, so dormant config can be distinguished from a broken live scheduler.
+- AudioKnob treats `scx` overlap as live ownership, not a static conflict map:
+  - `scx_lavd` locks `cpu_governor_performance_persistent` unless `--no-freq-scaling` is selected.
+  - `scx_lavd` also locks `power_profile_performance` unless `--autopower` is selected, because its default/autopilot and explicit power-mode flags take over performance-vs-power policy inside the scheduler.
+  - `scx_bpfland` and `scx_flash` lock `cpu_governor_performance_persistent` only when `--cpufreq` is selected.
+- AudioKnob does not currently lock RT/IRQ/isolation knobs behind `scx`, because `sched_ext` covers normal scheduling classes and does not replace PipeWire RT threads, IRQ affinity, or kernel boot-time CPU partitioning.
+- `scx` does not replace the `cpu_dma_latency_udev` access rule or PipeWire memlock/RT knobs; those remain separate layers even if some scheduler flags also influence CPU idle or frequency behavior.
+- Research refs:
+  - kernel sched_ext docs: https://docs.kernel.org/scheduler/sched-ext.html
+  - scheduler docs/index: https://sched-ext.com/docs/scheds/rust
+- Recommended starting point for mixed music + gaming use: `scx_bpfland`.
+- `scx_lavd` is the gaming-first fallback; `scx_flash` is the multimedia/audio-first fallback.
+- Requires kernel `sched_ext` support (`/sys/kernel/sched_ext`); without it the knob reports not applicable.
 
 ### QjackCtl RT
 - Must quit QjackCtl before applying (QjackCtl rewrites its config on exit).
@@ -241,6 +269,15 @@ Observed interaction trends:
   - https://manpages.ubuntu.com/manpages/noble/man1/irqbalance.1.html
 - Ubuntu RT kernel tuning parameters:
   - https://documentation.ubuntu.com/real-time/en/latest/tutorial/intel-tcc/kernel-parameters/
+- sched_ext kernel overview:
+  - https://docs.kernel.org/6.15/scheduler/sched-ext.html
+- sched_ext scheduler docs:
+  - https://sched-ext.com/docs/scheds/rust
+  - https://sched-ext.com/docs/scheds/rust/scx_bpfland
+  - https://sched-ext.com/docs/scheds/rust/scx_lavd
+  - https://sched-ext.com/docs/scheds/rust/scx_flash
+- scx systemd service docs:
+  - https://github.com/sched-ext/scx/blob/main/services/README.md
 
 ## Maintenance rules
 - Update this file when adding a new knob, changing behavior, or discovering

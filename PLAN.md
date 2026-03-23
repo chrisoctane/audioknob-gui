@@ -243,10 +243,14 @@ This section tracks v0.7.0 simple mode. Core mode switch + dial queue behavior a
 - The **Main** tab shows all knobs except the advanced core/IRQ set (to avoid duplicates).
 - The **Main** tab also includes the TSC kernel timing knobs (`kernel_clocksource_tsc`, `kernel_tsc_reliable`) behind the Advanced lock.
 - Use the **Cores & IRQ** tab to focus on core/IRQ tuning plus RT throttling, C-state limiters, core partition policy knobs (`kernel_workqueue_cpumask`, `cgroup_user_slice_allowed_cpus`, `irqbalance_banned_cpulist`), and PipeWire/WirePlumber affinity controls (`pipewire_data_loop_affinity`, `systemd_pipewire_service_rt`, `systemd_wireplumber_service_rt`).
-- The **Dev** tab exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber advanced tuning, PipeWire pulse latency/rules, PipeWire profiler module, kernel RT extras excluding TSC timing knobs, RTKit placeholder). These are optional and may require manual configuration.
+- The **Dev** tab exposes experimental knobs that are not primarily about core placement (PipeWire/WirePlumber advanced tuning, PipeWire pulse latency/rules, PipeWire profiler module, kernel RT extras excluding TSC timing knobs, `sched_ext` / `scx` scheduler control, RTKit placeholder). These are optional and may require manual configuration.
 - PipeWire **RT** is the single guided entry point for PipeWire realtime setup. The dialog leads with `Safe RT`, `Full RT`, and `Custom` presets in plain language, keeps advanced limits/module fields behind an explicit reveal, and points CPU-affinity tuning back to **Cores & IRQ**.
 - Several **Cores & IRQ** knobs are intentionally config-required before Apply (workqueue cpumask, user.slice AllowedCPUs, irqbalance banned CPUs).
-- Several **Dev** knobs are intentionally config-required before Apply (PipeWire pulse latency/rules).
+- Several **Dev** knobs are intentionally config-required before Apply (PipeWire pulse latency/rules, `sched_ext` / `scx` scheduler selection and optional flag preset).
+- The `sched_ext` / `scx` Dev knob uses a dedicated **Configure...** dialog for scheduler selection, scheduler-aware flag presets, and an `Enable at boot` checkbox.
+- The `sched_ext` / `scx` Dev knob separates config from runtime: **Apply Config** writes `/etc/default/scx`, installs an `scx.service` drop-in with `LimitMEMLOCK=infinity`, and syncs the boot-persistence choice; the row action then switches between **Start**, **Restart**, and **Stop** for the live `scx.service` session.
+- The `sched_ext` / `scx` Dev knob reports a distinct **Configured** state when `/etc/default/scx` matches the saved selection but `scx.service` is currently stopped.
+- When live `sched_ext` ownership overlaps existing power controls, the overlapping full-view rows lock `via scx` instead of offering Apply/Reset.
 - The **Audio Core Plan** panel lets you pick an audio core count and run **Auto-set** to choose cores with the fewest read-only IRQ bindings (prefers cores 2+ when possible).
 - **Linked core plan** is enabled by default and ties core-selection knobs to one shared model:
   - audio-role knobs use the selected audio cores
@@ -311,15 +315,18 @@ Use **Tools → Presets → Factory Preset** to manage factory snapshots:
 - **Factory Preset** is immutable once set (initial capture, manual capture, or import); capture/import are blocked after that.
 - Factory capture/import actions remain visible and show **(Locked)** with an explanation dialog when clicked.
 - **Export/Queue Restore Factory Preset...** remain available.
-- **Factory Preset (Reset All)...** performs a full “leave no trace” reset of all Audioknob changes.
+- **Factory Preset (Reset All)...** resets tracked AudioKnob changes to the recorded Factory Preset snapshot and restores saved Factory Preset config.
+- Factory reset restores the oldest recorded baseline per target instead of replaying every historical effect transaction; kernel-managed IRQ restores are skipped rather than failing the whole reset.
+- Factory reset restores saved Factory Preset selector/config state before the post-reset status refresh, clearing stale per-knob GUI selections that are not part of the saved preset.
+- Manual or external system settings can remain active after Factory Reset if they are outside AudioKnob ownership (for example service state changed outside the app or retained group membership).
 - Factory preset snapshots are date-stamped (`factory_captured_at`) and include profile metadata.
 
 ### Info vs Status panels
 
 - **Info** uses a simple tag format: `[i]` summary, `[r]` requirements, `[+]` benefits, `[-]` tradeoffs.
-- **Status/Check** shows live technical details (service states, group gaps, sysctl/sysfs values, PipeWire runtime settings, etc.); when status is **partial**, it includes a short reason line and raw checks below.
+- **Status/Check** shows live technical details (service states, group gaps, sysctl/sysfs values, PipeWire runtime settings, etc.); when status is **partial** or **External**, it includes a short reason or ownership note and raw checks below.
 - Partial reasons are explicit for mixed states (for example: masked/unmasked user services, partial group membership activation, sysfs match counts, and WirePlumber/PipeWire config drift).
-- Status column is operational only (`Applied`, `Not applied`, `Partial`, `Reboot`, `Unknown`, `N/A`).
+- Status column is operational only (`Applied`, `Configured`, `External`, `Not applied`, `Partial`, `Reboot`, `Unknown`, `N/A`).
 - When a knob is **Partial**, the row action queues a **Reset** (revert to defaults). Apply again after reset if you want to re-enable it.
 - Preset matches are shown as color dots beside the status button (**blue = matches Reference Preset**, **green = matches Factory Preset**).
 

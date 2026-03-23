@@ -6,10 +6,11 @@ import shutil
 
 from PySide6.QtWidgets import QMessageBox
 
+from audioknob_gui.core.scx import list_available_scx_schedulers
 from audioknob_gui.gui.actions import QueueTaskWorker
 from audioknob_gui.gui.logging_utils import _get_gui_logger, _log_gui_audit
 from audioknob_gui.gui.worker_api import _PKEXEC_CANCELLED, _run_pkexec_command_capture
-from audioknob_gui.knob_ids import AUDIO_GROUP_MEMBERSHIP, POWER_PROFILE_PERFORMANCE
+from audioknob_gui.knob_ids import AUDIO_GROUP_MEMBERSHIP, POWER_PROFILE_PERFORMANCE, SCX_SCHEDULER
 
 
 def refresh_user_groups(ui) -> None:
@@ -51,6 +52,12 @@ def knob_commands_ok(ui, k) -> bool:
             check_command_available("powerprofilesctl")
             or check_command_available("tuned-adm")
         )
+    if k.id == SCX_SCHEDULER:
+        available = list_available_scx_schedulers()
+        selected = ui._scx_scheduler_from_state()
+        if selected:
+            return selected in available
+        return bool(available)
     return all(check_command_available(cmd) for cmd in k.requires_commands)
 
 
@@ -71,6 +78,8 @@ def knob_missing_commands(ui, k) -> list[str]:
         ):
             return []
         return ["powerprofilesctl", "tuned-adm"]
+    if k.id == SCX_SCHEDULER:
+        return [] if knob_commands_ok(ui, k) else ["scx"]
     return [cmd for cmd in k.requires_commands if not check_command_available(cmd)]
 
 
@@ -379,6 +388,7 @@ def on_leave_groups(ui) -> None:
 def on_install_packages(ui, commands: list[str]) -> None:
     """Install packages that provide the given commands."""
     from audioknob_gui.platform.packages import get_package_name, detect_package_manager
+    from audioknob_gui.platform.packages import PackageManager
 
     if ui._install_busy:
         QMessageBox.information(ui, "Install in progress", "Package installation is already running.")
@@ -395,6 +405,14 @@ def on_install_packages(ui, commands: list[str]) -> None:
     unknown = []
     for cmd in commands:
         pkg = get_package_name(cmd)
+        if pkg is None and cmd == "scx":
+            manager = detect_package_manager()
+            if manager == PackageManager.RPM:
+                pkg = "scx"
+            elif manager == PackageManager.DPKG:
+                pkg = "scx"
+            elif manager == PackageManager.PACMAN:
+                pkg = "scx-scheds"
         if pkg:
             packages.append(pkg)
         else:
@@ -443,8 +461,6 @@ def on_install_packages(ui, commands: list[str]) -> None:
     manager = detect_package_manager()
 
     try:
-        from audioknob_gui.platform.packages import PackageManager
-
         if manager == PackageManager.RPM:
             if shutil.which("zypper"):
                 cmd = ["zypper", "--non-interactive", "install", *packages]

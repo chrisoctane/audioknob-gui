@@ -21,6 +21,7 @@ from audioknob_gui.gui.knobs.registry import (
     get_action_override,
     get_config_widget_builder,
 )
+from audioknob_gui.gui.knobs import scx as scx_knob
 from audioknob_gui.gui.conflicts import (
     filtered_active_conflicts,
     prune_power_profile_conflicts,
@@ -33,6 +34,7 @@ from audioknob_gui.knob_ids import (
     PIPEWIRE_RT_MODULE_TUNING,
     PIPEWIRE_RT_SETUP,
     POWER_PROFILE_PERFORMANCE,
+    SCX_SCHEDULER,
 )
 
 TABLE_CONTROL_MIN_HEIGHT = 26
@@ -69,7 +71,7 @@ class TableMixin:
         missing: list[str] = []
         for dep in depends:
             status = self._knob_statuses.get(dep, "unknown")
-            if status in ("applied", "pending_reboot"):
+            if status in ("applied", "pending_reboot", "active_external"):
                 continue
             missing.append(dep)
         return missing
@@ -247,6 +249,9 @@ class TableMixin:
                     if rtirq_path:
                         return Path(rtirq_path).name
             return "rtirq.conf"
+
+        if kind == "scx_scheduler":
+            return "scx.service"
 
         if kind == "irq_affinity":
             return "/proc/irq"
@@ -577,6 +582,7 @@ class TableMixin:
         
         mapping = {
             "applied": ("✓ Applied", "#2e7d32"),      # Green
+            "configured": ("○ Configured", "#7cb342"),  # Olive - config synced, runtime stopped
             "active_external": ("~ External", "#4a90e2"),  # Blue - set outside audioknob
             "not_applied": ("—", "#757575"),          # Gray dash
             "not_applicable": ("N/A", "#9e9e9e"),     # Gray N/A
@@ -633,12 +639,13 @@ class TableMixin:
             status = self._knob_statuses.get(k.id, "unknown")
             status_order = {
                 "applied": 0,
-                "active_external": 1,
-                "pending_reboot": 2,
-                "partial": 3,
-                "not_applied": 4,
-                "not_applicable": 5,
-                "unknown": 6,
+                "configured": 1,
+                "active_external": 2,
+                "pending_reboot": 3,
+                "partial": 4,
+                "not_applied": 5,
+                "not_applicable": 6,
+                "unknown": 7,
                 "sys_default": 4,
                 "deviated": 4,
             }
@@ -729,6 +736,7 @@ class TableMixin:
         elif grouping_mode == "status":
             status_labels = {
                 "applied": "Applied",
+                "configured": "Configured",
                 "active_external": "External",
                 "pending_reboot": "Reboot Required",
                 "partial": "Partial",
@@ -739,6 +747,7 @@ class TableMixin:
             }
             status_order = [
                 "applied",
+                "configured",
                 "active_external",
                 "pending_reboot",
                 "partial",
@@ -892,11 +901,11 @@ class TableMixin:
                 group_ok = False
             commands_ok = self._knob_commands_ok(k)
             missing_cmds = self._knob_missing_commands(k)
-            reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot")
-            advanced_gate_lock = k.id in advanced_knobs and not advanced_enabled and status not in ("applied", "pending_reboot")
+            reboot_gate_lock = bool(k.requires_reboot) and not reboot_gate_enabled and status not in ("applied", "pending_reboot", "active_external")
+            advanced_gate_lock = k.id in advanced_knobs and not advanced_enabled and status not in ("applied", "pending_reboot", "active_external")
             reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
             missing_deps = self._missing_dependencies(k)
-            dependency_lock = bool(missing_deps) and status not in ("applied", "pending_reboot")
+            dependency_lock = bool(missing_deps) and status not in ("applied", "pending_reboot", "active_external")
             locked = not group_ok or not commands_ok or reboot_gate_lock or reboot_dep_lock or advanced_gate_lock or dependency_lock
             simple_owned_reason = ""
             lock_fn = getattr(self, "_simple_owned_lock_reason", None)
@@ -916,11 +925,20 @@ class TableMixin:
                     tuned_managed_reason = ""
             if tuned_managed_reason:
                 locked = True
+            scx_managed_reason = ""
+            scx_fn = getattr(self, "_scx_managed_lock_reason", None)
+            if callable(scx_fn):
+                try:
+                    scx_managed_reason = str(scx_fn(k.id) or "")
+                except Exception:
+                    scx_managed_reason = ""
+            if scx_managed_reason:
+                locked = True
             requires_config = False
             if (
                 k.impl is not None
                 and k.impl.kind == "pipewire_conf"
-                and status not in ("applied", "pending_reboot")
+                and status not in ("applied", "pending_reboot", "active_external")
             ):
                 if k.id == "pipewire_clock_constraints":
                     state_keys = (
@@ -971,8 +989,10 @@ class TableMixin:
                         isinstance(self.state.get("pipewire_num_data_loops"), int)
                         or isinstance(self.state.get("pipewire_data_loops"), list)
                     )
-            if status not in ("applied", "pending_reboot"):
-                if k.id == "kernel_workqueue_cpumask":
+            if status not in ("applied", "pending_reboot", "active_external"):
+                if k.id == SCX_SCHEDULER:
+                    requires_config = scx_knob.effective_scheduler(self) is None
+                elif k.id == "kernel_workqueue_cpumask":
                     cores = self.state.get("kernel_workqueue_cpumask_cores")
                     requires_config = not (
                         isinstance(cores, list) and any(isinstance(x, int) for x in cores)
@@ -1010,7 +1030,7 @@ class TableMixin:
                 )
             except Exception:
                 conflict_ids = set()
-            conflict_lock = bool(conflict_ids) and status not in ("applied", "pending_reboot")
+            conflict_lock = bool(conflict_ids) and status not in ("applied", "pending_reboot", "active_external")
 
             row_dim = locked or not_applicable or requires_config
             self._row_dim[r] = row_dim
@@ -1021,6 +1041,8 @@ class TableMixin:
                 lock_reason = simple_owned_reason
             elif tuned_managed_reason:
                 lock_reason = tuned_managed_reason
+            elif scx_managed_reason:
+                lock_reason = scx_managed_reason
             elif group_pending_lock:
                 lock_reason = f"Groups pending reboot: {', '.join(k.requires_groups)}"
             elif reboot_dep_lock:
@@ -1085,7 +1107,12 @@ class TableMixin:
             # Column 5: Status (with color)
             status_tip = ""
             if locked:
-                status_text = "via tuned" if tuned_managed_reason else "Locked"
+                if tuned_managed_reason:
+                    status_text = "via tuned"
+                elif scx_managed_reason:
+                    status_text = "via scx"
+                else:
+                    status_text = "Locked"
                 status_color = locked_fg.name()
                 status_tip = lock_reason
             elif not_applicable:
@@ -1098,6 +1125,8 @@ class TableMixin:
                     status_color = "#d32f2f"
                 tooltip_map = {
                     "applied": "Applied.",
+                    "active_external": "Set outside AudioKnob.",
+                    "configured": "Config is synced, but runtime is currently stopped.",
                     "partial": "Partially applied. Click status to view exact reasons.",
                     "pending_reboot": "Applied in boot config; reboot required.",
                     "not_applied": "Not applied.",
@@ -1147,7 +1176,7 @@ class TableMixin:
             else:
                 status_btn.clicked.connect(lambda _, kid=k.id: self._show_cli_status(kid))
             reference_match, factory_match = self._preset_match_flags(k.id)
-            if tuned_managed_reason:
+            if tuned_managed_reason or scx_managed_reason:
                 reference_match = factory_match = False
             if reference_match or factory_match:
                 status_wrap = QWidget()
@@ -1275,7 +1304,7 @@ class TableMixin:
                 btn.setToolTip(lock_reason)
                 btn.setStyleSheet(locked_style)
                 self._set_action_cell(r, btn)
-            elif simple_owned_reason or tuned_managed_reason:
+            elif simple_owned_reason or tuned_managed_reason or scx_managed_reason:
                 btn = self._make_action_button("🔒")
                 btn.setEnabled(False)
                 btn.setToolTip(lock_reason)
@@ -1315,7 +1344,7 @@ class TableMixin:
                 else:
                     # Normal knob: show Apply or Reset based on current status
                     status = self._knob_statuses.get(k.id, "unknown")
-                    if status in ("applied", "pending_reboot", "partial"):
+                    if status in ("applied", "pending_reboot", "partial", "active_external"):
                         btn = self._make_reset_button()
                         btn.clicked.connect(lambda _, kid=k.id: self._on_queue_knob(kid, "reset"))
                         self._apply_queue_button_state(btn, k.id, "reset", row_dim=row_dim)
@@ -1329,7 +1358,12 @@ class TableMixin:
             # Column 3: Config widgets
             config_builder = get_config_widget_builder(k.id)
             config_widget = None
-            allow_config_row_dim = allow_config_when_row_dim(k.id, ctx) and not bool(simple_owned_reason) and not bool(tuned_managed_reason)
+            allow_config_row_dim = (
+                allow_config_when_row_dim(k.id, ctx)
+                and not bool(simple_owned_reason)
+                and not bool(tuned_managed_reason)
+                and not bool(scx_managed_reason)
+            )
             if config_builder:
                 config_widget = config_builder(self, k, ctx)
             if config_widget is not None:

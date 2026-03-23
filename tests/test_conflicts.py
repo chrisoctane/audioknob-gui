@@ -13,6 +13,7 @@ def test_is_conflict_participant_requires_active_or_apply() -> None:
     assert is_conflict_participant("not_applied", None) is False
     assert is_conflict_participant("sys_default", None) is False
     assert is_conflict_participant("applied", None) is True
+    assert is_conflict_participant("active_external", None) is True
     assert is_conflict_participant("partial", None) is True
 
 

@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from audioknob_gui.knob_ids import (
     PIPEWIRE_RT_MODULE_TUNING,
     PIPEWIRE_RT_SETUP,
     POWER_PROFILE_PERFORMANCE,
+    SCX_SCHEDULER,
 )
 from audioknob_gui.platform.detect import dump_detect
 from audioknob_gui.registry import load_registry
@@ -75,6 +77,154 @@ def _log_audit_event(action: str, payload: dict[str, Any]) -> None:
 def _require_root() -> None:
     if os.geteuid() != 0:
         raise SystemExit("This command must run as root (use pkexec).")
+
+
+def _systemctl_capture(*args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:
+        return f"error: {exc}"
+    return result.stdout.strip() or result.stderr.strip()
+
+
+def _scx_last_journal_line(unit: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", unit, "-n", "8", "--no-pager", "-l", "-q", "-o", "cat"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+    for line in reversed((result.stdout or "").splitlines()):
+        text = line.strip()
+        if text:
+            return text
+    return None
+
+
+def _verify_scx_runtime(unit: str, scheduler: str, *, timeout_sec: float = 5.0) -> str | None:
+    target_ops = worker_ops.scx_ops_name(scheduler)
+    deadline = time.monotonic() + timeout_sec
+    active_state = ""
+    sched_state = None
+    live_ops = None
+
+    while True:
+        active_state = _systemctl_capture("is-active", unit)
+        sched_state, live_ops = worker_ops.read_sched_ext_status()
+        live_ops_name = worker_ops.scx_ops_name(live_ops)
+
+        if (
+            active_state == "active"
+            and sched_state == "enabled"
+            and target_ops
+            and live_ops_name == target_ops
+        ):
+            return None
+
+        if active_state == "failed" or time.monotonic() >= deadline:
+            break
+        time.sleep(0.2)
+
+    enabled_state = _systemctl_capture("is-enabled", unit)
+    result_state = _systemctl_capture(
+        "show",
+        unit,
+        "-p",
+        "Result",
+        "-p",
+        "ActiveState",
+        "-p",
+        "SubState",
+        "-p",
+        "ExecMainStatus",
+        "-p",
+        "LimitMEMLOCK",
+    )
+    detail = (
+        f"{unit} did not reach an active sched_ext state "
+        f"(service_enabled={enabled_state or 'unknown'}, "
+        f"service_active={active_state or 'unknown'}, "
+        f"sched_ext_state={sched_state or 'unavailable'}, "
+        f"live_ops={live_ops or 'none'}"
+    )
+    if result_state:
+        compact = ", ".join(
+            part.strip()
+            for part in result_state.splitlines()
+            if isinstance(part, str) and part.strip()
+        )
+        if compact:
+            detail += f", {compact}"
+    detail += ")."
+    last_log = _scx_last_journal_line(unit)
+    if last_log:
+        detail += f" Last log: {last_log}"
+    return detail
+
+
+def _verify_scx_stopped(unit: str, *, timeout_sec: float = 5.0) -> str | None:
+    deadline = time.monotonic() + timeout_sec
+    active_state = ""
+    sched_state = None
+    live_ops = None
+
+    while True:
+        active_state = _systemctl_capture("is-active", unit)
+        sched_state, live_ops = worker_ops.read_sched_ext_status()
+        if active_state in ("inactive", "failed", "unknown", "") and sched_state != "enabled":
+            return None
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.2)
+
+    enabled_state = _systemctl_capture("is-enabled", unit)
+    result_state = _systemctl_capture(
+        "show",
+        unit,
+        "-p",
+        "Result",
+        "-p",
+        "ActiveState",
+        "-p",
+        "SubState",
+        "-p",
+        "ExecMainStatus",
+        "-p",
+        "LimitMEMLOCK",
+    )
+    detail = (
+        f"{unit} did not reach a stopped sched_ext state "
+        f"(service_enabled={enabled_state or 'unknown'}, "
+        f"service_active={active_state or 'unknown'}, "
+        f"sched_ext_state={sched_state or 'unavailable'}, "
+        f"live_ops={live_ops or 'none'}"
+    )
+    if result_state:
+        compact = ", ".join(
+            part.strip()
+            for part in result_state.splitlines()
+            if isinstance(part, str) and part.strip()
+        )
+        if compact:
+            detail += f", {compact}"
+    detail += ")."
+    last_log = _scx_last_journal_line(unit)
+    if last_log:
+        detail += f" Last log: {last_log}"
+    return detail
+
+
+def _ensure_scx_unit_unmasked(unit: str) -> None:
+    if _systemctl_capture("is-enabled", unit) == "masked":
+        subprocess.run(["systemctl", "unmask", unit], check=False, capture_output=True, text=True)
 
 
 def _registry_default_path() -> str:
@@ -532,6 +682,27 @@ def _power_profile_backend_override(state: dict) -> str | None:
     return None
 
 
+def _scx_scheduler_override(state: dict) -> str | None:
+    raw = state.get("scx_scheduler")
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value or None
+
+
+def _scx_flags_override(state: dict) -> str | None:
+    from audioknob_gui.core.scx import normalize_scx_flags
+
+    raw = state.get("scx_flags")
+    if raw is None:
+        return None
+    return normalize_scx_flags(raw)
+
+
+def _scx_enable_at_boot_override(state: dict) -> bool | None:
+    return _state_bool(state, "scx_enable_at_boot")
+
+
 def _irq_pinning_override(state: dict) -> tuple[list[str] | None, str | None]:
     devices_raw = state.get("irq_pinning_devices")
     devices: list[str] | None = None
@@ -562,6 +733,19 @@ def _state_int_list_with_presence(state: dict, key: str) -> tuple[list[int] | No
         except Exception:
             return None, False
     return out, True
+
+
+def _state_uses_all_present_cores(state: dict, key: str) -> bool:
+    cores_raw, configured = _state_int_list_with_presence(state, key)
+    if not configured or not cores_raw:
+        return False
+    try:
+        from audioknob_gui.core.irq import read_cpu_present
+
+        present = read_cpu_present()
+    except Exception:
+        return False
+    return bool(present) and set(cores_raw) == present
 
 
 def _kernel_cmdline_clear_param(state: dict, knob_id: str) -> str | None:
@@ -696,10 +880,17 @@ def _kernel_cmdline_status_param(state: dict, knob_id: str) -> str | None:
     }
     return fallback.get(knob_id)
 
-
-def _apply_root_state_overrides(kid: str, params: dict[str, Any], state: dict) -> dict[str, Any]:
+def _apply_root_state_overrides(
+    kid: str,
+    params: dict[str, Any],
+    state: dict,
+    *,
+    for_status: bool = False,
+) -> dict[str, Any]:
     new_params = dict(params)
     if kid == "kernel_workqueue_cpumask":
+        if for_status and _state_uses_all_present_cores(state, "kernel_workqueue_cpumask_cores"):
+            return new_params
         cores_raw, configured = _state_int_list_with_presence(state, "kernel_workqueue_cpumask_cores")
         if configured and not cores_raw:
             try:
@@ -720,6 +911,8 @@ def _apply_root_state_overrides(kid: str, params: dict[str, Any], state: dict) -
         distro_id = worker_ops.read_os_release().get("ID", "")
         new_params["path"] = worker_ops.resolve_irqbalance_config_path(distro_id)
         cores_raw, configured = _state_int_list_with_presence(state, "irqbalance_banned_cpulist_cores")
+        if for_status and configured and not cores_raw:
+            return new_params
         if configured and not cores_raw:
             new_params["lines"] = []
             new_params["clear_prefixes"] = ["IRQBALANCE_BANNED_CPULIST="]
@@ -786,7 +979,117 @@ def _apply_root_state_overrides(kid: str, params: dict[str, Any], state: dict) -
             new_params["card_index"] = int(card_index)
         return new_params
 
+    if kid == SCX_SCHEDULER:
+        scheduler = _scx_scheduler_override(state)
+        if scheduler:
+            new_params["scheduler"] = scheduler
+        flags = _scx_flags_override(state)
+        if flags is not None:
+            new_params["flags"] = flags
+        enable_at_boot = _scx_enable_at_boot_override(state)
+        if enable_at_boot is not None:
+            new_params["enable_at_boot"] = enable_at_boot
+        return new_params
+
     return new_params
+
+
+def _latest_transaction_manifest_for_knob(knob_id: str, *, root_only: bool) -> dict[str, Any] | None:
+    paths = default_paths()
+    tx_roots = [paths.var_lib_dir] if root_only else [paths.var_lib_dir, paths.user_state_dir]
+    for tx_root in tx_roots:
+        try:
+            txs = list_transactions(tx_root)
+        except Exception:
+            continue
+        for tx_info in txs:
+            if knob_id not in tx_info.get("applied", []):
+                continue
+            manifest_path = Path(tx_info["root"]) / "manifest.json"
+            if not manifest_path.exists():
+                continue
+            try:
+                return json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+    return None
+
+
+def _latest_effect_for_knob(
+    knob_id: str,
+    *,
+    effect_kind: str,
+    root_only: bool,
+    unit: str | None = None,
+) -> dict[str, Any] | None:
+    manifest = _latest_transaction_manifest_for_knob(knob_id, root_only=root_only)
+    if not manifest:
+        return None
+    effects = manifest.get("effects")
+    if not isinstance(effects, list):
+        return None
+    for effect in reversed(effects):
+        if not isinstance(effect, dict):
+            continue
+        if effect.get("knob_id") != knob_id:
+            continue
+        if effect.get("kind") != effect_kind:
+            continue
+        if unit is not None and str(effect.get("unit") or "").strip() != unit:
+            continue
+        return effect
+    return None
+
+
+def _normalize_status_result(knob: Any, status: str, state: dict[str, Any]) -> str:
+    if not getattr(knob, "impl", None):
+        return status
+
+    kind = knob.impl.kind
+    params = knob.impl.params
+    knob_id = getattr(knob, "id", "")
+
+    if status == "applied":
+        if knob_id == "irqbalance_banned_cpulist":
+            cores_raw, configured = _state_int_list_with_presence(state, "irqbalance_banned_cpulist_cores")
+            if configured and not cores_raw:
+                return "sys_default"
+
+        if knob_id == "kernel_workqueue_cpumask" and _state_uses_all_present_cores(
+            state, "kernel_workqueue_cpumask_cores"
+        ):
+            return "sys_default"
+
+        if kind == "systemd_unit_toggle":
+            unit = str(params.get("unit") or "").strip()
+            if unit and _latest_effect_for_knob(
+                knob_id,
+                effect_kind="systemd_unit_toggle",
+                root_only=bool(getattr(knob, "requires_root", False)),
+                unit=unit,
+            ) is None:
+                return "active_external"
+
+        if kind == "power_profile":
+            backend = worker_ops.select_power_profile_backend(params)
+            if backend:
+                current = worker_ops.read_power_profile(backend["backend"], backend["cmd"])
+                effect = _latest_effect_for_knob(
+                    knob_id,
+                    effect_kind="power_profile",
+                    root_only=bool(getattr(knob, "requires_root", False)),
+                )
+                if effect is None:
+                    return "active_external"
+                current_text = str(current or "").strip()
+                effect_after = str(effect.get("after") or "").strip()
+                effect_backend = str(effect.get("backend") or "").strip()
+                if effect_after and current_text and effect_after != current_text:
+                    return "active_external"
+                if effect_backend and effect_backend != str(backend.get("backend") or ""):
+                    return "active_external"
+
+    return status
 
 
 def _kernel_cmdline_param_from_manifest(manifest: dict, knob_id: str) -> str | None:
@@ -896,6 +1199,33 @@ def _restore_power_profile_effects(effects: list[dict[str, Any]], errors: list[s
     return restored
 
 
+def _effect_restore_key(effect: dict[str, Any]) -> str | None:
+    kind = str(effect.get("kind", "")).strip()
+    if kind == "sysfs_write":
+        path = str(effect.get("path", "")).strip()
+        return f"{kind}:{path}" if path else None
+    if kind == "systemd_unit_toggle":
+        unit = str(effect.get("unit", "")).strip()
+        return f"{kind}:{unit}" if unit else None
+    if kind == "irq_affinity":
+        irq = effect.get("irq")
+        return f"{kind}:{irq}" if irq is not None else None
+    if kind == "power_profile":
+        knob_id = str(effect.get("knob_id", "")).strip()
+        return f"{kind}:{knob_id or 'default'}"
+    return None
+
+
+def _dedupe_oldest_restore_effects(effects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    for effect in effects:
+        key = _effect_restore_key(effect)
+        if not key:
+            continue
+        deduped[key] = dict(effect)
+    return list(deduped.values())
+
+
 def cmd_detect(_: argparse.Namespace) -> int:
     print(json.dumps(dump_detect(), indent=2, sort_keys=True))
     return 0
@@ -968,7 +1298,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
                 new_params["cpu_cores"] = irq_cpu_override
             k = replace(k, impl=replace(k.impl, params=new_params))
         if k.impl is not None:
-            new_params = _apply_root_state_overrides(k.id, k.impl.params, state)
+            new_params = _apply_root_state_overrides(k.id, k.impl.params, state, for_status=True)
             if new_params != k.impl.params:
                 k = replace(k, impl=replace(k.impl, params=new_params))
         items.append(preview(k, action=args.action))
@@ -1451,6 +1781,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     effects: list[dict] = []
     backups: list[dict] = []
     applied: list[str] = []
+    errors: list[str] = []
     warnings: list[str] = []
     followups: list[dict] = []
 
@@ -1691,6 +2022,104 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     subprocess.run(["systemctl", "restart", unit], check=False, capture_output=True, text=True)
                 except Exception:
                     pass
+
+        elif kind == "scx_scheduler":
+            from audioknob_gui.worker.ops import (
+                read_os_release,
+                resolve_scx_config_path,
+            )
+
+            scheduler = str(params.get("scheduler", "")).strip()
+            if not scheduler:
+                warnings.append(f"{k.title}: choose an scx scheduler before applying.")
+                continue
+            flags = worker_ops.normalize_scx_flags(params.get("flags"))
+            enable_at_boot = params.get("enable_at_boot")
+            enable_setting = enable_at_boot if isinstance(enable_at_boot, bool) else None
+
+            distro_id = read_os_release().get("ID", "")
+            cfg_path = resolve_scx_config_path(distro_id)
+            path = Path(cfg_path)
+            before = ""
+            try:
+                before = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                before = ""
+            reset_flags = worker_ops.scx_flags_reset_required(before, scheduler) and flags is None
+            after = worker_ops.update_scx_scheduler_config(before, scheduler, flags)
+            if before != after:
+                _backup_once(tx, backups, str(path), we_created=not path.exists(), knob_id=kid)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(after, encoding="utf-8")
+            if flags is not None:
+                warnings.append(
+                    f"{k.title}: set SCX_FLAGS to {flags or 'none'} for {scheduler}."
+                )
+            elif reset_flags:
+                warnings.append(
+                    f"{k.title}: cleared SCX_FLAGS because the previous scheduler's flags may be incompatible with {scheduler}."
+                )
+
+            unit = str(params.get("unit", "scx.service")).strip() or "scx.service"
+            dropin_path = Path(worker_ops.scx_service_dropin_path(unit))
+            dropin_before = ""
+            try:
+                dropin_before = dropin_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                dropin_before = ""
+            dropin_after = worker_ops.scx_service_dropin_content()
+            reload_error: str | None = None
+            if dropin_before != dropin_after:
+                _backup_once(tx, backups, str(dropin_path), we_created=not dropin_path.exists(), knob_id=kid)
+                dropin_path.parent.mkdir(parents=True, exist_ok=True)
+                dropin_path.write_text(dropin_after, encoding="utf-8")
+                warnings.append(
+                    f"{k.title}: set {unit} LimitMEMLOCK=infinity for BPF scheduler loading."
+                )
+                reload_result = subprocess.run(
+                    ["systemctl", "daemon-reload"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if reload_result.returncode != 0:
+                    detail = (
+                        str(reload_result.stderr or "").strip()
+                        or str(reload_result.stdout or "").strip()
+                        or "unknown error"
+                    )
+                    reload_error = f"failed to reload systemd after updating {dropin_path}: {detail}"
+            effect = None
+            enable_error: str | None = None
+            if enable_setting is True:
+                effect = worker_ops.systemd_enable_now(unit, start=False)
+                warnings.append(f"{k.title}: enabled {unit} at boot.")
+            elif enable_setting is False:
+                effect = worker_ops.systemd_disable(unit)
+                warnings.append(f"{k.title}: disabled {unit} at boot.")
+            else:
+                warnings.append(f"{k.title}: left {unit} boot persistence unchanged.")
+            if effect is not None:
+                effect["knob_id"] = kid
+                effects.append(effect)
+                effect_result = effect.get("result", {})
+                if isinstance(effect_result, dict) and int(effect_result.get("returncode", 0) or 0) != 0:
+                    detail = (
+                        str(effect_result.get("stderr") or "").strip()
+                        or str(effect_result.get("stdout") or "").strip()
+                        or "unknown error"
+                    )
+                    verb = "enable" if enable_setting else "disable"
+                    enable_error = f"failed to {verb} {unit}: {detail}"
+            if reload_error:
+                errors.append(f"{k.title}: {reload_error}")
+            if enable_error:
+                errors.append(f"{k.title}: {enable_error}")
+            elif not reload_error:
+                active_now = _systemctl_capture("is-active", unit)
+                sched_state, _live_ops = worker_ops.read_sched_ext_status()
+                if active_now == "active" or sched_state == "enabled":
+                    warnings.append(f"{k.title}: runtime is still using the currently running scheduler until you restart {unit}.")
 
         elif kind == "irq_affinity":
             from audioknob_gui.core.irq import (
@@ -2341,16 +2770,23 @@ def cmd_apply(args: argparse.Namespace) -> int:
     }
     if warnings:
         audit_payload["warnings"] = warnings
+    if errors:
+        audit_payload["errors"] = errors
     if followups:
         audit_payload["followups"] = followups
     _log_audit_event("apply", audit_payload)
 
-    logger.info("apply done txid=%s applied=%s", tx.txid, ",".join(applied))
     result = {"schema": 1, "txid": tx.txid, "applied": applied}
     if warnings:
         result["warnings"] = warnings
     if followups:
         result["followups"] = followups
+    if errors:
+        result["errors"] = errors
+        logger.error("apply failed txid=%s applied=%s errors=%s", tx.txid, ",".join(applied), " | ".join(errors))
+        print("\n\n".join(str(err) for err in errors), file=sys.stderr)
+        return 1
+    logger.info("apply done txid=%s applied=%s", tx.txid, ",".join(applied))
     print(json.dumps(result, indent=2))
     return 0
 
@@ -2388,7 +2824,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
         sysfs_errors = restore_sysfs(sysfs)
         for e in systemd:
             worker_ops.systemd_restore(e)
-        irq_errors = restore_irq_affinity(irq_affinity)
+        irq_warnings: list[str] = []
+        irq_errors = restore_irq_affinity(irq_affinity, warnings=irq_warnings)
         power_errors: list[str] = []
         _restore_power_profile_effects(effects, power_errors)
         if sysfs_errors:
@@ -2575,6 +3012,7 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
     # Track files to reset (oldest backup wins for true baseline reset)
     reset_paths: set[str] = set()
     file_targets: dict[str, dict[str, Any]] = {}
+    root_restore_effects: dict[str, dict[str, Any]] = {}
     needs_bootloader_update = False
     kernel_params: set[str] = set()
     kernel_cmdline_updated = False
@@ -2621,35 +3059,10 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                 kernel_params.add(param)
         
         if scope == "root" and effects and os.geteuid() == 0:
-            sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
-            systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
-            irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
-
-            try:
-                sysfs_errors = restore_sysfs(sysfs)
-                for e in systemd:
-                    worker_ops.systemd_restore(e)
-                irq_errors = restore_irq_affinity(irq_affinity)
-                power_errors: list[str] = []
-                power_restored = _restore_power_profile_effects(effects, power_errors)
-                if sysfs or systemd or irq_affinity or power_restored:
-                    results.append({
-                        "path": "(root effects)",
-                        "strategy": "effects",
-                        "success": True,
-                        "message": (
-                            f"Restored {len(sysfs)} sysfs + {len(systemd)} systemd + "
-                            f"{len(irq_affinity)} irq + {power_restored} power profile effects"
-                        ),
-                    })
-                if power_errors:
-                    errors.extend(power_errors)
-                if sysfs_errors:
-                    errors.extend(sysfs_errors)
-                if irq_errors:
-                    errors.extend(irq_errors)
-            except Exception as ex:
-                errors.append(f"Failed to restore root effects: {ex}")
+            for e in effects:
+                key = _effect_restore_key(e)
+                if key:
+                    root_restore_effects[key] = dict(e)
         
         # User-scope effects (services, baloo)
         if scope == "user" and effects:
@@ -2688,6 +3101,43 @@ def cmd_reset_defaults(args: argparse.Namespace) -> int:
                     "success": True,
                     "message": f"Restored {user_effects_restored} user effect(s)",
                 })
+
+    # Restore deduplicated oldest root effects (true baseline) once per target.
+    if scope_filter in ("root", "all") and os.geteuid() == 0 and root_restore_effects:
+        effects = list(root_restore_effects.values())
+        sysfs = [e for e in effects if e.get("kind") == "sysfs_write"]
+        systemd = [e for e in effects if e.get("kind") == "systemd_unit_toggle"]
+        irq_affinity = [e for e in effects if e.get("kind") == "irq_affinity"]
+
+        try:
+            sysfs_errors = restore_sysfs(sysfs)
+            for e in systemd:
+                worker_ops.systemd_restore(e)
+            irq_warnings: list[str] = []
+            irq_errors = restore_irq_affinity(irq_affinity, warnings=irq_warnings)
+            power_errors: list[str] = []
+            power_restored = _restore_power_profile_effects(effects, power_errors)
+            if sysfs or systemd or irq_affinity or power_restored:
+                message = (
+                    f"Restored {len(sysfs)} sysfs + {len(systemd)} systemd + "
+                    f"{len(irq_affinity)} irq + {power_restored} power profile effects"
+                )
+                if irq_warnings:
+                    message += f"; skipped {len(irq_warnings)} kernel-managed IRQ restore(s)"
+                results.append({
+                    "path": "(root effects)",
+                    "strategy": "effects",
+                    "success": True,
+                    "message": message,
+                })
+            if power_errors:
+                errors.extend(power_errors)
+            if sysfs_errors:
+                errors.extend(sysfs_errors)
+            if irq_errors:
+                errors.extend(irq_errors)
+        except Exception as ex:
+            errors.append(f"Failed to restore root effects: {ex}")
 
     # Reset files using oldest backups (true baseline)
     for file_path in sorted(file_targets.keys()):
@@ -3083,10 +3533,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                 new_params["housekeeping_cores"] = housekeeping_override
             k = replace(k, impl=replace(k.impl, params=new_params))
         if k.impl is not None:
-            new_params = _apply_root_state_overrides(k.id, k.impl.params, state)
+            new_params = _apply_root_state_overrides(k.id, k.impl.params, state, for_status=True)
             if new_params != k.impl.params:
                 k = replace(k, impl=replace(k.impl, params=new_params))
         status = check_knob_status(k)
+        status = _normalize_status_result(k, status, state)
         statuses.append({
             "knob_id": k.id,
             "title": k.title,
@@ -3688,13 +4139,18 @@ def _restore_knob_once(knob_id: str) -> dict:
             sysfs_errors = restore_sysfs(sysfs)
             for e in systemd:
                 worker_ops.systemd_restore(e)
-            irq_errors = restore_irq_affinity(irq_affinity)
+            irq_warnings: list[str] = []
+            irq_errors = restore_irq_affinity(irq_affinity, warnings=irq_warnings)
             power_errors: list[str] = []
             power_restored = _restore_power_profile_effects(effects, power_errors)
             if sysfs or systemd or irq_affinity or power_restored:
-                restored.append(
-                    f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd, {len(irq_affinity)} irq, {power_restored} power)"
+                message = (
+                    f"(effects: {len(sysfs)} sysfs, {len(systemd)} systemd, "
+                    f"{len(irq_affinity)} irq, {power_restored} power)"
                 )
+                if irq_warnings:
+                    message += f" [skipped {len(irq_warnings)} kernel-managed IRQ restore(s)]"
+                restored.append(message)
             if power_errors:
                 errors.extend(power_errors)
             if sysfs_errors:
@@ -3994,6 +4450,126 @@ def _force_reset_rtirq_config(params: dict) -> tuple[bool, str]:
         pass
 
     return True, "Removed rtirq config block and disabled rtirq service"
+
+
+def _force_reset_scx_scheduler(params: dict[str, Any]) -> tuple[bool, str]:
+    unit = str(params.get("unit", "scx.service")).strip() or "scx.service"
+    if not worker_ops._systemd_unit_exists(unit):
+        return True, f"{unit} is not installed (already off)"
+
+    try:
+        worker_ops.systemd_disable_now(unit)
+    except Exception as exc:
+        return False, f"Failed to disable {unit}: {exc}"
+
+    enabled = subprocess.run(["systemctl", "is-enabled", unit], capture_output=True, text=True)
+    enabled_state = (enabled.stdout or enabled.stderr or "").strip()
+    active = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True)
+    active_state = (active.stdout or active.stderr or "").strip()
+    sched_state, live_ops = worker_ops.read_sched_ext_status()
+
+    if enabled_state in ("enabled", "static", "indirect") or active_state == "active":
+        return False, f"Force reset available: reset did not disable {unit}"
+    if sched_state == "enabled":
+        detail = live_ops or "unknown"
+        return False, f"Disabled {unit}, but sched_ext is still enabled externally ({detail})"
+    return True, f"Disabled {unit}"
+
+
+def cmd_scx_runtime(args: argparse.Namespace) -> int:
+    _require_root()
+
+    reg = load_registry(args.registry)
+    knob = next((item for item in reg if item.id == SCX_SCHEDULER and item.impl), None)
+    if knob is None or knob.impl is None or knob.impl.kind != "scx_scheduler":
+        payload = {
+            "schema": 1,
+            "success": False,
+            "action": args.action,
+            "error": "sched_ext knob is not available in the registry",
+        }
+        _log_audit_event("scx-runtime", payload)
+        print(json.dumps(payload, indent=2))
+        return 1
+
+    unit = str(knob.impl.params.get("unit", "scx.service")).strip() or "scx.service"
+    if not worker_ops._systemd_unit_exists(unit):
+        payload = {
+            "schema": 1,
+            "success": False,
+            "action": args.action,
+            "unit": unit,
+            "error": f"{unit} is not installed",
+        }
+        _log_audit_event("scx-runtime", payload)
+        print(json.dumps(payload, indent=2))
+        return 1
+
+    distro_id = worker_ops.read_os_release().get("ID", "")
+    cfg_path = worker_ops.resolve_scx_config_path(distro_id)
+    scheduler = worker_ops.read_scx_scheduler_config(cfg_path)
+
+    success = False
+    message = ""
+    if args.action in ("start", "restart"):
+        if not scheduler:
+            payload = {
+                "schema": 1,
+                "success": False,
+                "action": args.action,
+                "unit": unit,
+                "error": f"No SCX_SCHEDULER is configured in {cfg_path}. Apply Config first.",
+            }
+            _log_audit_event("scx-runtime", payload)
+            print(json.dumps(payload, indent=2))
+            return 1
+        _ensure_scx_unit_unmasked(unit)
+        effect = worker_ops.systemd_restart(unit) if args.action == "restart" else worker_ops.systemd_start(unit)
+        result = effect.get("result", {})
+        if isinstance(result, dict) and int(result.get("returncode", 0) or 0) == 0:
+            runtime_error = _verify_scx_runtime(unit, scheduler)
+            if runtime_error is None:
+                success = True
+                verb = "Restarted" if args.action == "restart" else "Started"
+                message = f"{verb} {unit} with {scheduler}"
+            else:
+                message = runtime_error
+        else:
+            detail = (
+                str(result.get("stderr") or "").strip()
+                or str(result.get("stdout") or "").strip()
+                or "unknown error"
+            )
+            message = f"failed to {args.action} {unit}: {detail}"
+    else:
+        effect = worker_ops.systemd_stop(unit)
+        result = effect.get("result", {})
+        if isinstance(result, dict) and int(result.get("returncode", 0) or 0) == 0:
+            stop_error = _verify_scx_stopped(unit)
+            if stop_error is None:
+                success = True
+                message = f"Stopped {unit}"
+            else:
+                message = stop_error
+        else:
+            detail = (
+                str(result.get("stderr") or "").strip()
+                or str(result.get("stdout") or "").strip()
+                or "unknown error"
+            )
+            message = f"failed to stop {unit}: {detail}"
+
+    payload = {
+        "schema": 1,
+        "success": success,
+        "action": args.action,
+        "unit": unit,
+        "scheduler": scheduler,
+        "message": message,
+    }
+    _log_audit_event("scx-runtime", payload)
+    print(json.dumps(payload, indent=2))
+    return 0 if success else 1
 
 
 def _force_reset_user_services(services: list[str]) -> tuple[bool, str]:
@@ -4696,6 +5272,8 @@ def cmd_force_reset_knob(args: argparse.Namespace) -> int:
         success, message = _force_reset_wireplumber_conf(path)
     elif kind == "rtirq_config":
         success, message = _force_reset_rtirq_config(params)
+    elif kind == "scx_scheduler":
+        success, message = _force_reset_scx_scheduler(params)
     elif kind == "irq_affinity":
         success, message = _force_reset_irq_affinity(params)
     elif kind == "power_profile":
@@ -4797,6 +5375,10 @@ def main(argv: list[str] | None = None) -> int:
     sfr = sub.add_parser("force-reset-knob", help="Force reset a knob without a transaction")
     sfr.add_argument("knob_id", help="ID of the knob to force reset")
     sfr.set_defaults(func=cmd_force_reset_knob)
+
+    ssr = sub.add_parser("scx-runtime", help="Control scx.service runtime without changing config")
+    ssr.add_argument("action", choices=["start", "restart", "stop"])
+    ssr.set_defaults(func=cmd_scx_runtime)
 
     args = p.parse_args(argv)
     try:

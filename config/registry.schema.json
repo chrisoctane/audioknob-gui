@@ -96,6 +96,7 @@
                     "qjackctl_server_prefix",
                     "udev_rule",
                     "rtirq_config",
+                    "scx_scheduler",
                     "irq_affinity",
                     "kernel_cmdline",
                     "power_profile",

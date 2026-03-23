@@ -20,6 +20,7 @@ def _sample_paths() -> dict[str, str]:
         "kernel_cmdline_file": "/etc/default/grub",
         "cpupower_config": "/etc/default/cpufrequtils",
         "rtirq_config": "/etc/default/rtirq",
+        "scx_config": "/etc/default/scx",
         "pipewire_user_conf_dir": "/home/test/.config/pipewire/pipewire.conf.d",
         "pipewire_system_conf_dir": "/etc/pipewire/pipewire.conf.d",
         "qjackctl_config": "/home/test/.config/rncbc.org/QjackCtl.conf",
@@ -69,3 +70,17 @@ def test_build_knob_paths_user_service_mask() -> None:
     assert targets[0]["type"] == "user_services"
     values = targets[0]["value"]
     assert "tracker-miner-fs.service" in values
+
+
+def test_build_knob_paths_scx_includes_memlock_dropin() -> None:
+    knobs = _load_real_registry()
+    paths = _sample_paths()
+    distro = _sample_distro(paths)
+
+    knob_paths = build_knob_paths(paths=paths, distro=distro, knobs=knobs)
+    entry = knob_paths["scx_scheduler"]
+    targets = entry["targets"]
+
+    path_values = [target["value"] for target in targets if target["type"] == "path"]
+    assert "/etc/default/scx" in path_values
+    assert "/etc/systemd/system/scx.service.d/99-audioknob-memlock.conf" in path_values

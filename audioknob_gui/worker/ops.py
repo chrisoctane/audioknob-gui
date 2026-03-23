@@ -12,6 +12,18 @@ from pathlib import Path
 from typing import Any
 
 from audioknob_gui.core.diffutil import unified_diff
+from audioknob_gui.core.scx import (
+    normalize_scx_flags,
+    read_sched_ext_status,
+    read_scx_flags_config,
+    read_scx_scheduler_config,
+    scx_service_dropin_content,
+    scx_service_dropin_matches,
+    scx_service_dropin_path,
+    scx_flags_reset_required,
+    scx_ops_name,
+    update_scx_scheduler_config,
+)
 from audioknob_gui.core.paths import get_registry_path
 from audioknob_gui.core.qjackctl import (
     build_post_start_script,
@@ -157,6 +169,27 @@ def resolve_rtirq_config_path(distro_id: str) -> str:
         candidates = ["/etc/default/rtirq", "/etc/rtirq.conf", "/etc/sysconfig/rtirq"]
     else:
         candidates = ["/etc/rtirq.conf", "/etc/sysconfig/rtirq", "/etc/default/rtirq"]
+    for path in candidates:
+        if Path(path).exists():
+            return path
+    return candidates[0]
+
+
+def resolve_scx_config_path(distro_id: str) -> str:
+    env_paths = _systemd_environment_files("scx.service")
+    normalized_env_paths: list[str] = []
+    for path in env_paths:
+        normalized_env_paths.extend(_normalize_env_path(path))
+    if normalized_env_paths:
+        for path in normalized_env_paths:
+            if Path(path).exists():
+                return path
+
+    candidates = ["/etc/default/scx", "/etc/sysconfig/scx"]
+    for path in normalized_env_paths:
+        if path not in candidates:
+            candidates.append(path)
+
     for path in candidates:
         if Path(path).exists():
             return path
@@ -424,6 +457,14 @@ def build_knob_paths(
             targets.append({"type": "path", "value": cfg_path})
             unit = str(params.get("unit", "rtirq.service"))
             targets.append({"type": "systemd_unit", "value": unit})
+        elif kind == "scx_scheduler":
+            cfg_path = paths.get("scx_config", "")
+            targets.append({"type": "path", "value": cfg_path})
+            unit = str(params.get("unit", "scx.service"))
+            targets.append({"type": "systemd_unit", "value": unit})
+            targets.append({"type": "path", "value": scx_service_dropin_path(unit)})
+            targets.append({"type": "path", "value": "/sys/kernel/sched_ext/state"})
+            targets.append({"type": "path", "value": "/sys/kernel/sched_ext/root/ops"})
         elif kind == "irq_affinity":
             targets.append({"type": "proc_irq", "value": "/proc/irq"})
             state_path = str(params.get("persist_state_path", ""))
@@ -509,6 +550,7 @@ def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
         "cpupower_config": resolve_cpupower_config_path(distro.distro_id),
         "cpu_governor_service": resolve_cpu_governor_service(distro.distro_id) or "",
         "rtirq_config": resolve_rtirq_config_path(distro.distro_id),
+        "scx_config": resolve_scx_config_path(distro.distro_id),
         "pipewire_user_conf_dir": str(Path("~/.config/pipewire/pipewire.conf.d").expanduser()),
         "pipewire_system_conf_dir": "/etc/pipewire/pipewire.conf.d",
         "wireplumber_user_conf_dir": str(Path("~/.config/wireplumber/wireplumber.conf.d").expanduser()),
@@ -548,6 +590,7 @@ def scan_system_profile(knobs: list[Knob] | None = None) -> dict[str, Any]:
         "cpupower_config": _check_path(paths["cpupower_config"], expect_dir=False),
         "cpu_governor_service": bool(paths["cpu_governor_service"]),
         "rtirq_config": _check_path(paths["rtirq_config"], expect_dir=False),
+        "scx_config": _check_path(paths["scx_config"], expect_dir=False),
         "pipewire_user_conf_dir": _check_path(paths["pipewire_user_conf_dir"], expect_dir=True),
         "pipewire_system_conf_dir": _check_path(paths["pipewire_system_conf_dir"], expect_dir=True),
         "wireplumber_user_conf_dir": _check_path(paths["wireplumber_user_conf_dir"], expect_dir=True),
@@ -984,6 +1027,68 @@ def _rtirq_config_preview(params: dict[str, Any]) -> tuple[list[FileChange], lis
     unit = str(params.get("unit", "rtirq.service"))
     cmds = [["systemctl", "enable", "--now", unit]]
     return changes, cmds
+
+
+def _scx_scheduler_preview(params: dict[str, Any]) -> tuple[list[FileChange], list[list[str]], list[str]]:
+    scheduler = str(params.get("scheduler", "")).strip()
+    if not scheduler:
+        return [], [], ["No sched_ext scheduler selected. Configure this knob before applying."]
+    flags = normalize_scx_flags(params.get("flags"))
+    enable_at_boot = params.get("enable_at_boot")
+    enable_setting = enable_at_boot if isinstance(enable_at_boot, bool) else None
+
+    distro_id = read_os_release().get("ID", "")
+    cfg_path = resolve_scx_config_path(distro_id)
+    path = Path(cfg_path)
+    before = _read_text(str(path))
+    reset_flags = scx_flags_reset_required(before, scheduler) and flags is None
+    after = update_scx_scheduler_config(before, scheduler, flags)
+
+    changes: list[FileChange] = []
+    if before != after:
+        action = "modify" if path.exists() else "create"
+        changes.append(FileChange(path=str(path), action=action, diff=unified_diff(str(path), before, after)))
+
+    unit = str(params.get("unit", "scx.service")).strip() or "scx.service"
+    dropin_path = Path(scx_service_dropin_path(unit))
+    dropin_before = _read_text(str(dropin_path))
+    dropin_after = scx_service_dropin_content()
+    if dropin_before != dropin_after:
+        action = "modify" if dropin_path.exists() else "create"
+        changes.append(
+            FileChange(
+                path=str(dropin_path),
+                action=action,
+                diff=unified_diff(str(dropin_path), dropin_before, dropin_after),
+            )
+        )
+    cmds: list[list[str]] = []
+    if dropin_before != dropin_after:
+        cmds.append(["systemctl", "daemon-reload"])
+    if enable_setting is True:
+        cmds.append(["systemctl", "enable", unit])
+    elif enable_setting is False:
+        cmds.append(["systemctl", "disable", unit])
+    notes = [
+        f"Writes SCX_SCHEDULER={scheduler} to {cfg_path}.",
+        f"Writes {dropin_path} with LimitMEMLOCK=infinity for {unit}.",
+        "Apply syncs /etc/default/scx, the scx.service memlock drop-in, and the Enable at boot preference.",
+        "Use the row action to start, stop, or restart scx.service after applying config.",
+        "sched_ext complements PipeWire RT rather than replacing it.",
+    ]
+    if flags is not None:
+        notes.append(f"Writes SCX_FLAGS={flags or 'none'}.")
+    elif reset_flags:
+        notes.append(
+            "Clears the existing SCX_FLAGS line because scheduler-specific flags can break the newly selected scheduler."
+        )
+    if enable_setting is True:
+        notes.append(f"Enables {unit} at boot.")
+    elif enable_setting is False:
+        notes.append(f"Disables {unit} at boot without stopping the current runtime session.")
+    else:
+        notes.append(f"Leaves the current {unit} boot-persistence setting unchanged.")
+    return changes, cmds, notes
 
 
 def _irq_affinity_preview(params: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -1769,6 +1874,11 @@ def preview(knob: Any, action: str) -> PreviewItem:
             file_changes.extend(changes)
             would_run.extend(cmds)
             notes.append("Writes rtirq config and enables the rtirq service.")
+        elif kind == "scx_scheduler":
+            changes, cmds, more_notes = _scx_scheduler_preview(params)
+            file_changes.extend(changes)
+            would_run.extend(cmds)
+            notes.extend(more_notes)
         elif kind == "irq_affinity":
             writes, more_notes = _irq_affinity_preview(params)
             would_write.extend(writes)
@@ -1869,30 +1979,28 @@ def preview(knob: Any, action: str) -> PreviewItem:
 
 # Apply/restore primitives used by the worker.
 
-def systemd_disable_now(unit: str) -> dict[str, Any]:
+def _systemd_effect(unit: str, argv: list[str]) -> dict[str, Any]:
     pre_enabled = run(["systemctl", "is-enabled", unit]).stdout.strip()
     pre_active = run(["systemctl", "is-active", unit]).stdout.strip()
-
-    r = run(["systemctl", "disable", "--now", unit])
+    r = run(argv)
     return {
         "kind": "systemd_unit_toggle",
         "unit": unit,
         "pre": {"enabled": pre_enabled, "active": pre_active},
         "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
     }
+
+
+def systemd_disable_now(unit: str) -> dict[str, Any]:
+    return _systemd_effect(unit, ["systemctl", "disable", "--now", unit])
+
+
+def systemd_disable(unit: str) -> dict[str, Any]:
+    return _systemd_effect(unit, ["systemctl", "disable", unit])
 
 
 def systemd_mask_now(unit: str) -> dict[str, Any]:
-    pre_enabled = run(["systemctl", "is-enabled", unit]).stdout.strip()
-    pre_active = run(["systemctl", "is-active", unit]).stdout.strip()
-
-    r = run(["systemctl", "mask", "--now", unit])
-    return {
-        "kind": "systemd_unit_toggle",
-        "unit": unit,
-        "pre": {"enabled": pre_enabled, "active": pre_active},
-        "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
-    }
+    return _systemd_effect(unit, ["systemctl", "mask", "--now", unit])
 
 
 def systemd_enable_now(unit: str, start: bool = True) -> dict[str, Any]:
@@ -1913,6 +2021,18 @@ def systemd_enable_now(unit: str, start: bool = True) -> dict[str, Any]:
         "pre": {"enabled": pre_enabled, "active": pre_active},
         "result": {"returncode": r.returncode, "stdout": r.stdout, "stderr": r.stderr},
     }
+
+
+def systemd_start(unit: str) -> dict[str, Any]:
+    return _systemd_effect(unit, ["systemctl", "start", unit])
+
+
+def systemd_restart(unit: str) -> dict[str, Any]:
+    return _systemd_effect(unit, ["systemctl", "restart", unit])
+
+
+def systemd_stop(unit: str) -> dict[str, Any]:
+    return _systemd_effect(unit, ["systemctl", "stop", unit])
 
 
 def systemd_restore(effect: dict[str, Any]) -> None:
@@ -2011,7 +2131,11 @@ def restore_sysfs(effects: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
-def restore_irq_affinity(effects: list[dict[str, Any]]) -> list[str]:
+def restore_irq_affinity(
+    effects: list[dict[str, Any]],
+    *,
+    warnings: list[str] | None = None,
+) -> list[str]:
     errors: list[str] = []
     for e in effects:
         if e.get("kind") != "irq_affinity":
@@ -2026,6 +2150,11 @@ def restore_irq_affinity(effects: list[dict[str, Any]]) -> list[str]:
         try:
             path.write_text(str(before).strip() + "\n", encoding="utf-8")
         except Exception as exc:
+            err_no = getattr(exc, "errno", None)
+            if err_no in (errno.EPERM, errno.EACCES):
+                if warnings is not None:
+                    warnings.append(f"Skipped kernel-managed IRQ affinity restore: {path}")
+                continue
             errors.append(f"irq affinity restore failed: {path}: {exc}")
     return errors
 
@@ -2290,6 +2419,83 @@ def check_knob_status(knob: Any) -> str:
         if cfg_ok and service_ok:
             return "applied"
         if cfg_ok or service_ok or service_partial:
+            return "partial"
+        return "not_applied"
+
+    if kind == "scx_scheduler":
+        distro_id = read_os_release().get("ID", "")
+        cfg_path = resolve_scx_config_path(distro_id)
+        config_scheduler = read_scx_scheduler_config(cfg_path)
+        config_flags = normalize_scx_flags(read_scx_flags_config(cfg_path))
+        selected_scheduler = str(params.get("scheduler", "")).strip() or None
+        selected_flags = normalize_scx_flags(params.get("flags"))
+        selected_enable_raw = params.get("enable_at_boot")
+        selected_enable = selected_enable_raw if isinstance(selected_enable_raw, bool) else None
+        selected_ops = scx_ops_name(selected_scheduler)
+        state, live_ops = read_sched_ext_status()
+        if state is None:
+            return "not_applicable"
+
+        live_enabled = state == "enabled"
+        live_matches = bool(selected_ops and live_ops and scx_ops_name(live_ops) == selected_ops)
+
+        unit = str(params.get("unit", "scx.service")).strip() or "scx.service"
+        service_enabled = False
+        service_active = False
+        service_partial = False
+        if _systemd_unit_exists(unit):
+            try:
+                enabled_result = run(["systemctl", "is-enabled", unit])
+                enabled_state = (enabled_result.stdout or enabled_result.stderr or "").strip()
+                if enabled_state in ("enabled", "static", "indirect"):
+                    service_enabled = True
+                elif enabled_state not in ("", "disabled", "masked"):
+                    service_partial = True
+            except Exception:
+                service_partial = True
+            try:
+                active_result = run(["systemctl", "is-active", unit])
+                active_state = (active_result.stdout or active_result.stderr or "").strip()
+                if active_state == "active":
+                    service_active = True
+                elif active_state not in ("", "inactive", "failed"):
+                    service_partial = True
+            except Exception:
+                service_partial = True
+
+        dropin_matches = scx_service_dropin_matches(unit)
+        config_matches = bool(selected_ops and config_scheduler and scx_ops_name(config_scheduler) == selected_ops)
+        flags_match = selected_flags is None or config_flags == selected_flags
+        boot_matches = selected_enable is None or service_enabled == selected_enable
+        runtime_present = live_enabled or service_active or service_partial
+
+        if (
+            selected_scheduler
+            and config_matches
+            and flags_match
+            and boot_matches
+            and dropin_matches
+            and live_matches
+            and service_active
+        ):
+            return "applied"
+        if selected_scheduler and config_matches and flags_match and boot_matches and dropin_matches:
+            if not live_enabled and not service_active and not service_partial:
+                return "configured"
+            return "partial"
+        if not selected_scheduler:
+            if (
+                config_scheduler
+                and live_enabled
+                and live_ops
+                and scx_ops_name(config_scheduler) == scx_ops_name(live_ops)
+                and service_active
+            ):
+                return "active_external"
+            if runtime_present:
+                return "partial"
+            return "not_applied"
+        if runtime_present:
             return "partial"
         return "not_applied"
 

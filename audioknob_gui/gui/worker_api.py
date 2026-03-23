@@ -414,6 +414,29 @@ def _run_worker_force_reset_user(knob_id: str) -> dict:
     return json.loads(p.stdout)
 
 
+def _run_worker_scx_runtime_pkexec(action: str) -> dict:
+    if not _pkexec_available():
+        raise RuntimeError("pkexec not found")
+
+    worker = _pick_root_worker_path()
+    argv = [
+        "pkexec",
+        worker,
+        "--registry",
+        _registry_path(),
+        "scx-runtime",
+        action,
+    ]
+    p = subprocess.run(argv, text=True, capture_output=True)
+    if p.returncode != 0:
+        log_path = _worker_log_path(is_root=True)
+        msg = p.stderr.strip() or p.stdout.strip() or "worker scx-runtime failed"
+        if _is_pkexec_cancel(msg):
+            raise RuntimeError(_PKEXEC_CANCELLED)
+        raise RuntimeError(f"{msg}\n\nLog: {log_path}")
+    return json.loads(p.stdout)
+
+
 def _run_worker_restore_knob_pkexec(knob_id: str) -> dict:
     if not _pkexec_available():
         raise RuntimeError("pkexec not found")

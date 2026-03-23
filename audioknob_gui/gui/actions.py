@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox, QT
 from audioknob_gui.gui.chrome import build_dialog_root, set_label_tone, style_dialog_button_box, style_panel_surface
 from audioknob_gui.gui.logging_utils import _get_gui_logger
 from audioknob_gui.gui.state import save_state
-from audioknob_gui.knob_ids import RT_LIMITS_AUDIO_GROUP
+from audioknob_gui.knob_ids import RT_LIMITS_AUDIO_GROUP, SCX_SCHEDULER
 from audioknob_gui.gui.worker_api import (
     _PKEXEC_CANCELLED,
     _is_force_reset_error,
@@ -24,6 +24,7 @@ from audioknob_gui.gui.worker_api import (
     _run_worker_reset_defaults_user,
     _run_worker_restore_knob_pkexec,
     _run_worker_restore_knob_user,
+    _run_worker_scx_runtime_pkexec,
 )
 
 
@@ -57,6 +58,20 @@ class QueueTaskWorker(QThread):
         except Exception as e:
             success, payload, message = False, None, str(e)
         self.finished.emit(bool(success), payload, message or "")
+
+
+def _restore_factory_reset_config(ui) -> bool:
+    """Restore saved Factory Preset config state after Reset All completes."""
+    restore_config = ui.state.get("factory_config")
+    if not isinstance(restore_config, dict):
+        return False
+    try:
+        from audioknob_gui.gui import status as status_mod
+
+        status_mod._apply_baseline_config(ui, restore_config, clear_missing=True)
+        return True
+    except Exception:
+        return False
 
 
 def on_apply_knob(ui, knob_id: str) -> None:
@@ -101,6 +116,17 @@ def on_queue_knob(ui, knob_id: str, action: str) -> None:
     ui._save_queue()
     ui._update_queue_ui()
     ui._populate()
+
+
+def on_scx_runtime(ui, action: str) -> None:
+    if action not in ("start", "restart", "stop"):
+        return
+
+    def _task():
+        result = _run_worker_scx_runtime_pkexec(action)
+        return True, {"result": result}, ""
+
+    run_knob_task(ui, SCX_SCHEDULER, action, _task)
 
 
 def run_knob_task(ui, knob_id: str, action: str, fn) -> None:
@@ -152,9 +178,11 @@ def on_knob_task_finished(
                 ui._refresh_statuses()
                 ui._populate()
             return
-        if action == "apply":
+        if action in ("apply", "start", "restart"):
             _get_gui_logger().error("apply knob failed id=%s error=%s", knob_id, message)
             QMessageBox.critical(ui, "Failed", message or "Unknown error")
+        elif action == "stop":
+            QMessageBox.warning(ui, "Stop Failed", message or "Unknown error")
         else:
             QMessageBox.warning(ui, "Reset Failed", message or "Unknown error")
 
@@ -363,7 +391,7 @@ def restore_knob(ui, knob_id: str, requires_root: bool) -> tuple[bool, str]:
 
 
 def on_reset_defaults(ui) -> None:
-    """Reset ALL audioknob-gui changes to system defaults."""
+    """Reset tracked audioknob-gui changes to the recorded factory state."""
     def _set_reset_ui(busy: bool) -> None:
         btn = getattr(ui, "btn_reset", None)
         action = getattr(ui, "act_factory_reset", None)
@@ -373,6 +401,7 @@ def on_reset_defaults(ui) -> None:
         if action is not None:
             action.setEnabled(not busy)
             action.setText("Factory Preset (Working...)" if busy else "Factory Preset (Reset All)...")
+
     # First, show what will be reset
     _get_gui_logger().info("reset defaults requested")
     try:
@@ -453,11 +482,14 @@ def on_reset_defaults(ui) -> None:
     layout = build_dialog_root(confirm_dialog, parent=ui)
 
     total_changes = file_count + effects_count
-    title = QLabel(f"Reset {total_changes} change(s) to system defaults?")
+    title = QLabel(f"Reset {total_changes} tracked AudioKnob change(s)?")
     set_label_tone(title, "lead")
     layout.addWidget(title)
 
-    note = QLabel("You'll be prompted for your password if root access is needed.")
+    note = QLabel(
+        "This restores the recorded Factory Preset config and resets tracked AudioKnob changes. "
+        "Manual or external settings can remain."
+    )
     set_label_tone(note, "muted")
     layout.addWidget(note)
 
@@ -542,6 +574,8 @@ def on_reset_defaults(ui) -> None:
         ui.state["last_root_txid"] = None
         ui._queued_actions = {}
         ui.state["queued_actions"] = {}
+        if success:
+            _restore_factory_reset_config(ui)
         save_state(ui.state)
         ui._update_queue_ui()
 
@@ -571,8 +605,9 @@ def on_reset_defaults(ui) -> None:
             QMessageBox.information(
                 ui,
                 "Factory Preset complete",
-                "All audioknob-gui changes have been reset to system defaults.\n\n"
+                "Tracked AudioKnob changes were reset and Factory Preset config was restored.\n\n"
                 + "\n".join(results_text)
+                + "\n\nManual or external settings may still be active."
                 + reboot_note,
             )
 

@@ -87,6 +87,9 @@ def load_state() -> dict:
         "wireplumber_alsa_disable_batch": None,  # bool | None
         "pipewire_pro_audio_device_id": None,  # str | int | None
         "power_profile_backend": "auto",  # auto | powerprofilesctl | tuned
+        "scx_scheduler": None,  # str | None
+        "scx_flags": None,  # str | None
+        "scx_enable_at_boot": None,  # bool | None
         "jitter_test_last": None,  # dict payload from last run or None
         "system_profile": None,  # dict from startup scan or None
         "baseline_statuses": {},  # knob_id -> status string (first-run baseline)
@@ -236,6 +239,12 @@ def load_state() -> dict:
             data["pipewire_pro_audio_device_id"] = None
         if "power_profile_backend" not in data:
             data["power_profile_backend"] = "auto"
+        if "scx_scheduler" not in data:
+            data["scx_scheduler"] = None
+        if "scx_flags" not in data:
+            data["scx_flags"] = None
+        if "scx_enable_at_boot" not in data:
+            data["scx_enable_at_boot"] = None
         if "jitter_test_last" not in data:
             data["jitter_test_last"] = None
         if "system_profile" not in data:
@@ -506,6 +515,14 @@ def load_state() -> dict:
         backend = str(data.get("power_profile_backend") or "").strip().lower()
         if backend not in ("auto", "powerprofilesctl", "tuned"):
             data["power_profile_backend"] = "auto"
+        scx_scheduler = data.get("scx_scheduler")
+        if scx_scheduler is not None and not isinstance(scx_scheduler, str):
+            data["scx_scheduler"] = None
+        elif isinstance(scx_scheduler, str) and not scx_scheduler.strip():
+            data["scx_scheduler"] = None
+        scx_flags = data.get("scx_flags")
+        if scx_flags is not None and not isinstance(scx_flags, str):
+            data["scx_flags"] = None
         return data
     except Exception:
         return default

@@ -89,6 +89,7 @@ from audioknob_gui.knob_ids import (
     PIPEWIRE_RT_MODULE_TUNING,
     PIPEWIRE_MLOCK_POLICY,
     PIPEWIRE_PULSE_APP_RULES,
+    SCX_SCHEDULER,
 )
 
 from PySide6.QtCore import Qt, QThread, QTimer
@@ -500,6 +501,7 @@ class MainWindow(TableMixin, QMainWindow):
                 "kernel_nmi_watchdog_off",
                 "kernel_nosoftlockup",
                 "kernel_nosmt",
+                SCX_SCHEDULER,
                 "systemd_pipewire_service_rt",
                 "systemd_wireplumber_service_rt",
                 "irqbalance_banned_cpulist",
@@ -522,6 +524,7 @@ class MainWindow(TableMixin, QMainWindow):
             "kernel_nmi_watchdog_off",
             "kernel_nosoftlockup",
             "kernel_nosmt",
+            SCX_SCHEDULER,
             "pipewire_clock_constraints",
             PIPEWIRE_MLOCK_POLICY,
             "wireplumber_alsa_usb_tuning",
@@ -1747,7 +1750,7 @@ class MainWindow(TableMixin, QMainWindow):
             if knob.id not in simple_mode.ORDERED_QUEUE_KNOBS:
                 continue
             status = self._knob_statuses.get(knob.id, "unknown")
-            if status in ("applied", "pending_reboot", "not_applicable"):
+            if status in ("applied", "pending_reboot", "active_external", "not_applicable"):
                 skip.add(knob.id)
                 continue
             if not self._knob_commands_ok(knob):
@@ -1769,7 +1772,7 @@ class MainWindow(TableMixin, QMainWindow):
             status = self._knob_statuses.get(kid, "unknown")
             knob = by_id.get(kid)
             if kid in non_queue_knob_ids:
-                if status in ("applied", "pending_reboot"):
+                if status in ("applied", "pending_reboot", "active_external"):
                     reasons[kid] = "already active"
                 elif kid == AUDIO_GROUP_MEMBERSHIP:
                     reasons[kid] = "manual action"
@@ -2117,9 +2120,41 @@ class MainWindow(TableMixin, QMainWindow):
             return ""
         return "Managed by tuned. Reset Power Profile to unlock."
 
+    def _scx_managed_ids(self) -> list[str]:
+        try:
+            from audioknob_gui.core.scx import (
+                read_sched_ext_status,
+                read_scx_flags_config,
+                read_scx_scheduler_config,
+                scx_managed_knob_ids,
+            )
+            from audioknob_gui.worker.ops import read_os_release, resolve_scx_config_path
+        except Exception:
+            return []
+
+        sched_state, live_ops = read_sched_ext_status()
+        if sched_state != "enabled":
+            return []
+
+        try:
+            distro_id = read_os_release().get("ID", "")
+            cfg_path = resolve_scx_config_path(distro_id)
+        except Exception:
+            cfg_path = ""
+        scheduler = read_scx_scheduler_config(cfg_path) if cfg_path else None
+        flags = read_scx_flags_config(cfg_path) if cfg_path else None
+        return list(scx_managed_knob_ids(scheduler or live_ops, flags))
+
+    def _scx_managed_lock_reason(self, knob_id: str) -> str:
+        if knob_id == SCX_SCHEDULER:
+            return ""
+        if knob_id not in self._scx_managed_ids():
+            return ""
+        return "Managed by sched_ext. Stop sched_ext Scheduler to unlock."
+
     def _power_profile_tuned_active(self) -> bool:
         pp_status = self._knob_statuses.get(POWER_PROFILE_PERFORMANCE, "unknown")
-        if pp_status not in ("applied", "pending_reboot"):
+        if pp_status not in ("applied", "pending_reboot", "active_external"):
             return False
         return self._power_profile_backend_is_tuned()
 
@@ -2223,6 +2258,9 @@ class MainWindow(TableMixin, QMainWindow):
         tuned_lock_reason = self._tuned_managed_lock_reason(k.id)
         if tuned_lock_reason:
             return False, tuned_lock_reason
+        scx_lock_reason = self._scx_managed_lock_reason(k.id)
+        if scx_lock_reason:
+            return False, scx_lock_reason
         if status == "not_applicable":
             return False, "Not available on this system"
         reboot_gate_enabled = bool(self.state.get("enable_reboot_knobs", False))
@@ -2235,12 +2273,12 @@ class MainWindow(TableMixin, QMainWindow):
         reboot_gate_lock = (
             bool(k.requires_reboot)
             and not reboot_gate_enabled
-            and status not in ("applied", "pending_reboot")
+            and status not in ("applied", "pending_reboot", "active_external")
         )
         advanced_gate_lock = (
             k.id in self._advanced_knob_ids()
             and not advanced_enabled
-            and status not in ("applied", "pending_reboot")
+            and status not in ("applied", "pending_reboot", "active_external")
         )
         reboot_dep_lock = (not reboot_gate_enabled) and bool(k.requires_groups)
         if group_pending:
@@ -2949,7 +2987,7 @@ class MainWindow(TableMixin, QMainWindow):
             if queued_actions.get(dep) == "apply":
                 continue
             status = self._knob_statuses.get(dep, "unknown")
-            if status in ("applied", "pending_reboot"):
+            if status in ("applied", "pending_reboot", "active_external"):
                 continue
             missing.append(dep)
         return missing
@@ -3007,7 +3045,7 @@ class MainWindow(TableMixin, QMainWindow):
                     continue
                 action = self._queued_actions.get(child)
                 status = self._knob_statuses.get(child, "unknown")
-                if action == "apply" or status in ("applied", "pending_reboot"):
+                if action == "apply" or status in ("applied", "pending_reboot", "active_external"):
                     dependents.append(child)
                     seen.add(child)
                     pending.append(child)
@@ -3799,6 +3837,25 @@ class MainWindow(TableMixin, QMainWindow):
             return raw
         return "auto"
 
+    def _scx_scheduler_from_state(self) -> str | None:
+        raw = self.state.get("scx_scheduler")
+        if raw is None:
+            return None
+        value = str(raw).strip()
+        return value or None
+
+    def _scx_flags_from_state(self) -> str | None:
+        raw = self.state.get("scx_flags")
+        if raw is None:
+            return None
+        return str(raw).strip()
+
+    def _scx_enable_at_boot_from_state(self) -> bool | None:
+        raw = self.state.get("scx_enable_at_boot")
+        if isinstance(raw, bool):
+            return raw
+        return None
+
     def _tuned_conflict_ids(self) -> list[str]:
         return [
             "cpu_governor_performance_persistent",
@@ -4133,7 +4190,7 @@ class MainWindow(TableMixin, QMainWindow):
             if kid in apply_set:
                 continue
             status = self._knob_statuses.get(kid, "unknown")
-            if status in ("applied", "pending_reboot", "partial", "running"):
+            if status in ("applied", "pending_reboot", "partial", "running", "active_external"):
                 reset_targets.add(kid)
         if not reset_targets:
             return 0
@@ -4692,6 +4749,9 @@ class MainWindow(TableMixin, QMainWindow):
 
     def _on_queue_knob(self, knob_id: str, action: str) -> None:
         actions.on_queue_knob(self, knob_id, action)
+
+    def _on_scx_runtime(self, action: str) -> None:
+        actions.on_scx_runtime(self, action)
 
     def _ensure_menu_width(self, menu: QMenu) -> None:
         try:
@@ -5303,6 +5363,7 @@ class MainWindow(TableMixin, QMainWindow):
             "pipewire_conf",
             "wireplumber_conf",
             "rtirq_config",
+            "scx_scheduler",
             "irq_affinity",
             "power_profile",
             "qjackctl_server_prefix",

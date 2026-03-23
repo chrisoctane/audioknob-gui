@@ -279,7 +279,16 @@ def check_semantic_doc_contracts(repo: Path) -> list[str]:
             + ", ".join(missing_status_keys)
         )
 
-    expected_plan_labels = ["Applied", "Not applied", "Partial", "Reboot", "Unknown", "N/A"]
+    expected_plan_labels = [
+        "Applied",
+        "Configured",
+        "External",
+        "Not applied",
+        "Partial",
+        "Reboot",
+        "Unknown",
+        "N/A",
+    ]
     plan_labels = _read_plan_operational_status_labels(repo)
     if plan_labels is None:
         errors.append(

@@ -81,3 +81,26 @@ def test_baseline_config_keys_include_new_dev_rt_keys() -> None:
         "pipewire_pulse_min_quantum",
         "pipewire_pulse_app_rules",
     }.issubset(keys)
+
+
+def test_apply_baseline_config_clear_missing_removes_stale_selector_keys(monkeypatch) -> None:
+    from audioknob_gui.gui import status as status_mod
+
+    monkeypatch.setattr(status_mod, "save_state", lambda _state: None)
+
+    ui = SimpleNamespace()
+    ui.state = {
+        "kernel_workqueue_cpumask_cores": list(range(8)),
+        "irqbalance_banned_cpulist_cores": [],
+        "power_profile_backend": "tuned",
+    }
+
+    status_mod._apply_baseline_config(
+        ui,
+        {"power_profile_backend": "auto"},
+        clear_missing=True,
+    )
+
+    assert "kernel_workqueue_cpumask_cores" not in ui.state
+    assert "irqbalance_banned_cpulist_cores" not in ui.state
+    assert ui.state["power_profile_backend"] == "auto"

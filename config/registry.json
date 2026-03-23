@@ -814,6 +814,31 @@
         "restore": true
       },
       "category": "kernel",
+      "description": "[i] controls scx.service with a selected sched_ext scheduler.\n[r] configure before apply.\n[+] can improve mixed music and gaming responsiveness under CPU contention.\n[-] experimental whole-system scheduler change; complements rather than replaces PipeWire RT.",
+      "id": "scx_scheduler",
+      "impl": {
+        "kind": "scx_scheduler",
+        "params": {
+          "scheduler": "",
+          "unit": "scx.service"
+        }
+      },
+      "requires_commands": [
+        "scx"
+      ],
+      "requires_groups": [],
+      "requires_reboot": false,
+      "requires_root": true,
+      "risk_level": "high",
+      "title": "sched_ext Scheduler"
+    },
+    {
+      "capabilities": {
+        "apply": true,
+        "read": true,
+        "restore": true
+      },
+      "category": "kernel",
       "description": "[i] adds audit=0 to kernel cmdline.\n[+] reduces audit overhead on realtime workloads.\n[-] disables kernel audit logging (security tradeoff).",
       "id": "kernel_audit_off",
       "impl": {

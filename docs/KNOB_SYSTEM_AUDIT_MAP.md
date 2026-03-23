@@ -43,9 +43,9 @@ Each finding should include all of the following:
    - cross-system parity batch
 
 ## Current inventory snapshot (for audit baseline)
-- Knobs: `56`
+- Knobs: `58`
 - Categories: `10`
-- Implementation kinds: `17`
+- Implementation kinds: `18`
 - Conflict-map source families: `4`
 
 ## Coverage target matrix
@@ -175,6 +175,7 @@ Current audit package (this cycle):
 | `qjackctl_server_prefix` | Full | user-scope with runtime/process safeguards |
 | `udev_rule` | Full | file presence + expected content status path |
 | `rtirq_config` | Full | config + service dual-state partial reasons |
+| `scx_scheduler` | Full | config + service + live sched_ext ops parity required |
 | `irq_affinity` | Full | multi-resource effects and partial reasons |
 | `kernel_cmdline` | Full | boot config vs running kernel state split |
 | `power_profile` | Full | backend resolution and conflict gating |

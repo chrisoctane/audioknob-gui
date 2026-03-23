@@ -5,7 +5,7 @@ from typing import Callable
 
 from PySide6.QtWidgets import QPushButton
 
-from audioknob_gui.gui.knobs import alsa, irq, kernel, pipewire, power_profile, qjackctl, testing
+from audioknob_gui.gui.knobs import alsa, irq, kernel, pipewire, power_profile, qjackctl, scx, testing
 from audioknob_gui.knob_ids import (
     ALSA_XRUN_MONITOR,
     AUDIO_GROUP_MEMBERSHIP,
@@ -22,6 +22,7 @@ from audioknob_gui.knob_ids import (
     PIPEWIRE_RT_SETUP,
     POWER_PROFILE_PERFORMANCE,
     RT_LIMITS_AUDIO_GROUP,
+    SCX_SCHEDULER,
 )
 
 
@@ -77,6 +78,8 @@ def get_action_override(knob_id: str):
         return ("post_lock", pipewire.build_rt_setup_action)
     if knob_id == "rtkit_daemon_tuning":
         return ("post_lock", pipewire.build_rtkit_info_action)
+    if knob_id == SCX_SCHEDULER:
+        return ("post_lock", scx.build_runtime_action)
     if knob_id == "blocker_check":
         return ("post_lock", _action_blocker_check)
     if knob_id == ALSA_XRUN_MONITOR:
@@ -113,6 +116,8 @@ def get_config_widget_builder(knob_id: str):
         return lambda ui, knob, ctx: pipewire.build_config_button(ui, knob.id, "Configure...")
     if knob_id == POWER_PROFILE_PERFORMANCE:
         return power_profile.build_backend_combo
+    if knob_id == SCX_SCHEDULER:
+        return lambda ui, knob, ctx: scx.build_config_button(ui, knob.id)
     if knob_id == "qjackctl_server_prefix_rt":
         return lambda ui, knob, ctx: qjackctl.build_config_button(ui, knob.id)
     if knob_id == IRQ_PINNING:
@@ -127,6 +132,8 @@ def get_config_widget_builder(knob_id: str):
 def allow_config_when_row_dim(knob_id: str, ctx: RowContext) -> bool:
     if knob_id == POWER_PROFILE_PERFORMANCE:
         return power_profile.allow_config_when_row_dim(ctx)
+    if knob_id == SCX_SCHEDULER:
+        return scx.allow_config_when_row_dim(ctx)
     if knob_id in (
         "pipewire_clock_constraints",
         PIPEWIRE_MLOCK_POLICY,
@@ -191,6 +198,9 @@ def handle_configure_knob(ui, knob_id: str) -> bool:
     if knob_id == "pipewire_pro_audio_profile":
         pipewire.configure_pro_audio_dialog(ui)
         return True
+    if knob_id == SCX_SCHEDULER:
+        scx.configure_dialog(ui)
+        return True
     return False
 
 
@@ -214,6 +224,8 @@ def apply_info_param_overrides(ui, knob, params: dict) -> None:
         irq.apply_param_overrides(ui, params)
     if knob.id == POWER_PROFILE_PERFORMANCE:
         power_profile.apply_param_overrides(ui, params)
+    if knob.id == SCX_SCHEDULER:
+        scx.apply_param_overrides(ui, params)
     if knob.id in _KERNEL_CORE_KNOBS:
         kernel.apply_param_overrides(ui, knob, params)
 
@@ -264,6 +276,8 @@ def build_info_extra_html(ui, knob, helpers: InfoHelpers) -> str:
         parts.append(kernel.cstate_extra_html(ui, knob.id))
     if knob.id == POWER_PROFILE_PERFORMANCE:
         parts.append(power_profile.info_extra_html(ui, knob))
+    if knob.id == SCX_SCHEDULER:
+        parts.append(scx.info_extra_html(ui, knob))
     return "".join(parts)
 
 
