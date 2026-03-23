@@ -20,6 +20,7 @@ Allowed paths:
 - `README.md`
 - `pyproject.toml`
 - `audioknob_gui/__init__.py`
+- `audioknob_gui/core/scx.py`
 - `audioknob_gui/knob_ids.py`
 - `audioknob_gui/registry.py`
 - `audioknob_gui/gui/`
